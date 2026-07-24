@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "acumen"
+description = "Acumen Intelligence — backtester and live screener for one frozen intraday NSE strategy"
+readme = "CONTEXT.md"
+requires-python = ">=3.10"
+dynamic = ["version"]
+
+# Pinned exactly (==) to the versions verified working on the operator's machine.
+# Adding or moving a pin is a Class-B decision and must be recorded in PROGRESS.md.
+dependencies = [
+    # carried over from the PoC's requirements.txt (SmartAPI access layer)
+    "smartapi-python==1.5.5",
+    "pyotp==2.10.0",
+    "python-dotenv==1.2.2",
+    "requests==2.32.3",
+    "websocket-client==1.9.0",  # transitive dep of smartapi-python; websockets are NOT used in v1 (CONTEXT §4.3)
+    "logzero==1.7.0",
+    # engine + store
+    "pandas==3.0.3",
+    "pyarrow==25.0.0",  # Parquet flat-file store (CONTEXT §6)
+    "PyYAML==6.0.3",    # config.yaml loader
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==9.1.1",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.dynamic]
+version = { attr = "acumen.__version__" }
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+# src layout without requiring an editable install: `pytest` works from a bare clone.
+pythonpath = ["src"]
