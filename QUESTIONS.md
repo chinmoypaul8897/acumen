@@ -113,3 +113,52 @@ does not license a tick lookup table anywhere in `src/` — CONTEXT §3.3's "NEV
 0.05" and §4.3's instrument-master rule are unchanged, and chunk 5A still owns the real
 per-symbol `tick_size` loader. F7 becomes fully offline and frozen; a future NSE tick reform
 cannot silently move a calibrated fixture.
+
+---
+
+## Q-3 · chunk 1 · class A · open · NON-BLOCKING for chunk 1 (blocks chunk 9's full run)
+
+**Question.** Where does the trading calendar for years BEFORE the current one come from?
+
+**Why it is a hole.** CONTEXT §4.1 names exactly one holiday source —
+`https://www.nseindia.com/api/holiday-master?type=trading` — and that endpoint publishes
+**one year at a time**. The pull taken during this session (2026-07-24, frozen at
+`tests/fixtures/holidays_2026.json`) contains 20 CM holidays and **every one of them is in
+2026**. There is no historical parameter, and CONTEXT §4.1 names no archive.
+
+**Why it matters.** CONTEXT §2 requires a backtest over "max history (min 5 years —
+trader's Q36)", and CONTEXT §3.1 makes trading days load-bearing in two places that decide
+real money:
+
+1. **`bias_pair(D)`** (§3.2) must be the previous two *trading* days. A missing holiday makes
+   the engine read a holiday's non-existent candle as candle(D−1) — or, more insidiously,
+   shifts the whole pair by one day and computes a bias from the wrong two candles.
+2. **E2 exclusions** (§7) key off "a date absent from the trading calendar".
+
+An unloaded year is the dangerous case because the failure is silent: with no holiday data,
+every Mon–Fri looks tradable, so roughly 12–16 phantom trading days per year get invented and
+every bias pair spanning one of them is wrong. The code would look fine and the backtest would
+report a number.
+
+**What this session did meanwhile.** Did NOT guess. `TradingCalendar` carries the set of
+years its data actually covers and **raises `CalendarError` for any date outside it** rather
+than answering (`src/acumen/calendar.py`, `_require_covered`; tested in
+`tests/test_calendar.py::test_uncovered_year_raises_instead_of_guessing` and
+`::test_bias_pair_refuses_to_cross_out_of_the_covered_year`). Chunk 1's own goldens are all
+2026 and are unaffected. The constructor already accepts a multi-year holiday set
+(`TradingCalendar.from_holidays(..., covered_years=...)`), so whichever option the architect
+picks needs a loader, not a redesign — `test_a_multi_year_calendar_answers_across_the_boundary`
+already proves the cross-year walk works once the data exists.
+
+**Options for the architect:**
+(a) **Derive trading days from the daily store**: chunk 2 ingests 25 years of bhavcopy, and a
+date with a bhavcopy IS a trading day. Free, self-consistent with the price data, and needs
+no new source — but it makes the calendar a function of ingestion success, so a failed
+download would masquerade as a holiday (mitigable: cross-check against the current year's
+published list, which this session's fixture makes possible).
+(b) **Archive the endpoint going forward** and source past years elsewhere (NSE circulars /
+a published historical holiday list), committing them as a frozen multi-year fixture.
+(c) **Restrict v1's backtest window** to the years for which a published calendar is held.
+
+Chunk 2 is the first session that could act on (a); chunk 9's full-history run is the first
+that is BLOCKED without an answer.

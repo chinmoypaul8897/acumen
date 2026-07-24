@@ -20,11 +20,29 @@ a digest update to make the suite green again.
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 
 import pytest
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "poc" / "data"
+FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
+
+#: SHA-256 of every frozen file under tests/fixtures/, extended as chunks add them.
+#:
+#: chunk 1 (2026-07-24): `tick_sizes.json` is the architect's ruling on QUESTIONS.md Q-2
+#: (F7's tick inputs, frozen so the fixture stops depending on a daily live dump);
+#: `universe_snapshot.json` and `holidays_2026.json` are verbatim single pulls of the two
+#: CONTEXT 4.1 endpoints, taken once during the chunk-1 build so the whole calendar/universe
+#: suite runs offline (CLAUDE.md rule 3: fixtures under tests/fixtures/ are FROZEN).
+#:
+#: Unlike poc/data there is no exact-set assertion here: later chunks legitimately add
+#: fixtures. What may never happen is one of these files CHANGING.
+FROZEN_FIXTURES_SHA256: dict[str, str] = {
+    "holidays_2026.json": "798c545acc5351eb9ed84f353c1fcc665a26967426e3761b7097e7f3c7042424",
+    "tick_sizes.json": "61488842568ee632b528dfa3c5f6be44a771520a2aa02cd63cb76b7c0ee146b0",
+    "universe_snapshot.json": "3eaa84baf758421fa57754c28dc32dd0a5bb864f8e02ccbab237ed05ef13f912",
+}
 
 #: SHA-256 of every frozen CSV, measured 2026-07-24 by the chunk-0 review session.
 FROZEN_SHA256: dict[str, str] = {
@@ -96,3 +114,38 @@ def test_minute_fixtures_kept_their_crlf_line_endings() -> None:
     """
     raw = (DATA_DIR / "TCS_2026-07-14_1min.csv").read_bytes()
     assert raw.count(b"\r\n") == 376, "frozen CSV lost its CRLF line endings"
+
+
+@pytest.mark.parametrize("name", sorted(FROZEN_FIXTURES_SHA256))
+def test_frozen_tests_fixture_bytes_are_unchanged(name: str) -> None:
+    path = FIXTURES_DIR / name
+    assert path.is_file(), f"frozen fixture is MISSING: tests/fixtures/{name}"
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    assert digest == FROZEN_FIXTURES_SHA256[name], (
+        f"tests/fixtures/{name} CHANGED. Fixtures under tests/fixtures/ are FROZEN "
+        "(CLAUDE.md rule 3): the endpoint snapshots are the exact bytes the calendar and "
+        "universe goldens were computed from, and tick_sizes.json is an architect ruling. "
+        "Restore the file from git -- re-pulling the endpoint is NOT a fix."
+    )
+
+
+def test_the_endpoint_snapshots_are_verbatim_payloads() -> None:
+    """They must stay raw API responses -- no wrapper, no hand-edit, no reformatting.
+
+    A snapshot that has been prettified or annotated is no longer evidence of what the
+    endpoint actually returns, which is the only reason to freeze one.
+    """
+    universe = json.loads((FIXTURES_DIR / "universe_snapshot.json").read_text(encoding="utf-8"))
+    assert set(universe) == {"data"}
+    assert set(universe["data"]) == {"IndexList", "UnderlyingList"}
+
+    holidays = json.loads((FIXTURES_DIR / "holidays_2026.json").read_text(encoding="utf-8"))
+    assert "CM" in holidays and "FO" in holidays
+    assert set(holidays["CM"][0]) == {
+        "tradingDate",
+        "weekDay",
+        "description",
+        "morning_session",
+        "evening_session",
+        "Sr_no",
+    }
