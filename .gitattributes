@@ -1,0 +1,12 @@
+# Text is stored AND checked out as LF on every platform. This machine has
+# core.autocrlf=true, which would otherwise rewrite the seed documents (CLAUDE.md,
+# CONTEXT.md, plan.md are LF today) with CRLF on the next checkout -- files CLAUDE.md
+# forbids touching should not be mutated by a git default.
+* text=auto eol=lf
+
+# Frozen golden fixtures are DATA, not text: their exact bytes are the test input
+# (CONTEXT §8 F7/F10; CLAUDE.md rule 3). `-text` disables all line-ending translation, so
+# the checked-out bytes are exactly the committed bytes -- these CSVs are CRLF as produced
+# by the PoC run and must stay that way. Listed last: later rules win in .gitattributes.
+poc/data/** -text
+tests/fixtures/** -text

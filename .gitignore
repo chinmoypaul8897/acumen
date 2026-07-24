@@ -1,0 +1,15 @@
+# Secrets — never committed, never printed, never logged (CLAUDE.md rule 4, CONTEXT §4.3)
+.env
+
+# Local stores, caches and run artifacts (CONTEXT §6: data/ is gitignored).
+# Anchored with a leading slash ON PURPOSE: an unanchored "data/" would also ignore
+# poc/data/, and those CSVs are FROZEN GOLDEN FIXTURES that must stay tracked (CONTEXT §8 F7/F10).
+/data/
+/cache/
+/logs/
+poc/cache/
+
+# Python build / test artifacts
+__pycache__/
+*.egg-info
+.pytest_cache/
