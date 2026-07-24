@@ -320,6 +320,7 @@ def cached_json(
     allow_network: bool,
     session: requests.Session | None = None,
     sleep: Callable[[float], None] = time.sleep,
+    fetcher: Callable[[str], Any] | None = None,
 ) -> Any:
     """Return the endpoint payload, pulling it live at most once per calendar day.
 
@@ -336,6 +337,12 @@ def cached_json(
             True, which is what keeps the suite offline.
         session: an existing session; a fresh one is built when omitted.
         sleep: injected for tests.
+        fetcher: how to pull the payload live, when omitted :func:`fetch_json`. Chunk 3's
+            corporate-action sources need a different session, a different decoder (BSE
+            answers CSV) or a different pace, and every one of them must still get this
+            module's day-cache and opt-in discipline -- so the POLICY is shared and only the
+            fetch differs. Whatever it returns must be JSON-serialisable, since that is what
+            the cache envelope holds.
 
     Raises:
         NseFetchError: offline with no cache for ``today``, the cache is damaged and no live
@@ -369,7 +376,10 @@ def cached_json(
             f"pass allow_network=True to refresh {Path(cache_path)}."
         )
 
-    payload = cached_json_fetch(url, session=session, sleep=sleep)
+    if fetcher is None:
+        payload = cached_json_fetch(url, session=session, sleep=sleep)
+    else:
+        payload = fetcher(url)
     write_cache(cache_path, payload, url=url, fetched_on=today)
     return payload
 
