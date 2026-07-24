@@ -180,15 +180,35 @@ def is_session_time(stamp: datetime, *, minutes: int = 1) -> bool:
 
 @dataclass(frozen=True)
 class TradingCalendar:
-    """NSE trading days for the years its holiday data covers. Immutable and pure.
+    """NSE trading days for the period its data covers. Immutable and pure.
+
+    Two kinds of calendar live in this one class, because everything downstream
+    (:meth:`bias_pair`, the E2 filter) must behave identically whichever one it is given:
+
+    * **published** -- built from CONTEXT 4.1's holiday endpoint. A trading day is a weekday
+      that is not on the holiday list. This is the authority for the current and future
+      dates the live screener works on (Q-3 ruling, safeguard 3).
+    * **derived** -- built from the daily store's outcome ledger by
+      :meth:`from_daily_store` (Q-3 ruling: "a date with a bhavcopy IS a trading day"). It
+      answers from an EXPLICIT day set rather than from the weekday rule, which is what lets
+      it represent NSE's occasional weekend sessions honestly. This serves the backtest past.
 
     Attributes:
         holidays: the exchange holidays (weekends are separate and implicit).
         covered_years: the years this calendar may answer for. Any other year raises.
+        trading_days: an explicit trading-day set (derived calendars). ``None`` means the
+            weekday-minus-holidays rule applies.
+        covered_days: an explicit set of dates this calendar has evidence for (derived
+            calendars over a partial year). ``None`` means the whole of ``covered_years``.
+        source: ``"published"`` or ``"derived"`` -- carried into error messages so a caller
+            can see WHICH calendar refused, and never used to decide anything.
     """
 
     holidays: frozenset[date]
     covered_years: frozenset[int]
+    trading_days: frozenset[date] | None = None
+    covered_days: frozenset[date] | None = None
+    source: str = "published"
 
     # --- construction -------------------------------------------------------------
 
@@ -224,6 +244,136 @@ class TradingCalendar:
         """Build straight from a ``holiday-master`` payload. PURE."""
         return cls.from_holidays(parse_holidays(payload, segment=segment))
 
+    @classmethod
+    def from_daily_store(cls, store: Any, years: Iterable[int]) -> TradingCalendar:
+        """Derive the calendar for whole ``years`` from a daily store's outcome ledger.
+
+        QUESTIONS.md Q-3, the architect's ruling executed: "historical trading days are
+        DERIVED from the daily store -- a date with a bhavcopy IS a trading day".
+
+        Every calendar date of every named year must carry a TERMINAL outcome. A year with
+        a gap, or with an ``error`` date in it, is refused outright -- that is safeguard 1
+        ("a download error is NEVER treated as a holiday") made executable: an unfinished or
+        unlucky backfill cannot quietly become a calendar full of invented holidays.
+
+        Note the consequence for the CURRENT year: it cannot be complete until it ends, so
+        this constructor will refuse it. That is the intended division of labour -- the
+        published endpoint stays authoritative for current and future dates (safeguard 3),
+        and :meth:`from_daily_store_range` covers a deliberately partial window.
+
+        Args:
+            store: anything exposing ``coverage(from_date, to_date)`` -- in practice
+                :class:`acumen.daily_store.DailyStore`. Duck-typed so the pure calendar does
+                not have to import the storage layer.
+            years: the calendar years to derive.
+
+        Raises:
+            CalendarError: no years given, or a year is incompletely/uncertainly covered.
+        """
+        wanted = sorted({int(year) for year in years})
+        if not wanted:
+            raise CalendarError("from_daily_store needs at least one year.")
+        return cls._derive(
+            store,
+            start=date(wanted[0], 1, 1),
+            end=date(wanted[-1], 12, 31),
+            keep_years=frozenset(wanted),
+        )
+
+    @classmethod
+    def from_daily_store_range(cls, store: Any, start: date, end: date) -> TradingCalendar:
+        """Derive the calendar for exactly ``[start, end]`` -- a deliberately partial window.
+
+        Same rules as :meth:`from_daily_store`; the difference is that the resulting calendar
+        knows it only covers that window and REFUSES any date outside it, instead of
+        answering "not a trading day" for a date it simply has not ingested.
+        """
+        start_checked = _require_plain_date(start, "start")
+        end_checked = _require_plain_date(end, "end")
+        if end_checked < start_checked:
+            raise CalendarError(
+                f"Empty range: {end_checked.isoformat()} is before {start_checked.isoformat()}."
+            )
+        return cls._derive(store, start=start_checked, end=end_checked, keep_years=None)
+
+    @classmethod
+    def _derive(
+        cls, store: Any, *, start: date, end: date, keep_years: frozenset[int] | None
+    ) -> TradingCalendar:
+        from .bhavcopy import OUTCOME_NOT_FOUND, OUTCOME_PRESENT  # local: storage vocabulary
+
+        ledger: dict[date, str] = {}
+        frame = store.coverage(start, end)
+        for day, outcome in zip(frame["trade_date"], frame["outcome"]):
+            checked = _require_plain_date(day, "ledger date")
+            if keep_years is None or checked.year in keep_years:
+                ledger[checked] = str(outcome)
+
+        trading: set[date] = set()
+        holidays: set[date] = set()
+        unusable: list[str] = []
+        missing: list[date] = []
+
+        current = start
+        while current <= end:
+            if keep_years is not None and current.year not in keep_years:
+                current += timedelta(days=1)
+                continue
+            outcome = ledger.get(current)
+            if outcome == OUTCOME_PRESENT:
+                trading.add(current)
+            elif outcome == OUTCOME_NOT_FOUND:
+                if current.weekday() not in _WEEKEND:
+                    holidays.add(current)
+            elif outcome is None:
+                missing.append(current)
+            else:
+                unusable.append(f"{current.isoformat()}={outcome}")
+            current += timedelta(days=1)
+
+        if missing or unusable:
+            raise CalendarError(
+                "Refusing to derive a trading calendar from an incomplete ledger "
+                f"({start.isoformat()}..{end.isoformat()}): "
+                f"{len(missing)} date(s) never attempted"
+                + (f" (first: {missing[0].isoformat()})" if missing else "")
+                + f", {len(unusable)} unsettled"
+                + (f" ({', '.join(unusable[:5])})" if unusable else "")
+                + ". QUESTIONS.md Q-3 safeguard 1: a download error is NEVER treated as a "
+                "holiday. Re-run the backfill over this range first."
+            )
+        if not trading:
+            raise CalendarError(
+                f"The ledger for {start.isoformat()}..{end.isoformat()} contains no "
+                "file-present date, so there is no trading day in it at all. That is a "
+                "damaged store, not a closed market."
+            )
+
+        covered = frozenset(
+            day for day in _walk(start, end) if keep_years is None or day.year in keep_years
+        )
+        return cls(
+            holidays=frozenset(holidays),
+            covered_years=frozenset(day.year for day in covered),
+            trading_days=frozenset(trading),
+            covered_days=covered,
+            source="derived",
+        )
+
+    @property
+    def weekend_sessions(self) -> tuple[date, ...]:
+        """Trading days that fall on a Saturday or Sunday, oldest first.
+
+        NSE does hold them (budget Saturdays, disaster-recovery live sessions), and the
+        Q-3 ruling makes them trading days here because NSE published a bhavcopy. Whether
+        CONTEXT 7-E2 should ALSO exclude them as "non-standard sessions" is QUESTIONS.md
+        Q-4, unanswered -- so this property exists to make them visible rather than to
+        decide anything. Always empty for a published calendar.
+        """
+        if self.trading_days is None:
+            return ()
+        return tuple(sorted(day for day in self.trading_days if day.weekday() in _WEEKEND))
+
     # --- trading days -------------------------------------------------------------
 
     def is_trading_day(self, day: date) -> bool:
@@ -235,6 +385,10 @@ class TradingCalendar:
         """
         checked = _require_plain_date(day)
         self._require_covered(checked)
+        if self.trading_days is not None:
+            # A derived calendar answers from evidence, not from the weekday rule: NSE
+            # publishes a bhavcopy for its occasional weekend sessions (QUESTIONS.md Q-3/Q-4).
+            return checked in self.trading_days
         return checked.weekday() not in _WEEKEND and checked not in self.holidays
 
     def is_standard_session(self, day: date) -> bool:
@@ -319,6 +473,13 @@ class TradingCalendar:
                 f"No NSE holiday data loaded for {day.year} (loaded: {years}). Refusing to "
                 "answer: an uncovered year would silently look holiday-free, inventing "
                 "about a dozen trading days. See QUESTIONS.md Q-3."
+            )
+        if self.covered_days is not None and day not in self.covered_days:
+            span = f"{min(self.covered_days).isoformat()}..{max(self.covered_days).isoformat()}"
+            raise CalendarError(
+                f"This {self.source} calendar has no evidence for {day.isoformat()}; it "
+                f"covers {span}. Refusing to answer: a date the daily store never ingested "
+                "is UNKNOWN, not a holiday (QUESTIONS.md Q-3 safeguard 1)."
             )
 
 
@@ -411,6 +572,14 @@ def load_cached_calendar(
         )
     fetched_on, payload = cached
     return fetched_on, TradingCalendar.from_payload(payload, segment=segment)
+
+
+def _walk(start: date, end: date) -> Iterable[date]:
+    """Every calendar date from ``start`` to ``end`` inclusive."""
+    current = start
+    while current <= end:
+        yield current
+        current += timedelta(days=1)
 
 
 def _require_plain_date(value: Any, what: str = "date") -> date:

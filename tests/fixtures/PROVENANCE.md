@@ -68,3 +68,14 @@ Note: the 2000-era header is SHORTER still — `SYMBOL,SERIES,OPEN,HIGH,LOW,CLOS
 PREVCLOSE,TOTTRDQTY,TOTTRDVAL,TIMESTAMP,` with no `TOTALTRADES` and no `ISIN` (verified live
 against `cm03JAN2000bhav.csv.zip` on 2026-07-24), which is why the parser treats both as
 optional. That file is not committed; the shape is asserted by a synthetic test instead.
+
+### `daily_ledger_window.csv` — the Q-3 outcome ledger
+
+One row per calendar date of the two ingested windows (27 dates), copied out of the live
+store's `ledger.parquet` after the run: `trade_date,outcome,source_format,http_status`. This
+is what makes the derived-calendar golden reproducible offline — including the card's named
+cases, `2026-07-19` = `confirmed-404` (a Sunday) and `2026-07-20` = `file-present`.
+
+Attempt timestamps and URLs are deliberately NOT copied: they are run metadata, not
+behaviour, and pinning them would make the fixture look like evidence about a moment rather
+than about the calendar.
