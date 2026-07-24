@@ -1,4 +1,5 @@
-"""Crash-safe file writes: write a temp file beside the target, then ``os.replace`` it.
+"""Crash-safe, power-loss-safe file writes: write a temp file beside the target, ``fsync``
+it, then ``os.replace`` it.
 
 Why this exists (docs/reviews/REVIEW_1.md Finding 2, and personas/code_reviewer.md
 checklist 2 -- "interrupted runs leave no half-written files"): every store this repo keeps
@@ -9,6 +10,22 @@ truncated cache or a truncated parquet is silent corruption that the next sessio
 
 ``os.replace`` is atomic on both POSIX and Windows when source and destination sit on the
 same filesystem, which is why the temp file is always created in the target's own directory.
+
+**Durability against power loss (REVIEW_2 Finding 6, pulled forward after the 2026-07-25
+power-loss incident).** ``os.replace`` being atomic is not enough on its own: after the
+rename, the operating system may still hold the new file's *data* only in its page cache. If
+the machine loses power in that window the rename can be durable while the bytes are not,
+leaving a correctly-named file that is zero-length or full of un-flushed garbage -- which is
+exactly the corruption the 2026-07-25 backfill hit (a 87 KB archive CSV of pure spaces, a
+truncated month parquet and a truncated ledger, all with valid names). So every write here
+now ``os.fsync``s the file's DATA to disk BEFORE the ``os.replace``, and best-effort
+``fsync``s the containing DIRECTORY afterwards so the rename itself is durable:
+
+* file fsync -- enforced on BOTH POSIX and Windows (``os.fsync`` -> ``FlushFileBuffers``);
+* directory fsync -- POSIX only. Windows has no portable way to obtain a flushable directory
+  handle (``os.open`` on a directory raises ``PermissionError``), and NTFS journals the
+  rename metadata itself, so on Windows this step is an honest documented no-op. The
+  data-durability half -- the half that actually prevents the incident above -- holds on both.
 
 This module is I/O ONLY and is not part of the pure engine layer (CONTEXT 6).
 
@@ -23,6 +40,41 @@ from pathlib import Path
 from typing import Callable
 
 __all__ = ["atomic_write_bytes", "atomic_write_text", "atomic_write_with"]
+
+
+def _fsync_file(path: Path) -> None:
+    """Flush ``path``'s data to physical storage. Works on POSIX and Windows.
+
+    Opened ``O_RDWR`` because Windows' ``FlushFileBuffers`` (what ``os.fsync`` calls) needs a
+    handle with write access; the open neither reads nor writes any bytes.
+    """
+    fd = os.open(path, os.O_RDWR)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _fsync_dir_best_effort(directory: Path) -> None:
+    """Flush ``directory``'s entries so a just-completed rename is durable. Best-effort.
+
+    POSIX: open the directory read-only and ``fsync`` its descriptor -- this is what makes
+    the ``os.replace`` survive a power cut. Windows: a directory cannot be opened as a file
+    descriptor (``os.open`` raises), and NTFS already journals the rename, so this is a
+    documented no-op there rather than a guarantee we cannot keep. Either way the file's own
+    data was already fsynced before the rename, which is the part that prevents a valid-named
+    but empty/garbage file (REVIEW_2 F6, the 2026-07-25 incident).
+    """
+    try:
+        dir_fd = os.open(directory, os.O_RDONLY)
+    except (OSError, ValueError):
+        return  # Windows and other platforms without directory fds: honest best-effort skip
+    try:
+        os.fsync(dir_fd)
+    except OSError:
+        pass  # some filesystems refuse to fsync a directory; the file fsync already ran
+    finally:
+        os.close(dir_fd)
 
 
 def atomic_write_bytes(path: Path, data: bytes) -> Path:
@@ -41,13 +93,14 @@ def atomic_write_bytes(path: Path, data: bytes) -> Path:
         with os.fdopen(handle_fd, "wb") as handle:
             handle.write(data)
             handle.flush()
-            os.fsync(handle.fileno())
+            os.fsync(handle.fileno())  # data on disk BEFORE the rename (REVIEW_2 F6)
         os.replace(temp_path, target)
     except BaseException:
         # BaseException on purpose: a KeyboardInterrupt mid-write is the exact scenario this
         # module exists for, and it must not leave the temp file behind either.
         temp_path.unlink(missing_ok=True)
         raise
+    _fsync_dir_best_effort(target.parent)  # make the rename itself durable (POSIX; see module)
     return target
 
 
@@ -72,8 +125,10 @@ def atomic_write_with(path: Path, writer: Callable[[Path], None]) -> Path:
     temp_path = Path(temp_name)
     try:
         writer(temp_path)
+        _fsync_file(temp_path)  # flush the writer's bytes to disk BEFORE the rename (F6)
         os.replace(temp_path, target)
     except BaseException:
         temp_path.unlink(missing_ok=True)
         raise
+    _fsync_dir_best_effort(target.parent)  # make the rename itself durable (POSIX; see module)
     return target

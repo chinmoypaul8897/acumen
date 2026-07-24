@@ -58,10 +58,20 @@ from .bhavcopy import (
     DateOutcome,
     Download,
     date_range,
+    url_for,
 )
 
 DAILY_DIRNAME: str = "daily"
 LEDGER_FILENAME: str = "ledger.parquet"
+
+#: The command that reconstructs a lost or corrupt ledger from the surviving monthly
+#: parquets. Named in the error a damaged ledger raises so an operator is handed the fix
+#: instead of a raw pyarrow traceback (the 2026-07-25 power-loss incident; REVIEW_2 F6).
+REBUILD_LEDGER_COMMAND: str = "acumen-backfill --rebuild-ledger --store <store root>"
+
+#: Stamped into the ``reason`` column of every row a ledger rebuild writes, so a later reader
+#: can tell a reconstructed ``file-present`` row from one recorded by a live fetch.
+REBUILT_LEDGER_REASON: str = "rebuilt-from-monthly-parquet"
 
 #: One Parquet schema, written explicitly rather than inferred -- an inferred schema changes
 #: shape when a month happens to have no nulls in a column, and a store whose dtypes drift
@@ -241,6 +251,76 @@ class DailyStore:
         )
         return self.ledger_path
 
+    def rebuild_ledger_from_monthlies(self) -> dict[str, object]:
+        """Reconstruct the entire ledger from the surviving monthly parquets, atomically.
+
+        The recovery path for a lost or corrupt ledger (the 2026-07-25 power-loss incident,
+        REVIEW_2 F6). The ledger is a derived index -- it holds no fact the month files do not
+        -- so it can always be rebuilt from them:
+
+        * every date that appears in a **readable** monthly parquet becomes ``file-present``,
+          with its ``source_format`` read from the stored rows and its URL reconstructed from
+          that format (:func:`~acumen.bhavcopy.url_for`);
+        * every other in-range date is simply **absent** -- it becomes pending again and
+          re-resolves naturally on the next backfill run. Concretely this means the lost
+          ``confirmed-404`` knowledge is not fabricated: those dates are re-attempted and settle
+          themselves the first time the run reaches them again.
+
+        A monthly that will not open is **skipped and reported**, not fatal -- so this is safe
+        to run even if a corrupt month was not quarantined first (its dates just return to
+        pending, exactly as if the file were gone). It does NOT read the existing ledger, so it
+        works precisely when the ledger is the corrupt file.
+
+        This is written through the fsync-hardened atomic path, so the recovery itself is
+        power-loss safe. Returns a summary dict for the operator's report.
+        """
+        monthlies = sorted(self.daily_dir.glob("*/bhavcopy_*.parquet"))
+        by_date: dict[date, tuple[str, int]] = {}
+        read_ok: list[str] = []
+        unreadable: list[str] = []
+
+        for path in monthlies:
+            rel = str(path.relative_to(self.root))
+            try:
+                table = pq.read_table(path, columns=["trade_date", "source_format"])
+            except Exception as exc:  # a corrupt month: skip, its dates return to pending
+                unreadable.append(f"{rel} ({type(exc).__name__}: {exc})")
+                continue
+            read_ok.append(rel)
+            trade_dates = table.column("trade_date").to_pylist()
+            formats = table.column("source_format").to_pylist()
+            for day, fmt in zip(trade_dates, formats):
+                stored_fmt, count = by_date.get(day, (fmt, 0))
+                by_date[day] = (stored_fmt, count + 1)
+
+        ledger: dict[date, DateOutcome] = {}
+        by_format: dict[str, int] = {}
+        for day in sorted(by_date):
+            fmt, count = by_date[day]
+            by_format[fmt] = by_format.get(fmt, 0) + 1
+            ledger[day] = DateOutcome(
+                trade_date=day,
+                outcome=OUTCOME_PRESENT,
+                source_format=fmt,
+                url=url_for(day, fmt),
+                http_status=200,
+                reason=REBUILT_LEDGER_REASON,
+                row_count=count,
+                attempted_at=None,  # the original fetch time is unknown; inventing one would lie
+            )
+
+        self._write_ledger(ledger)
+        return {
+            "ledger_path": self.ledger_path,
+            "monthlies_read": len(read_ok),
+            "monthlies_unreadable": unreadable,
+            "dates_present": len(ledger),
+            "rows_seen": sum(count for _fmt, count in by_date.values()),
+            "by_format": by_format,
+            "first_date": min(ledger) if ledger else None,
+            "last_date": max(ledger) if ledger else None,
+        }
+
     # --- reading -------------------------------------------------------------------
 
     def daily(
@@ -390,11 +470,31 @@ class DailyStore:
     # --- the outcome ledger --------------------------------------------------------
 
     def outcomes(self) -> dict[date, DateOutcome]:
-        """The whole ledger as ``{date: outcome}``. Empty when nothing has been attempted."""
+        """The whole ledger as ``{date: outcome}``. Empty when nothing has been attempted.
+
+        Raises:
+            DailyStoreError: the ledger file exists but will not open -- the signature of a
+                power-loss truncation (REVIEW_2 F6). The message names the ``--rebuild-ledger``
+                recovery instead of surfacing a raw pyarrow traceback, because the ledger holds
+                nothing the monthly parquets do not and can always be rebuilt from them.
+        """
         path = self.ledger_path
         if not path.is_file():
             return {}
-        table = pq.read_table(path, schema=LEDGER_SCHEMA)
+        try:
+            table = pq.read_table(path, schema=LEDGER_SCHEMA)
+        except Exception as exc:  # ArrowInvalid, ArrowIOError, OSError: all mean "unreadable"
+            raise DailyStoreError(
+                f"The outcome ledger at {path} exists but cannot be read "
+                f"({type(exc).__name__}: {exc}). This is the signature of a power-loss "
+                "truncation (REVIEW_2 F6): a valid file name over data that never reached "
+                "disk. The ledger holds no information the monthly parquet files do not, so "
+                "rebuild it from them with:\n"
+                f"    acumen-backfill --rebuild-ledger --store {self.root}\n"
+                "Quarantine any corrupt monthly parquet first (move it aside, never delete). "
+                "Every date whose month file survived returns as file-present; every other "
+                "date simply becomes pending again and re-resolves on the next backfill run."
+            ) from exc
         result: dict[date, DateOutcome] = {}
         for record in table.to_pylist():
             stamp = record["attempted_at"]

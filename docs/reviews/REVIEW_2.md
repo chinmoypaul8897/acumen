@@ -519,6 +519,44 @@ This review added exactly one file — `tests/test_review2_probes.py` (51 tests)
 | F3 | **half CLOSED** | chunk-3 prep (2026-07-24) | `_keep_raw` writes through `atomic_write_text`; proved by interrupting `os.replace` and finding neither a truncated CSV nor an orphan temp. The resumability half is UNCHANGED and still documented: the archive is written inside the fetch loop, so `--raw-dir` added to a later run does not backfill dates an earlier run settled. The architect scoped this session to the atomic half. |
 | F4 | **CLOSED** | chunk-3 prep (2026-07-24) | The false example is replaced by `int(float("2189.20") * 100) == 218919` (TCS's own 2026-07-15 close) in `bhavcopy.py`'s module docstring, in `_paise`, and in the build test — which now asserts the arithmetic as well as quoting it. PROGRESS B24 is corrected in place with a visible note. The fifth site, commit `52791e0`'s message body, is history and was NOT rewritten. |
 | F5 | **CLOSED** | chunk-3 prep (2026-07-24) | The four Q-4/Q-5 cross-references are corrected (`calendar.py` x2, `test_derived_calendar.py` x2). Both items have since been RULED, so the comments now point at executed rulings rather than open questions. |
-| F6, F7 | open | — | Both are forward-looking (fsync durability; a read-side ledger/rows invariant before chunk 9's full run). Untouched by this session. |
+| F6 | **CLOSED (early)** | incident-fix (2026-07-25) | **The prediction landed.** F6 warned that `atomic_write_with` was process-crash safe but NOT power-loss safe: "against a power cut the rename can be durable before the data is, leaving a zero-length or partial Parquet with a valid name. On a laptop running an hours-long backfill this is a real if unlikely scenario." On 2026-07-25 a power cut during the operator's 25-year backfill did exactly that — three files with valid names over un-flushed data: `ledger.parquet` ("magic bytes not found"), the in-flight month `daily/2009/bhavcopy_2009-03.parquet`, and the raw archive `2009-03-13_archive.csv` (87 KB of pure spaces). The architect approved pulling the fix forward from chunk 13. `atomic_io` now `os.fsync`s the file's data to disk BEFORE `os.replace` (both `atomic_write_bytes` and `atomic_write_with`) and best-effort `fsync`s the containing directory afterwards — file fsync enforced on POSIX **and** Windows, directory fsync POSIX-only (Windows cannot open a directory fd; NTFS journals the rename — documented honestly in the module). Asserted via a monkeypatch that fsync precedes replace. See the incident note below. |
+| F7 | open (partially mitigated) | incident-fix (2026-07-25) | Still open — there is still no proactive read-side `DailyStore.verify()` that flags a `file-present` ledger date whose month rows have vanished. **Partial mitigation:** the new `--rebuild-ledger` command *derives* the ledger from the row files, so after a rebuild the ledger cannot claim a date the monthlies do not contain (ledger←rows reconciliation, by construction). It is a recovery tool, not the routine consistency check F7 asks for, and it is deliberately lossy of `error`/`confirmed-404` knowledge — so it addresses the drift only in the ledger→rows direction and only when explicitly run. The `verify()` before chunk 9's full run is still owed. |
 | F8, F9, F10, F11 | INFO | — | F11 is no longer merely informational: the architect ruled on it as Q-5, and the measurement it records is now a regression test (`test_q5_a_saturday_session_is_excluded_and_monday_pairs_to_friday_thursday`). |
 | F12 | **half CLOSED** | chunk-3 prep (2026-07-24) | The implementation moved into the package (`src/acumen/backfill_daily.py`, zero import-time statements) and `pyproject.toml` declares the `acumen-backfill` console entry point. `scripts/backfill_daily.py` is now a launcher whose module body also executes nothing; its `sys.path` insert survives INSIDE `_load_main()`, fires only when the package is not installed, and exists because chunk-0 B2 guarantees a bare clone runs with no install step — and because the operator's 25-year backfill was running against that exact command while this session worked. Installing the project (`pip install -e . --no-deps`) removes the last insert from the execution path. |
+
+---
+
+### Incident note — 2026-07-25 power-loss during the backfill (F6 closed early)
+
+A power cut hit the operator's laptop mid-backfill, at date **2009-03-13**. The next start
+raised `ArrowInvalid: ... Parquet magic bytes not found in footer` on `ledger.parquet`. A
+read-only diagnosis found the damage was exactly the F6 signature — a valid file name over
+data that never reached disk — and confined to the three files being written at the instant of
+the cut:
+
+| Artifact | Bytes | State |
+|---|---|---|
+| `data/daily_store/ledger.parquet` | 49,281 | CORRUPT — rewritten in full on every date (§12 F8), so always in-flight |
+| `data/daily_store/daily/2009/bhavcopy_2009-03.parquet` | 257,057 | CORRUPT — the month being appended to |
+| `data/raw_bhav/2009-03-13_archive.csv` | 87,159 | CORRUPT — 87 KB of spaces (audit-trail file, not the store) |
+
+Everything else was intact: **112 / 113 monthlies OK, 2,320 / 2,321 raw files OK.**
+
+Recovery, scoped by the architect to *recovery + the F6 hardening only*:
+
+1. **Quarantine, never delete** — the three corrupt files were moved to
+   `data/daily_store/_quarantine/2026-07-25/` (path preserved, with a `MANIFEST.txt`). The
+   quarantine lives outside the store's `daily/` tree, so nothing re-scans it.
+2. **Rebuild** — `acumen-backfill --rebuild-ledger --store data/daily_store` reconstructed the
+   ledger from the 112 surviving monthlies: **2,313 dates → `file-present`** (2,303 archive +
+   10 udiff), span 2000-01-03 … 2026-07-24, source format read from each date's stored rows.
+   The rebuilt file-present set equals the distinct date set across the monthlies exactly.
+3. **Back to pending** — the quarantined month's 31 March-2009 dates (incl. 2009-03-13) and any
+   lost `confirmed-404` knowledge are simply **absent** now, i.e. pending again; they re-resolve
+   the next time a normal run reaches them. Lost 404s are re-derived from fresh evidence, never
+   invented.
+
+`--rebuild-ledger` is a permanent CLI, so future recovery is one command. A corrupt ledger now
+raises `DailyStoreError` naming that command (via `main()`, exit 2) instead of a raw pyarrow
+traceback. Twelve tests cover the fsync-before-rename ordering, the corrupt-ledger error, and
+rebuild-from-monthlies including a quarantined month (`tests/test_incident_recovery.py`).

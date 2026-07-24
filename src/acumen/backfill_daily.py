@@ -22,9 +22,21 @@ Useful flags:
     --raw-dir data/raw_bhav    also keep each date's extracted CSV, for audit / fixtures
     --retry-errors             re-attempt dates whose last outcome was an error (default on)
     --dry-run                  list what WOULD be fetched, touch nothing
+    --rebuild-ledger           RECOVERY: rebuild the ledger from the monthly parquets and
+                               stop (offline; needs no --from/--to). See below.
 
 Nothing happens without ``--allow-network``: reaching the internet is opt-in everywhere in
 this repo, which is what keeps the test suite honest.
+
+Recovery after a power loss (REVIEW_2 Finding 6; the 2026-07-25 incident): if the ledger is
+truncated ("Parquet magic bytes not found"), any run that reads it now stops with a clear
+error pointing here. Quarantine any corrupt monthly parquet (move it aside, never delete),
+then rebuild the ledger from the files that survived -- one command, no network:
+
+    acumen-backfill --rebuild-ledger --store data/daily_store
+
+Every date whose month parquet survived comes back as ``file-present``; every other date
+becomes pending again and re-resolves the next time a normal run reaches it.
 
 This module lives inside the package rather than under ``scripts/`` so that no entry point
 has to mutate ``sys.path`` at import time (REVIEW_2 Finding 12). It still holds no strategy
@@ -43,7 +55,7 @@ from typing import Sequence
 
 from . import bhavcopy, nse_http, universe
 from .atomic_io import atomic_write_text
-from .daily_store import SERIES_UNKNOWN, DailyStore
+from .daily_store import SERIES_UNKNOWN, DailyStore, DailyStoreError
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -52,10 +64,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         description="Backfill the daily bhavcopy store (CONTEXT 4.1).",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("--from", dest="start", required=True, help="first date, YYYY-MM-DD")
-    parser.add_argument("--to", dest="end", required=True, help="last date, YYYY-MM-DD")
+    parser.add_argument("--from", dest="start", default=None, help="first date, YYYY-MM-DD")
+    parser.add_argument("--to", dest="end", default=None, help="last date, YYYY-MM-DD")
     parser.add_argument("--store", default=None, help="store root (default: <data_dir>/daily_store)")
     parser.add_argument("--raw-dir", default=None, help="also keep each date's extracted CSV")
+    parser.add_argument(
+        "--rebuild-ledger",
+        action="store_true",
+        help=(
+            "RECOVERY: discard the ledger and rebuild it from the monthly parquets "
+            "(offline; needs no --from/--to/--allow-network). Use after a power-loss "
+            "truncation; quarantine any corrupt monthly first"
+        ),
+    )
     parser.add_argument(
         "--allow-network",
         action="store_true",
@@ -94,10 +115,17 @@ def resolve_dates(store: DailyStore, start: date, end: date, *, retry_errors: bo
 
 
 def run(args: argparse.Namespace) -> int:
-    start = date.fromisoformat(args.start)
-    end = date.fromisoformat(args.end)
     root = Path(args.store) if args.store else default_store_root()
     store = DailyStore.at(root)
+
+    if args.rebuild_ledger:
+        return _rebuild_ledger(store)
+
+    if not args.start or not args.end:
+        print("ERROR: --from and --to are required (or pass --rebuild-ledger to recover).")
+        return 2
+    start = date.fromisoformat(args.start)
+    end = date.fromisoformat(args.end)
     raw_dir = Path(args.raw_dir) if args.raw_dir else None
 
     pending = resolve_dates(store, start, end, retry_errors=not args.no_retry_errors)
@@ -143,6 +171,40 @@ def run(args: argparse.Namespace) -> int:
 
     print()
     _print_summary(store, start, end, symbols=cached_universe_symbols())
+    return 0
+
+
+def _rebuild_ledger(store: DailyStore) -> int:
+    """Rebuild the ledger from the surviving monthly parquets, then report (RECOVERY).
+
+    The one-command recovery for a ledger lost to a power-loss truncation (REVIEW_2 F6, the
+    2026-07-25 incident). Offline, touches no month file, and writes the new ledger through
+    the fsync-hardened atomic path. Dates whose month survived come back as file-present;
+    every other date becomes pending again and re-resolves on the next backfill run.
+    """
+    print(f"store        : {store.root}")
+    print("REBUILDING the ledger from the monthly parquet files (REVIEW_2 F6 recovery).")
+    print("Reading nothing from the old ledger -- it holds no fact the month files do not.\n")
+
+    summary = store.rebuild_ledger_from_monthlies()
+
+    print(f"  monthlies read       : {summary['monthlies_read']}")
+    unreadable = summary["monthlies_unreadable"]
+    assert isinstance(unreadable, list)
+    print(f"  monthlies unreadable : {len(unreadable)}  (skipped; their dates return to pending)")
+    for item in unreadable:
+        print(f"      ! {item}")
+    print(f"  dates -> file-present: {summary['dates_present']}")
+    print(f"  rows scanned         : {summary['rows_seen']}")
+    print(f"  by source format     : {summary['by_format']}")
+    if summary["dates_present"]:
+        print(f"  date span recovered  : {summary['first_date']} .. {summary['last_date']}")
+    print(f"  ledger written       : {summary['ledger_path']}")
+    print(
+        "\nDONE. Every non-recovered date (including any lost confirmed-404s) is now pending "
+        "and\nwill be re-attempted on the next run -- errors and gaps are never holidays "
+        "(QUESTIONS.md Q-3)."
+    )
     return 0
 
 
@@ -241,7 +303,13 @@ def _hms(seconds: float) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
-    return run(parse_args(argv))
+    try:
+        return run(parse_args(argv))
+    except DailyStoreError as exc:
+        # A corrupt ledger (REVIEW_2 F6) surfaces here as guidance, not a pyarrow traceback:
+        # the message already names the --rebuild-ledger recovery.
+        print(f"\nERROR: {exc}")
+        return 2
 
 
 if __name__ == "__main__":
