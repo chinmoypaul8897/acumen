@@ -27,6 +27,7 @@ import pytest
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "poc" / "data"
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 #: SHA-256 of every frozen file under tests/fixtures/, extended as chunks add them.
 #:
@@ -58,6 +59,53 @@ FROZEN_FIXTURES_SHA256: dict[str, str] = {
     ),
     "tick_sizes.json": "61488842568ee632b528dfa3c5f6be44a771520a2aa02cd63cb76b7c0ee146b0",
     "universe_snapshot.json": "3eaa84baf758421fa57754c28dc32dd0a5bb864f8e02ccbab237ed05ef13f912",
+    # chunk 3 (2026-07-25): the corporate-action sources CONTEXT 4.2 names. Ten VERBATIM
+    # snapshots (one per source per window) and two DERIVED bhavcopy cuts for the
+    # adjustment-sanity golden. Provenance in tests/fixtures/PROVENANCE.md.
+    "ca/bse_ca_2016-01.csv": (
+        "982fc2a6cee3c0012ff5248948959482e8d252be7720561ee632fd6f9a77d49c"
+    ),
+    "ca/bse_ca_2023-07.csv": (
+        "c819ee25c44a679f7665cedc1b3630b093bc09c3cd3b703039c25af309888a22"
+    ),
+    "ca/bse_ca_2024-10.csv": (
+        "c8815e985538aeb20d399b8a7c540736fae8aa58b56610cc0e0f8d0ba8ca93cf"
+    ),
+    "ca/ca_adjust_archive.csv": (
+        "4061f0e6fffe2a64f07be8f868aa30fbb0a033d55d1f2cdc93f26a6f1e657768"
+    ),
+    "ca/ca_adjust_udiff.csv": (
+        "f4e9ccd14ccbd46f248a131b081859d0f5ecd0a52a15738bb9c357a7acb27c66"
+    ),
+    "ca/nse_ca_2016-01.json": (
+        "6bb9787d830d8234a23403c1441abd9f7430ec05902c80b7b492400dfe1616bd"
+    ),
+    "ca/nse_ca_2023-07.json": (
+        "8a2c5d348e3a94bc3d6ee31bc1a5fef789954eef3fec57235ad9b18a8f5ab67e"
+    ),
+    "ca/nse_ca_2024-10.json": (
+        "d064cda3fa2fe7e358ec8aca68c9ca7c5c648a3b0584f21d320be558c1aa13e0"
+    ),
+    "ca/yahoo_splits_GREENPLY_2015-12.json": (
+        "cc7fc8a3718ff72ea0e58b7406dd702c8b06666c8a8d957d9282e93d165dd976"
+    ),
+    "ca/yahoo_splits_KOTHARIPRO_2015-12.json": (
+        "03a70ddebedab6ea18ce48be238b08a587ae5e2a91a4195e1367cc112a541740"
+    ),
+    "ca/yahoo_splits_RELIANCE_2023-07.json": (
+        "b2bdeb52c6617f328e02a385b6fc42d1cc17335e81567dd9a3d50c6ae8212763"
+    ),
+    "ca/yahoo_splits_RELIANCE_2024-10.json": (
+        "f3d3a78111bd0f004ea88aacede81778610a0db8e017f0ae07a8d97984fafc9a"
+    ),
+}
+
+#: CONTEXT 4.2's own test ORACLE, frozen at docs/ (not under tests/fixtures/, because it is a
+#: published document rather than a captured payload). F8 reads its worked examples directly.
+FROZEN_ORACLE_SHA256: dict[str, str] = {
+    "nse_adjustment_calculator.xlsx": (
+        "ac79276d12a7f72bc614fa9ea574c6ba12dd54fda811641de4835dadb4544062"
+    ),
 }
 
 #: SHA-256 of every frozen CSV, measured 2026-07-24 by the chunk-0 review session.
@@ -143,6 +191,46 @@ def test_frozen_tests_fixture_bytes_are_unchanged(name: str) -> None:
         "universe goldens were computed from, and tick_sizes.json is an architect ruling. "
         "Restore the file from git -- re-pulling the endpoint is NOT a fix."
     )
+
+
+@pytest.mark.parametrize("name", sorted(FROZEN_ORACLE_SHA256))
+def test_the_frozen_oracle_bytes_are_unchanged(name: str) -> None:
+    """CONTEXT 4.2: "our factors must reproduce" NSE's calculator. An oracle that can be
+    regenerated is not an oracle -- these bytes are the ones F8 was checked against."""
+    path = REPO_ROOT / "docs" / name
+    assert path.is_file(), f"frozen oracle is MISSING: docs/{name}"
+    assert hashlib.sha256(path.read_bytes()).hexdigest() == FROZEN_ORACLE_SHA256[name], (
+        f"docs/{name} CHANGED. Restore it from git; re-downloading it from NSE is NOT a fix "
+        "(CLAUDE.md rule 3)."
+    )
+
+
+def test_the_corporate_action_snapshots_are_verbatim_payloads() -> None:
+    """The CA snapshots must stay raw source responses -- the same rule as chunk 1's two.
+
+    A snapshot that has been prettified, trimmed or annotated is no longer evidence of what
+    the source returns, which is the only reason to freeze one. The two `ca_adjust_*.csv`
+    files are the exception and are DERIVED, not verbatim: whole lines lifted out of real
+    bhavcopy CSVs, declared as such in PROVENANCE.md.
+    """
+    nse = json.loads((FIXTURES_DIR / "ca" / "nse_ca_2016-01.json").read_text(encoding="utf-8"))
+    assert isinstance(nse, list) and len(nse) == 19
+    assert set(nse[0]) == {
+        "bcEndDate", "bcStartDate", "caBroadcastDate", "comp", "exDate", "faceVal", "ind",
+        "isin", "ndEndDate", "ndStartDate", "recDate", "series", "subject", "symbol",
+    }
+    assert all(row["caBroadcastDate"] is None for row in nse), (
+        "QUESTIONS.md Q-7 rests on this field being empty; if a future pull carries it, the "
+        "special-dividend question may be answerable from the source itself."
+    )
+
+    bse = (FIXTURES_DIR / "ca" / "bse_ca_2016-01.csv").read_text(encoding="utf-8")
+    assert bse.startswith("Security Code,Security Name,Company Name,Ex Date,Purpose")
+
+    yahoo = json.loads(
+        (FIXTURES_DIR / "ca" / "yahoo_splits_KOTHARIPRO_2015-12.json").read_text(encoding="utf-8")
+    )
+    assert set(yahoo) == {"chart"} and yahoo["chart"]["error"] is None
 
 
 def test_the_endpoint_snapshots_are_verbatim_payloads() -> None:

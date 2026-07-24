@@ -102,3 +102,81 @@ Prices are round numbers chosen so a wrong pick is obvious in a failure message 
 debt / partly-paid rows sit nowhere near the equity's). **This file is not evidence about NSE
 and must never be cited as such** — every real-data claim in the Q-4 work is measured on the
 two DERIVED bhavcopy fixtures instead.
+
+## chunk 3 (2026-07-25) — `ca/`, the corporate-action sources
+
+CONTEXT §4.2 names three sources; there is one snapshot per source per window, which is the
+minimum possible (all three APIs are window-scoped, so one file cannot cover three windows).
+Every one is **VERBATIM** — the exact response bytes, no wrapper, no reformatting — taken in a
+single pass on **2026-07-25 (IST)** at one request per 4 seconds. The pacing is deliberately
+slower than this repo's usual 1-per-2s because the operator's 25-year bhavcopy backfill was
+running against the same infrastructure in another process; the combined rate stayed at the
+usual ~1 request / 2s.
+
+The windows are the ones the chunk-3 card names, chosen for five independently verified
+events: **Jan-2016** (KOTHARIPRO bonus ex 05-Jan, GREENPLY face-value split ex 06-Jan,
+JMCPROJECT rights ex 11-Jan), **Jul-2023** (RELIANCE demerger ex 20-Jul) and **Oct-2024**
+(RELIANCE 1:1 bonus ex 28-Oct).
+
+| File | Kind | Source URL (parameters as sent) | bytes |
+|---|---|---|---|
+| `ca/nse_ca_2016-01.json` | VERBATIM | `nseindia.com/api/corporates-corporateActions?index=equities&from_date=01-01-2016&to_date=31-01-2016` | 5,849 |
+| `ca/nse_ca_2023-07.json` | VERBATIM | same, `01-07-2023`..`31-07-2023` | 106,619 |
+| `ca/nse_ca_2024-10.json` | VERBATIM | same, `01-10-2024`..`31-10-2024` | 23,717 |
+| `ca/bse_ca_2016-01.csv` | VERBATIM | `api.bseindia.com/BseIndiaAPI/api/CorpactCSVDownload/w?scripcode=&Fdate=20160101&TDate=20160131&Purposecode=&strSearch=S&ddlindustrys=&ddlcategorys=E&segment=0` | 3,018 |
+| `ca/bse_ca_2023-07.csv` | VERBATIM | same, `20230701`..`20230731` | 42,476 |
+| `ca/bse_ca_2024-10.csv` | VERBATIM | same, `20241001`..`20241031` | 12,910 |
+| `ca/yahoo_splits_KOTHARIPRO_2015-12.json` | VERBATIM | `query1.finance.yahoo.com/v8/finance/chart/KOTHARIPRO.NS?period1=1448928000&period2=1456704000&interval=1d&events=split` | 6,894 |
+| `ca/yahoo_splits_GREENPLY_2015-12.json` | VERBATIM | same shape, `GREENPLY.NS`, same window | 7,955 |
+| `ca/yahoo_splits_RELIANCE_2024-10.json` | VERBATIM | same shape, `RELIANCE.NS`, `2024-10-01`..`2024-11-30` | 5,203 |
+| `ca/yahoo_splits_RELIANCE_2023-07.json` | VERBATIM | same shape, `RELIANCE.NS`, `2023-07-01`..`2023-08-31` | 5,326 |
+
+The last Yahoo file is frozen precisely because it is **empty of splits**: it is the evidence
+that Yahoo's stream cannot see the RELIANCE demerger (CONTEXT §4.2 says rights and demergers
+are invisible there), and a source that is silent must never be read as one that disagrees.
+
+### `ca/ca_adjust_archive.csv` and `ca/ca_adjust_udiff.csv` — **DERIVED**
+
+The bhavcopy rows the adjustment-sanity golden runs on, so it needs no live store. Header line
+verbatim, plus every row whose symbol is one of the three verified events' symbols. Cut from
+the CSVs archived by `scripts/backfill_daily.py --raw-dir` during this session (one live
+fetch per date, 1 request / 4s, the same pacing as above).
+
+| File | Symbols | Dates | Rows |
+|---|---|---|---|
+| `ca/ca_adjust_archive.csv` | KOTHARIPRO, GREENPLY | 2015-12-30 .. 2016-01-11 (9 trading days) | 18 |
+| `ca/ca_adjust_udiff.csv` | RELIANCE | 2024-10-23 .. 2024-10-31 (7 trading days) | 7 |
+
+Source CSV digests (SHA-256 of the CSV inside each published ZIP, as downloaded):
+
+| Date | Format | SHA-256 | lines | kept |
+|---|---|---|---|---|
+| 2015-12-30 | archive | `2f54c9a5fc6542cdc885eafce25e11868b5bc2df07d0ed972e4762b2224ec311` | 1625 | 2 |
+| 2015-12-31 | archive | `60236335f32d8f565e1250131773437c5a2416122f6d011c408b1071d36b4035` | 1607 | 2 |
+| 2016-01-01 | archive | `f7b2c885bf9411ac1ba564325f5347816b78de7b672ba943aa769debf6915cc7` | 1608 | 2 |
+| 2016-01-04 | archive | `2f773eda6f1c187432548d6d554e0a29d42895f7f8997049cabd74c619194326` | 1624 | 2 |
+| 2016-01-05 | archive | `135b3bb5c5c0c6d139302179ff43893bf36902f99cbe3420df40efcbb06a11b7` | 1628 | 2 |
+| 2016-01-06 | archive | `4bee07284baa0c520f49d68e850cd708dbf89cb88f6ecad416e73df475493b84` | 1622 | 2 |
+| 2016-01-07 | archive | `83a72da633b5d4695385282ef674b7a9ab56072bde2b7bed97d584ddeddea92a` | 1633 | 2 |
+| 2016-01-08 | archive | `eed87349dd0f4c7109ef57b29f3bc832db15f18016f28b3a966e81c7525e646b` | 1623 | 2 |
+| 2016-01-11 | archive | `339268cce785cda8411a89631a29d3bbcc6ac8006f3eb1d4194eb15304426e11` | 1634 | 2 |
+| 2024-10-23 | udiff | `343fcf400d871842823967d94b9f5b81a70ea32de9e30996c4a48ec61bd2a4b3` | 2860 | 1 |
+| 2024-10-24 | udiff | `114e7c49cf48971a1360c15a94fe340c20795c89e29b1730c68183bd0994f2df` | 2844 | 1 |
+| 2024-10-25 | udiff | `fed0742836df91b672c987d3310f81997daef865d1ac831546b0415ef5654866` | 2903 | 1 |
+| 2024-10-28 | udiff | `a09ec1262af5a79a3679008f94fc32ccbefa047c15f9325fabbc35e75856ae7e` | 2921 | 1 |
+| 2024-10-29 | udiff | `ddc1ef14bb4d279870360b6df2d7b7653d5970660e53d517624dd8fa204b8ba1` | 2866 | 1 |
+| 2024-10-30 | udiff | `8b1e79b624f3dcfff87add9224cd4db90b9324d1bae7eecf83520ded998b42e7` | 2851 | 1 |
+| 2024-10-31 | udiff | `4d8e4bba60ca43252bee6f24aaa63ff126638296f599ceefbbf94961bf71334c` | 2851 | 1 |
+
+### The F8 oracle — `docs/nse_adjustment_calculator.xlsx`
+
+Not under `tests/fixtures/` because it is a published document, not a captured payload, but
+frozen on the same terms (digest pinned in `tests/test_fixture_integrity.py`). CONTEXT §4.2:
+"NSE's official 'Adjustment of F&O contracts Calculator' XLSX — our factors must reproduce
+it." Fetched once on 2026-07-25 from
+`nsearchives.nseindia.com/web/sites/default/files/inline-files/Adjustment%20of%20Futures%20and%20Options%20contracts%20Calculator.xlsx`
+(20,114 bytes, SHA-256 `ac79276d12a7f72bc614fa9ea574c6ba12dd54fda811641de4835dadb4544062`).
+CONTEXT §4.2 gives the URL only as `nsearchives.nseindia.com/.../` — four candidate paths were
+tried and this is the one that answered 200; the other three answered 404. Its three sheets
+(BONUS, SPLIT, RIGHTS) are read cell-by-cell by `tests/test_ca_goldens.py`, so the numbers in
+that file cannot drift from the oracle they quote.
