@@ -367,3 +367,99 @@ a synthetic Saturday 2019-06-01 session is `is_trading_day` **False**, `is_stand
 **False**, surfaced in `weekend_sessions`, and `bias_pair(Mon 2019-06-03)` is
 `(Fri 2019-05-31, Thu 2019-05-30)` — the "one whole candle out" the finding warned about is
 gone.
+
+---
+
+## Q-6 · chunk 3 · class A · open · NON-BLOCKING for chunk 3 (BLOCKS rights factors on real events)
+
+**Question.** CONTEXT §4.2's rights factor needs the **issue price S**. NSE's subject states a
+**PREMIUM**, not S. How is S to be obtained?
+
+**Why it is a hole.** CONTEXT §4.2 gives the formula in terms of S:
+
+> Rights A:B at price S, cum-close P → `k = (P−E)/P` where `C = (P−S)·A`, `E = C/(A+B)`
+
+Every rights subject in the three frozen windows carries the premium instead, or nothing at
+all (measured, `tests/fixtures/ca/nse_ca_*.json`):
+
+| symbol | ex-date | subject | what it gives |
+|---|---|---|---|
+| JMCPROJECT | 2016-01-11 | ` Rights 2:7` | ratio only — no price at all |
+| SRPL | 2023-07-06 | `Rights 1:1 @ Premium Rs 1.30/-` | premium |
+| BROOKS | 2023-07-28 | `Rights 1:16 @ Premium Rs 65/-` | premium |
+| HINDWAREAP | 2024-10-25 | `Rights 119:758 @ Premium Rs 218/-` | premium |
+| GEOJITFSL | 2024-10-07 | `Rights 1:6 @ Premium Rs 49/-` | premium |
+
+The natural conversion is `S = face value + premium`. The obstacle is that the row's own
+`faceVal` field is the face value **as of the query, not as of the event** — proved by
+GREENPLY in the same snapshot: its January-2016 rows show `faceVal = 1`, the value AFTER the
+5→1 split those very rows announce. Using it would silently mis-price any rights issue on a
+symbol that later split. BSE is no help: its 21 rights rows in these windows all read
+`Right Issue of Equity Shares`, with neither ratio nor price, and Yahoo is blind to rights
+(CONTEXT §4.2 says so).
+
+**Why it matters.** A wrong S moves k, and k multiplies a whole pre-ex history. With the
+2016 JMCPROJECT numbers, an S that is off by one rupee moves k in the third decimal — which
+is larger than the tick on most of the universe.
+
+**What this session did meanwhile.** Did NOT guess. `factor_for` **requires**
+`rights_issue_price_paise` and raises, naming this item, when it is absent;
+`build_factor_table` collects the event as *pending* with the reason instead of returning a
+factor. Nothing silently becomes `k = 1`. The FORMULA itself is fully tested — against the
+architect's hand-derived case (1:4 @ 200 on P = 300 → k = 280/300) and against NSE's own
+calculator XLSX (17:74 @ 65 on P = 107.10 → k = 0.9265654979940694, matched to the last digit
+the file holds), both in `tests/test_ca_goldens.py`.
+
+**Options for the architect:**
+(a) rule `S = face value + premium`, and name the source for the face value **as of the
+ex-date** (the bhavcopy carries no face value; the archive-era CSV does not either);
+(b) source S from the rights circular / offer document per event (manual, but there are few
+rights issues on F&O underlyings);
+(c) rule that rights issues are treated like demergers — no factor, suppress the bias pair
+across the ex-date — which is defensible for a strategy that only ever needs two consecutive
+candles;
+(d) rule that a rights issue on an F&O-universe symbol is excluded and counted (CONTEXT
+§7-E3-style), with the occurrences listed in the backtest report.
+
+Chunk 4 (bias) is the first session that consumes factors on real dates; the first rights
+issue on an F&O underlying inside the backtest window is the first thing that needs this.
+
+---
+
+## Q-7 · chunk 3 · class A · open · NON-BLOCKING for chunk 3 (BLOCKS automatic special-dividend classification)
+
+**Question.** CONTEXT §4.2 tests the 2% dividend threshold against the **pre-announcement
+close**. Which date is "the announcement", and where does it come from?
+
+**Why it is a hole.** CONTEXT §4.2 is explicit and deliberate about the two reference prices:
+
+> NOTE: the 2% threshold is tested against the PRE-ANNOUNCEMENT close, but the factor k uses
+> the CUM-date close — two different reference prices, intentionally, per NSE's own rule
+
+The corporate-actions endpoint carries `exDate`, `recDate`, `bcStartDate`/`bcEndDate` and
+`ndStartDate`/`ndEndDate` — and a `caBroadcastDate` field that is **null on every row of all
+three frozen windows (438 rows, 2016 / 2023 / 2024)**. So the announcement date is not in the
+data this project holds, and neither BSE's CSV nor Yahoo carries it.
+
+**Why it matters.** The threshold decides between `k = 1` and `k = 1 − D/P_cum`. Getting it
+wrong in the ordinary direction leaves a real gap unadjusted; in the special direction it
+invents one. It is the only row of CONTEXT §4.2's table whose classification is not
+determined by the subject string alone.
+
+**What this session did meanwhile.** Did NOT guess. `factor_for` requires
+`pre_announcement_close_paise` for every dividend and raises, naming this item, when it is
+absent — a dividend never quietly becomes `k = 1`, which is what "no adjustment" looks like
+from the outside. Both branches of the rule are tested with supplied prices, including the
+boundary (exactly 2% is SPECIAL, per the spec's `<` / `≥` wording).
+
+**Options for the architect:**
+(a) rule a proxy for the announcement date (e.g. `bcStartDate`, or ex-date minus N trading
+days) and record N in CONTEXT §4.2;
+(b) rule that the threshold is tested against the **cum-date** close as well, collapsing the
+two reference prices into one — simpler, at the cost of the deliberate NSE distinction;
+(c) source announcement dates from NSE's separate corporate-announcements feed (a different
+endpoint, not yet researched, and a second daily pull);
+(d) rule a fixed rupee/percentage cut in the spec that needs no announcement date at all.
+
+Ordinary dividends are the overwhelming majority (240 of 343 rows in the July-2023 window
+alone), so whatever is ruled here runs on almost every symbol in the backtest.
