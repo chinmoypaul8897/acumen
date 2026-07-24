@@ -36,9 +36,16 @@ FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 #: CONTEXT 4.1 endpoints, taken once during the chunk-1 build so the whole calendar/universe
 #: suite runs offline (CLAUDE.md rule 3: fixtures under tests/fixtures/ are FROZEN).
 #:
+#: chunk 2 (2026-07-24): three DERIVED fixtures -- whole lines lifted byte-for-byte out of
+#: real bhavcopy files, plus the outcome ledger of this session's bounded-window ingest. Each
+#: source file's own SHA-256, its URL and the trimming rule are recorded in
+#: tests/fixtures/PROVENANCE.md; committing the full 190 KB ZIPs per date was the alternative.
+#:
 #: Unlike poc/data there is no exact-set assertion here: later chunks legitimately add
 #: fixtures. What may never happen is one of these files CHANGING.
 FROZEN_FIXTURES_SHA256: dict[str, str] = {
+    "bhavcopy_archive_sample.csv": "40d0281ab08a84c25d5ae27237ab3769875e97bc2d29a7f698652799645ed185",
+    "bhavcopy_udiff_sample.csv": "bd477ba42278705a9cde9d7807d04891d076bca0fb974ec9ccc1b6632177c6cd",
     "holidays_2026.json": "798c545acc5351eb9ed84f353c1fcc665a26967426e3761b7097e7f3c7042424",
     "tick_sizes.json": "61488842568ee632b528dfa3c5f6be44a771520a2aa02cd63cb76b7c0ee146b0",
     "universe_snapshot.json": "3eaa84baf758421fa57754c28dc32dd0a5bb864f8e02ccbab237ed05ef13f912",
@@ -149,3 +156,32 @@ def test_the_endpoint_snapshots_are_verbatim_payloads() -> None:
         "evening_session",
         "Sr_no",
     }
+
+
+def test_the_derived_bhavcopy_fixtures_kept_nses_own_header() -> None:
+    """A DERIVED fixture is only evidence if the lines it kept were not touched.
+
+    Whole rows were dropped and nothing else -- so the header must still be NSE's, verbatim,
+    including the trailing comma the old archive format ends its header with. A prettified
+    or renamed column would make the parser test prove something about us, not about NSE.
+    """
+    udiff = (FIXTURES_DIR / "bhavcopy_udiff_sample.csv").read_text(encoding="utf-8")
+    assert udiff.splitlines()[0] == (
+        "TradDt,BizDt,Sgmt,Src,FinInstrmTp,FinInstrmId,ISIN,TckrSymb,SctySrs,XpryDt,"
+        "FininstrmActlXpryDt,StrkPric,OptnTp,FinInstrmNm,OpnPric,HghPric,LwPric,ClsPric,"
+        "LastPric,PrvsClsgPric,UndrlygPric,SttlmPric,OpnIntrst,ChngInOpnIntrst,TtlTradgVol,"
+        "TtlTrfVal,TtlNbOfTxsExctd,SsnId,NewBrdLotQty,Rmks,Rsvd1,Rsvd2,Rsvd3,Rsvd4"
+    )
+
+    archive = (FIXTURES_DIR / "bhavcopy_archive_sample.csv").read_text(encoding="utf-8")
+    assert archive.splitlines()[0] == (
+        "SYMBOL,SERIES,OPEN,HIGH,LOW,CLOSE,LAST,PREVCLOSE,TOTTRDQTY,TOTTRDVAL,TIMESTAMP,"
+        "TOTALTRADES,ISIN,"
+    )
+
+
+def test_every_frozen_fixture_is_documented_in_provenance() -> None:
+    """A frozen file whose origin nobody wrote down is not evidence, it is furniture."""
+    provenance = (FIXTURES_DIR / "PROVENANCE.md").read_text(encoding="utf-8")
+    for name in FROZEN_FIXTURES_SHA256:
+        assert f"`{name}`" in provenance, f"{name} is pinned but not documented"

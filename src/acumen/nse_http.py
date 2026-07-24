@@ -68,6 +68,17 @@ class NseFetchError(RuntimeError):
     """An NSE endpoint could not be fetched, or its cached copy is unusable."""
 
 
+class NseNotFoundError(NseFetchError):
+    """The server answered 404: the resource is definitively absent, not transiently down.
+
+    Separated from its parent because chunk 2 has to tell those two cases apart and must
+    never confuse them: a 404 from the bhavcopy archive is evidence that NSE published no
+    file for that date (a non-trading day), while ANY other failure is an error to retry
+    later. Treating a failed fetch as a holiday would silently delete trading days from the
+    derived calendar (QUESTIONS.md Q-3, safeguard 1).
+    """
+
+
 def new_session() -> requests.Session:
     """Return a :class:`requests.Session` with the browser-like headers NSE requires."""
     session = requests.Session()
@@ -83,6 +94,14 @@ def new_session() -> requests.Session:
     return session
 
 
+class _Retry(Exception):
+    """A decoded body that is not usable yet -- retry rather than accept it."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
 def fetch_json(
     url: str,
     *,
@@ -90,6 +109,7 @@ def fetch_json(
     timeout: float = DEFAULT_TIMEOUT,
     max_attempts: int = DEFAULT_MAX_ATTEMPTS,
     sleep: Callable[[float], None] = time.sleep,
+    min_interval: float = MIN_SECONDS_BETWEEN_REQUESTS,
 ) -> Any:
     """GET ``url`` and return its decoded JSON, retrying transient failures.
 
@@ -99,10 +119,77 @@ def fetch_json(
         timeout: per-request timeout in seconds.
         max_attempts: total attempts, including the first.
         sleep: injected for tests; the throttle and backoff call it.
+        min_interval: minimum seconds between outbound requests, process-wide.
 
     Raises:
+        NseNotFoundError: the server answered 404.
         NseFetchError: every attempt failed. The message names the URL and the last reason
             -- never a partial body, never a credential (there are none on these endpoints).
+    """
+
+    def _decode(response: Any) -> Any:
+        try:
+            return response.json()
+        except ValueError:
+            # HTTP 200 carrying a bot-shield HTML page: a retry usually clears it.
+            raise _Retry("HTTP 200 whose body is not JSON") from None
+
+    return _fetch(
+        url,
+        decode=_decode,
+        session=session,
+        timeout=timeout,
+        max_attempts=max_attempts,
+        sleep=sleep,
+        min_interval=min_interval,
+    )
+
+
+def fetch_binary(
+    url: str,
+    *,
+    session: requests.Session | None = None,
+    timeout: float = DEFAULT_TIMEOUT,
+    max_attempts: int = DEFAULT_MAX_ATTEMPTS,
+    sleep: Callable[[float], None] = time.sleep,
+    min_interval: float = MIN_SECONDS_BETWEEN_REQUESTS,
+) -> bytes:
+    """GET ``url`` and return its raw body, retrying transient failures.
+
+    The sibling of :func:`fetch_json` for the published FILES of CONTEXT 4.1 -- the
+    bhavcopy ZIPs, which are downloads rather than API calls and therefore get their own
+    (slower) ``min_interval``.
+
+    Raises:
+        NseNotFoundError: the server answered 404 -- for a bhavcopy that means "NSE
+            published no file for this date", which is a real answer, not a failure.
+        NseFetchError: every attempt failed.
+    """
+    return _fetch(
+        url,
+        decode=lambda response: response.content,
+        session=session,
+        timeout=timeout,
+        max_attempts=max_attempts,
+        sleep=sleep,
+        min_interval=min_interval,
+    )
+
+
+def _fetch(
+    url: str,
+    *,
+    decode: Callable[[Any], Any],
+    session: requests.Session | None,
+    timeout: float,
+    max_attempts: int,
+    sleep: Callable[[float], None],
+    min_interval: float,
+) -> Any:
+    """The shared retry loop behind :func:`fetch_json` and :func:`fetch_binary`.
+
+    One loop, so the CONTEXT 4.3 retry policy (transient bursts are NORMAL; never report a
+    failure as "no data") cannot drift between the JSON path and the download path.
     """
     if max_attempts < 1:
         raise NseFetchError(f"max_attempts must be >= 1, got {max_attempts}.")
@@ -112,7 +199,7 @@ def fetch_json(
     warmed_up = False
 
     for attempt in range(1, max_attempts + 1):
-        _throttle(sleep)
+        _throttle(sleep, min_interval)
         try:
             response = http.get(url, timeout=timeout)
         except requests.RequestException as exc:
@@ -120,10 +207,9 @@ def fetch_json(
         else:
             if response.status_code == 200:
                 try:
-                    return response.json()
-                except ValueError:
-                    # HTTP 200 carrying a bot-shield HTML page: a retry usually clears it.
-                    reason = "HTTP 200 whose body is not JSON"
+                    return decode(response)
+                except _Retry as retry:
+                    reason = retry.reason
             elif response.status_code in _RETRYABLE_STATUS:
                 reason = f"HTTP {response.status_code}"
                 if response.status_code in (401, 403) and not warmed_up:
@@ -131,6 +217,11 @@ def fetch_json(
                     # and would double our request count against a site we pull once a day.
                     warmed_up = True
                     _warm_up_cookies(http, timeout=timeout, sleep=sleep)
+            elif response.status_code == 404:
+                raise NseNotFoundError(
+                    f"{url} returned HTTP 404; not a transient status, so no retry was "
+                    "attempted. The resource is absent, which is not the same as a failure."
+                )
             else:
                 raise NseFetchError(
                     f"{url} returned HTTP {response.status_code}; not a transient status, "
@@ -142,8 +233,8 @@ def fetch_json(
 
     raise NseFetchError(
         f"Could not fetch {url} after {max_attempts} attempts (last reason: {reason}). "
-        "This is an ERROR, not an empty result -- callers must not continue with an empty "
-        "universe or an empty holiday list."
+        "This is an ERROR, not an empty result -- an empty universe, an empty holiday list "
+        "and a missing bhavcopy day are all different from a fetch that failed."
     )
 
 
@@ -266,9 +357,16 @@ def cached_json_fetch(
     return fetch_json(url, session=session, sleep=sleep)
 
 
-def _throttle(sleep: Callable[[float], None]) -> None:
-    """Keep outbound requests at or below ~2 per second, process-wide."""
-    wait = MIN_SECONDS_BETWEEN_REQUESTS - (time.monotonic() - _last_request_at[0])
+def _throttle(
+    sleep: Callable[[float], None], min_interval: float = MIN_SECONDS_BETWEEN_REQUESTS
+) -> None:
+    """Keep outbound requests at or below one per ``min_interval`` seconds, process-wide.
+
+    The timestamp is shared by every caller on purpose: the JSON endpoints and the bhavcopy
+    archive live on the same infrastructure, so a fast JSON pull must not slip in beside a
+    paced download and double our real request rate.
+    """
+    wait = min_interval - (time.monotonic() - _last_request_at[0])
     if wait > 0:
         sleep(wait)
     _last_request_at[0] = time.monotonic()
