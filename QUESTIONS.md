@@ -14,7 +14,7 @@ implementation choice within spec (recorded in PROGRESS.md `decisions:`, not her
 
 ---
 
-## Q-1 · chunk 0 · class A · **RESOLVED — execution scheduled chunk 1** · NON-BLOCKING
+## Q-1 · chunk 0 · class A · **CLOSED (executed chunk 1, 2026-07-24)** · NON-BLOCKING
 
 **Question.** Where do the four pre-existing PoC-era root files belong?
 `RESULTS.md`, `acumen_poc.md`, `TradingView_POC_Calibration_Guide.docx`, `requirements.txt`.
@@ -45,9 +45,15 @@ performs the move and marks this item closed; chunk 2 must read `RESULTS.md` fro
 Moving `requirements.txt` under `poc/` also settles the drift risk noted above: it becomes a
 PoC-era artifact, and `pyproject.toml` is the single source of truth for dependencies.
 
+**CLOSED by the chunk-1 build session (2026-07-24).** All four files moved with `git mv`
+(rename detection 100% on all four — bytes unchanged): `RESULTS.md`, `acumen_poc.md`,
+`TradingView_POC_Calibration_Guide.docx` → `docs/`; `requirements.txt` → `poc/`. Nothing in
+the test suite or in `src/` referenced any of the four paths, so no code change was needed;
+`pyproject.toml`'s only mention is a prose comment. **Chunk 2 must read `docs/RESULTS.md`.**
+
 ---
 
-## Q-2 · chunk 0 review · class A · open · NON-BLOCKING (blocks nothing before chunk 6)
+## Q-2 · chunk 0 review · class A · **CLOSED (ruling (a) executed chunk 1, 2026-07-24)** · NON-BLOCKING
 
 **Question.** Where do the per-symbol `tickSize` values used by fixture F7 live, and are
 they frozen with the CSVs?
@@ -91,3 +97,19 @@ session that needs the answer (chunk 5A builds the instrument-master loader).
 (b) have F7 call chunk 5A's instrument-master loader against the cached master, and document
 that the cache must be retained;
 (c) rule that the values above, recorded in CONTEXT §8, are themselves the frozen input.
+
+**ARCHITECT'S RULING (relayed to the chunk-1 build session, 2026-07-24): option (a) —
+frozen fixture; production code reads the instrument master.**
+
+**CLOSED by the chunk-1 build session (2026-07-24).** Created `tests/fixtures/tick_sizes.json`
+with the five measured ticks in RUPEES (already divided by 100 per CONTEXT §4.3), carrying a
+`_note` field that states the constraint in the file itself:
+
+> "FROZEN F7 calibration tick sizes (rupees). Tests only - production code must always read
+> the instrument master (CONTEXT 3.3)."
+
+Scope of the ruling, so chunk 6 cannot misread it: this fixture is a **test input only**. It
+does not license a tick lookup table anywhere in `src/` — CONTEXT §3.3's "NEVER hardcode
+0.05" and §4.3's instrument-master rule are unchanged, and chunk 5A still owns the real
+per-symbol `tick_size` loader. F7 becomes fully offline and frozen; a future NSE tick reform
+cannot silently move a calibrated fixture.

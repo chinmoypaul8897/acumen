@@ -90,22 +90,39 @@ def test_archived_poc_scripts_are_present() -> None:
     assert expected <= {p.name for p in poc_dir.glob("*.py")}
 
 
-def test_project_python_sources_are_ascii_only() -> None:
+def _runtime_source_files() -> list[Path]:
+    """Every file the running program parses: Python sources plus `config.yaml`.
+
+    Chunk-0 decision B7 named `*.py` AND `config.yaml`, but the original test walked only
+    `src/` and `tests/` -- REVIEW_0 finding F3. `config.yaml` is included here so the
+    guarantee matches the recorded decision.
+    """
+    files = sorted((REPO_ROOT / "src").rglob("*.py"))
+    files += sorted((REPO_ROOT / "tests").rglob("*.py"))
+    files.append(REPO_ROOT / "config.yaml")
+    return files
+
+
+def test_project_runtime_sources_are_ascii_only() -> None:
     """The operator's console is cp1252.
 
     A traceback whose source line carries a rupee or section sign raises UnicodeEncodeError
     while it is being printed, hiding the real error at the worst possible moment. Spec
-    symbols belong in the markdown documents, not in code we will have to print.
+    symbols belong in the markdown documents, not in code we will have to print. The same
+    applies to `config.yaml`, whose lines the loader can echo in a ConfigError message.
     """
     offenders = []
-    for source in sorted((REPO_ROOT / "src").rglob("*.py")) + sorted(
-        (REPO_ROOT / "tests").rglob("*.py")
-    ):
+    for source in _runtime_source_files():
         text = source.read_text(encoding="utf-8")
         for lineno, line in enumerate(text.splitlines(), start=1):
             if not line.isascii():
                 offenders.append(f"{source.relative_to(REPO_ROOT)}:{lineno}")
     assert not offenders, f"non-ASCII source lines: {offenders}"
+
+
+def test_ascii_guard_actually_covers_config_yaml() -> None:
+    """REVIEW_0 F3: the guard must include config.yaml, not just the Python sources."""
+    assert REPO_ROOT / "config.yaml" in _runtime_source_files()
 
 
 def test_env_file_is_ignored_by_git() -> None:

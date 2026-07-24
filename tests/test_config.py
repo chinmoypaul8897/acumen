@@ -3,6 +3,12 @@
 CONTEXT 9 OPEN-1 says "code takes risk_per_trade as required config; no default". The
 single most valuable assertion in this chunk is that the loader refuses to hand a number to
 a simulation path while the trader has not given one.
+
+Every test that reads the repository's own config.yaml passes ``include_env=False``: a test
+suite has no reason to pull the operator's live credentials into ``os.environ``
+(REVIEW_0 finding F4). The one deliberate exception is
+``test_env_values_never_reach_the_config_object``, whose whole subject IS the
+``include_env=True`` path.
 """
 
 from __future__ import annotations
@@ -41,25 +47,25 @@ def _write_config(tmp_path: Path, body: str) -> Path:
 
 
 def test_repo_config_loads() -> None:
-    config = load_config()
+    config = load_config(include_env=False)
     assert isinstance(config, Config)
     assert config.source == DEFAULT_CONFIG_PATH
 
 
 def test_repo_config_keeps_risk_per_trade_required_empty() -> None:
     """OPEN-1 is open: the committed config must carry no amount at all."""
-    assert load_config().risk_per_trade is None
+    assert load_config(include_env=False).risk_per_trade is None
 
 
 def test_repo_config_carries_the_context_row_size() -> None:
     """Row Size N comes from config, never a hardcoded constant (CONTEXT 3.3, OPEN-2)."""
-    row_size = load_config().row_size
+    row_size = load_config(include_env=False).row_size
     assert isinstance(row_size, int)
     assert row_size == 24
 
 
 def test_repo_config_paths_resolve_absolute_under_the_repo() -> None:
-    paths = load_config().paths
+    paths = load_config(include_env=False).paths
     assert set(paths) == {"data_dir", "cache_dir", "logs_dir"}
     for name, resolved in paths.items():
         assert resolved.is_absolute(), name
@@ -70,7 +76,7 @@ def test_repo_config_paths_resolve_absolute_under_the_repo() -> None:
 
 
 def test_simulation_is_blocked_while_risk_per_trade_is_null() -> None:
-    config = load_config()
+    config = load_config(include_env=False)
     with pytest.raises(ConfigError) as excinfo:
         config.require_risk_per_trade()
     message = str(excinfo.value)
@@ -164,7 +170,7 @@ def test_absolute_path_values_are_kept_as_given(tmp_path: Path) -> None:
 
 def test_unknown_path_key_raises_a_clear_error() -> None:
     with pytest.raises(ConfigError, match="Unknown path key"):
-        load_config().path("nope_dir")
+        load_config(include_env=False).path("nope_dir")
 
 
 # --- secrets never leak (CLAUDE.md rule 4) ---------------------------------------------

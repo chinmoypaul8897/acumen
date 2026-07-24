@@ -1,0 +1,8 @@
+{
+  "_note": "FROZEN F7 calibration tick sizes (rupees). Tests only - production code must always read the instrument master (CONTEXT 3.3).",
+  "TCS": 0.10,
+  "RELIANCE": 0.10,
+  "HDFCBANK": 0.05,
+  "DIXON": 1.00,
+  "MANAPPURAM": 0.05
+}
