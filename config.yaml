@@ -1,0 +1,23 @@
+# config.yaml -- Acumen Intelligence run configuration (non-secret; committed).
+#
+# Credentials live in .env and are NEVER printed, logged or committed (CLAUDE.md rule 4).
+# Loaded by src/acumen/config.py. Every value below is a SPEC value with its CONTEXT.md
+# citation -- changing one requires an architect spec change, never a session decision.
+# ASCII-only on purpose (the operator's console is cp1252) -- see src/acumen/config.py.
+
+# INR risk per trade. Sizing is qty = floor(risk_per_trade / (entry - SL)) -- CONTEXT 3.5.
+# REQUIRED-EMPTY: OPEN-1 (CONTEXT 9) is still pending from the trader, and CONTEXT 9 states
+# "code takes risk_per_trade as required config; no default". While this is null, every
+# simulation / position-sizing path raises ConfigError via Config.require_risk_per_trade().
+risk_per_trade: null
+
+# Volume-profile Row Size N -- CONTEXT 3.3. 24 is PROVISIONAL (it matched the 22-Jul-2026
+# calibration); the trader's own setting is OPEN-2 (CONTEXT 9).
+row_size: 24
+
+# Filesystem placeholders. Relative values are resolved against this file's directory by
+# the loader. All three are gitignored (CLAUDE.md: never commit data/, cache/, artifacts).
+paths:
+  data_dir: data      # Parquet stores (daily + 1-min) -- CONTEXT 6
+  cache_dir: cache    # downloaded instrument master / raw API payloads
+  logs_dir: logs      # run logs
