@@ -8,7 +8,7 @@ No chunk may start while a dependency is not `reviewed-PASS` (plan.md §2).
 
 chunk 0: reviewed-PASS
 chunk 1: reviewed-PASS
-chunk 2: built
+chunk 2: reviewed-PASS
 chunk 3: todo
 chunk 4: todo
 chunk 5A: todo
