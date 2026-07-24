@@ -20,6 +20,21 @@ state-for-next-session: <exact current situation + the single next action>
 
 ---
 
+## [2026-07-24 19:09] chunk 0 · review · done
+scope: fresh code-review of chunk 0 (code_reviewer persona) — reran the suite, verified the frozen fixtures two independent ways, judged B1-B12, wrote docs/reviews/REVIEW_0.md. VERDICT PASS.
+files: created docs/reviews/REVIEW_0.md, tests/test_fixture_integrity.py; edited QUESTIONS.md (Q-1 marked resolved per architect ruling; Q-2 raised), STATUS.md, PROGRESS.md. NO file under review was modified; no file was moved.
+tests: 91 passed / 0 failed (60 builder + 31 added by this review). Builder's 60 reran green from a clean state (.pytest_cache and all __pycache__ deleted first). Fixtures touched: NONE — all 28 poc/data CSVs hash identically to their git HEAD blobs, and the new digest test was mutation-tested against temp COPIES only.
+decisions:
+  - Reviewer-added test file kept (persona process step 4): tests/test_fixture_integrity.py pins SHA-256 per fixture, the exact 28-file set, 375-candle length and CRLF preservation. Rationale: the build asserted only that fixtures EXIST, so CLAUDE.md rule 3 had no tripwire — a later session could silently regenerate one and stay green.
+  - Fixture integrity was established by recomputation, not by trusting the builder's digest: an independent reimplementation of the CONTEXT 3.3 row math reproduces all 25 poc_prorata values in volume_poc_summary.csv exactly, including all five CONTEXT 8 F7 anchors. Evidence, not assertion.
+  - The verification scripts were written to the session scratchpad, not the repo — chunk 6 owns the POC engine and a review may not pre-build it.
+questions: Q-1 marked "RESOLVED — execution scheduled chunk 1" with the architect's ruling (option (a): three documents to docs/, requirements.txt to poc/) recorded in full; NO file moved by this session. Q-2 RAISED (class A, non-blocking, first needed at chunk 6): CONTEXT 8 F7 calls the poc/data CSVs "the authoritative input", but recomputing the POC also needs the per-symbol tickSize, which lives nowhere in the repo (only the gitignored 35 MB cache/scrip_master.json). Measured values recorded in Q-2 so they survive cache deletion: TCS 0.10, RELIANCE 0.10, HDFCBANK 0.05, DIXON 1.00, MANAPPURAM 0.05.
+gate: n/a
+status-ledger: chunk 0: reviewed-PASS
+state-for-next-session: Chunk 0 is reviewed-PASS at tag chunk0-pass; python -m pytest is green (91/0) from a bare clone. Seven findings are in docs/reviews/REVIEW_0.md — all LOW or INFO, none blocking, none requiring a fix session: F1 (builder's aggregate digest is not reproducible; superseded by the new per-file digest test), F2 (fixed by this review), F3 (B7's ASCII claim is broader than the test that enforces it), F4 (six config tests load the real .env; suggest include_env=False), F5/F6/F7 are forward-looking notes for chunks 5A and 6. NEXT ACTION: build chunk 1 (universe & calendar) — and, per the architect's Q-1 ruling, that same session moves RESULTS.md, acumen_poc.md and TradingView_POC_Calibration_Guide.docx to docs/ and requirements.txt to poc/, then marks Q-1 closed.
+
+---
+
 ## [2026-07-24 18:19] chunk 0 · build · done
 scope: turned the PoC folder into the project repo — CONTEXT §6 layout, pinned pyproject, config loader with risk_per_trade required-empty, ledgers, git history.
 files: created .gitattributes, pyproject.toml, config.yaml, src/acumen/__init__.py, src/acumen/config.py, tests/test_smoke.py, tests/test_config.py, tests/fixtures/.gitkeep, docs/reviews/.gitkeep, PROGRESS.md, QUESTIONS.md, STATUS.md; rewrote .gitignore; moved common.py + poc1..poc5_*.py → poc/ and data/*.csv (28) → poc/data/; untouched: CLAUDE.md, CONTEXT.md, plan.md, personas/*, RESULTS.md, acumen_poc.md, TradingView_POC_Calibration_Guide.docx, requirements.txt, .env, cache/.

@@ -6,7 +6,7 @@ Every session updates its own chunk's line before it ends (CLAUDE.md end-of-sess
 States: `todo` | `built` | `reviewed-PASS` | `gate-closed(<evidence path>)`
 No chunk may start while a dependency is not `reviewed-PASS` (plan.md §2).
 
-chunk 0: built
+chunk 0: reviewed-PASS
 chunk 1: todo
 chunk 2: todo
 chunk 3: todo
