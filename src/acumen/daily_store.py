@@ -15,6 +15,13 @@ make the stored history depend on the day the store happened to be built, and wo
 throw away the rows chunk 3's corporate-action cross-checks may need. The universe filter is
 applied on the way OUT, by the caller passing the symbols it wants.
 
+**The instrument is the EQUITY series** (QUESTIONS.md Q-4, the architect's ruling). NSE
+publishes the same symbol under several series on one date -- NTPC carried six on 2018-01-01
+-- so a symbol alone is not a candle key. :meth:`DailyStore.daily` therefore selects the
+whitelist series :data:`INSTRUMENT_SERIES` and ignores every other one; the rows themselves
+stay in the store. Series that are neither the instrument nor one of the families the ruling
+names are reported by :meth:`DailyStore.series_report`, never chosen.
+
 **The outcome ledger is the calendar** (QUESTIONS.md Q-3, architect's ruling). Every date
 attempted is recorded as ``file-present`` / ``confirmed-404`` / ``error``; a date is only
 settled by the first two, so an interrupted or unlucky run resumes exactly where it stopped
@@ -91,6 +98,33 @@ LEDGER_SCHEMA: pa.Schema = pa.schema(
         pa.field("attempted_at", pa.timestamp("s")),
     ]
 )
+
+#: QUESTIONS.md Q-4, the architect's ruling, verbatim: "the instrument is the equity series.
+#: daily() selects per symbol-date by whitelist EQ, else BE, else BZ (same equity in
+#: trade-for-trade settlement -- matches the trader's TradingView chart)."
+#:
+#: This is the ONLY series choice this repo is allowed to make, which is why it lives in one
+#: constant rather than as a default argument anywhere. The order is the ruling's precedence
+#: order; it never actually decides anything, because two whitelist series on one symbol-date
+#: raise instead of being ranked (the ruling's own safety net -- see :func:`select_instrument`).
+INSTRUMENT_SERIES: tuple[str, ...] = ("EQ", "BE", "BZ")
+
+#: Series families the ruling names as "never the instrument" and which are therefore
+#: EXPECTED in the store: ``N*`` listed debt, ``P*`` partly-paid shares, ``BL`` block deals.
+#: Anything outside these and the whitelist is UNKNOWN and gets surfaced (never chosen) --
+#: the ruling's last clause. Matched on the family, not on an enumerated list, because NSE
+#: mints new codes within a family freely (NTPC alone carried N4/N6/N7/NB/NC/ND).
+_DEBT_PREFIX: str = "N"
+_PARTLY_PAID_PREFIX: str = "P"
+_BLOCK_DEAL_SERIES: str = "BL"
+
+#: Saturday, Sunday. QUESTIONS.md Q-5: a bhavcopy published on one of these dates is a
+#: non-standard session (CONTEXT 7-E2) -- excluded from trading, counted in the report.
+_WEEKEND_DAYS: frozenset[int] = frozenset({5, 6})
+
+SERIES_INSTRUMENT: str = "instrument"
+SERIES_KNOWN_OTHER: str = "known-non-instrument"
+SERIES_UNKNOWN: str = "unknown"
 
 _PRICE_COLUMNS: tuple[str, ...] = (
     "open_paise",
@@ -219,23 +253,36 @@ class DailyStore:
     ) -> pd.DataFrame:
         """RAW daily OHLCV for one symbol over ``[from_date, to_date]``, oldest first.
 
+        One row per trading date: the EQUITY series, selected by the Q-4 whitelist
+        :data:`INSTRUMENT_SERIES`. Every other series NSE published that day (listed debt,
+        partly-paid shares, the block-deal window, anything else) stays in the store and is
+        ignored here -- the architect's ruling, executed.
+
         Prices are integer paise; no corporate-action adjustment has been applied
         (CONTEXT 4.1/4.2). The frame is empty (with the full column set) when the store holds
-        nothing for that symbol in that range -- an empty range is a legitimate answer here,
-        unlike an empty universe.
+        no equity row for that symbol in that range. That is a legitimate ANSWER, not an
+        error: it is what a symbol whose equity had not listed yet looks like (IRFC was
+        debt-only until 2023), and it is why a symbol's history starts at its first equity
+        row.
 
         Args:
             symbol: the ticker, case-insensitive.
             from_date: inclusive start.
             to_date: inclusive end.
-            series: keep only this NSE series (e.g. "EQ"). ``None`` keeps every series.
+            series: keep only this NSE series, bypassing the whitelist entirely (the escape
+                hatch for a caller that genuinely wants a non-instrument series, e.g. an
+                audit of the block-deal rows). ``None`` applies the Q-4 selection.
 
         Raises:
-            DailyStoreError: the same symbol appears twice on one date. That means several
-                series carry it, and silently returning two rows for one day would corrupt
-                every downstream candle sequence -- pass ``series=`` to disambiguate.
+            DailyStoreError: TWO whitelist series carry the symbol on one date. The ruling
+                calls for a loud failure rather than a ranking, because a symbol trading
+                simultaneously as EQ and BE would mean the whitelist itself is wrong -- and
+                silently returning two candles for one day corrupts the bias pair
+                (CONTEXT 3.2).
         """
         frame = self.frame([symbol], from_date, to_date, series=series)
+        if series is None:
+            frame = _select_instrument_rows(frame, symbol)
         duplicated = frame["trade_date"].duplicated(keep=False)
         if bool(duplicated.any()):
             clashes = frame.loc[duplicated, ["trade_date", "series"]]
@@ -245,6 +292,42 @@ class DailyStore:
                 "two candles for one day would corrupt the bias pair (CONTEXT 3.2)."
             )
         return frame.reset_index(drop=True)
+
+    def series_report(
+        self, symbols: Iterable[str] | None, from_date: date, to_date: date
+    ) -> pd.DataFrame:
+        """Every series seen per symbol over a range, classified (QUESTIONS.md Q-4).
+
+        The ruling's last clause made queryable: "Unknown series encountered on F&O-universe
+        symbols must be surfaced in the backfill/coverage report." Pass the F&O universe as
+        ``symbols`` and read the ``kind`` column -- :data:`SERIES_UNKNOWN` rows are the ones
+        nobody has ruled on. Nothing here decides anything; an unknown series is reported and
+        still ignored by :meth:`daily`.
+
+        Columns: ``symbol``, ``series``, ``kind``, ``rows``, ``first_date``, ``last_date``.
+        """
+        frame = self.frame(symbols, from_date, to_date)
+        if frame.empty:
+            return pd.DataFrame(
+                columns=["symbol", "series", "kind", "rows", "first_date", "last_date"]
+            )
+        grouped = (
+            frame.groupby(["symbol", "series"], as_index=False)
+            .agg(rows=("trade_date", "size"), first_date=("trade_date", "min"),
+                 last_date=("trade_date", "max"))
+        )
+        grouped["kind"] = [classify_series(value) for value in grouped["series"]]
+        grouped = grouped[["symbol", "series", "kind", "rows", "first_date", "last_date"]]
+        return grouped.sort_values(["symbol", "series"]).reset_index(drop=True)
+
+    def unknown_series(
+        self, symbols: Iterable[str] | None, from_date: date, to_date: date
+    ) -> pd.DataFrame:
+        """Just the :data:`SERIES_UNKNOWN` rows of :meth:`series_report`."""
+        report = self.series_report(symbols, from_date, to_date)
+        if report.empty:
+            return report
+        return report[report["kind"] == SERIES_UNKNOWN].reset_index(drop=True)
 
     def frame(
         self,
@@ -346,7 +429,13 @@ class DailyStore:
         return _to_pandas(_outcomes_to_table(rows))
 
     def coverage_summary(self, from_date: date, to_date: date) -> dict[str, int]:
-        """Counts by outcome over a range, plus ``attempted`` and ``missing``."""
+        """Counts by outcome over a range, plus ``attempted``, ``missing``, ``weekend_session``.
+
+        ``weekend_session`` counts the ``file-present`` dates that fall on a Saturday or
+        Sunday. Under QUESTIONS.md Q-5 those are EXCLUDED from trading days, so the count is
+        an exclusion the report owes the reader (the ruling: "the backtest report counts
+        these exclusions"). A ledger query only -- it opens no month file.
+        """
         frame = self.coverage(from_date, to_date)
         counts = {
             name: int((frame["outcome"] == name).sum())
@@ -354,6 +443,13 @@ class DailyStore:
         }
         counts["attempted"] = int(len(frame))
         counts["missing"] = (to_date - from_date).days + 1 - counts["attempted"]
+        counts["weekend_session"] = sum(
+            1
+            for day, outcome in self.outcomes().items()
+            if from_date <= day <= to_date
+            and outcome.outcome == OUTCOME_PRESENT
+            and day.weekday() in _WEEKEND_DAYS
+        )
         return counts
 
     def pending_dates(self, from_date: date, to_date: date) -> tuple[date, ...]:
@@ -367,6 +463,49 @@ class DailyStore:
             day for day, outcome in self.outcomes().items() if outcome.is_terminal
         }
         return tuple(day for day in date_range(from_date, to_date) if day not in settled)
+
+
+# --- the Q-4 series rule (PURE) ----------------------------------------------------------
+
+
+def classify_series(series: str) -> str:
+    """Classify one NSE series code under the Q-4 ruling. PURE.
+
+    Returns :data:`SERIES_INSTRUMENT` for the whitelist, :data:`SERIES_KNOWN_OTHER` for the
+    families the ruling names as never-the-instrument, and :data:`SERIES_UNKNOWN` for
+    anything else -- which is reported, never chosen.
+    """
+    code = str(series).strip().upper()
+    if code in INSTRUMENT_SERIES:
+        return SERIES_INSTRUMENT
+    if code == _BLOCK_DEAL_SERIES:
+        return SERIES_KNOWN_OTHER
+    if len(code) == 2 and code[0] in (_DEBT_PREFIX, _PARTLY_PAID_PREFIX) and code[1].isalnum():
+        return SERIES_KNOWN_OTHER
+    return SERIES_UNKNOWN
+
+
+def _select_instrument_rows(frame: pd.DataFrame, symbol: str) -> pd.DataFrame:
+    """Keep the one equity row per date (Q-4); drop every non-instrument series.
+
+    Raises:
+        DailyStoreError: a date carries more than one whitelist series.
+    """
+    if frame.empty:
+        return frame
+    chosen = frame.loc[frame["series"].isin(INSTRUMENT_SERIES)]
+    clashing = chosen["trade_date"].duplicated(keep=False)
+    if bool(clashing.any()):
+        clashes = chosen.loc[clashing, ["trade_date", "series"]]
+        raise DailyStoreError(
+            f"{symbol.strip().upper()} carries more than one WHITELIST series on the same "
+            f"date ({clashes.to_dict('records')!r}). QUESTIONS.md Q-4 rules that this must "
+            f"raise loudly rather than be ranked: the whitelist {INSTRUMENT_SERIES!r} is "
+            "meant to hold exactly one equity row per date, so two of them means the rule "
+            "itself is wrong. Pass series= only if you have decided which one is the "
+            "instrument."
+        )
+    return chosen
 
 
 # --- conversions ------------------------------------------------------------------------

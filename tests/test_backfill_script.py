@@ -9,20 +9,20 @@ anything else:
 * **it resumes correctly** -- a settled date is never re-fetched, and an ``error`` date IS,
   because an error means "unknown", not "no file" (QUESTIONS.md Q-3 safeguard 1).
 
-Imported by path because ``scripts/`` is not a package -- which is deliberate: it is an
-entry point, not a library, and nothing under ``src/`` may depend on it.
+Since REVIEW_2 Finding 12 the implementation is a real module inside the package
+(:mod:`acumen.backfill_daily`) and ``scripts/backfill_daily.py`` is a thin launcher, so these
+tests import it normally instead of loading a file by path.
 """
 
 from __future__ import annotations
 
-import importlib.util
-import sys
 from datetime import date
 from pathlib import Path
 from types import ModuleType
 
 import pytest
 
+from acumen import backfill_daily
 from acumen.bhavcopy import OUTCOME_ERROR, OUTCOME_NOT_FOUND, OUTCOME_PRESENT, DateOutcome
 from acumen.daily_store import DailyStore
 
@@ -31,12 +31,7 @@ SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "backfill_daily.py"
 
 @pytest.fixture(scope="module")
 def backfill() -> ModuleType:
-    spec = importlib.util.spec_from_file_location("backfill_daily_under_test", SCRIPT)
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
+    return backfill_daily
 
 
 def _store_with(tmp_path: Path, outcomes: dict[date, str]) -> DailyStore:
@@ -159,3 +154,72 @@ def test_the_summary_warns_that_errors_are_not_holidays(
     out = capsys.readouterr().out
     assert "error          : 1" in out
     assert "NOT holidays" in out
+
+
+def test_the_summary_counts_weekend_sessions_as_exclusions(
+    backfill: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """QUESTIONS.md Q-5: "the backtest report counts these exclusions" -- so the run that
+    ingests one has to say so, or the operator never learns the day was dropped."""
+    saturday = date(2019, 6, 1)
+    assert saturday.weekday() == 5
+    store = _store_with(
+        tmp_path, {date(2019, 5, 31): OUTCOME_PRESENT, saturday: OUTCOME_PRESENT}
+    )
+    backfill._print_summary(store, date(2019, 5, 31), saturday)
+    out = capsys.readouterr().out
+    assert "weekend session: 1" in out
+    assert "EXCLUDED" in out and "Q-5" in out
+
+
+def test_the_summary_surfaces_unknown_series_for_universe_symbols(
+    backfill: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """QUESTIONS.md Q-4's last clause: unknown series are REPORTED, with what carries them.
+
+    The symbol list is passed in explicitly -- a printer that quietly loaded the cached F&O
+    universe would make this section depend on the operator's machine.
+    """
+    from acumen.bhavcopy import FORMAT_UDIFF, Download, parse_bhavcopy
+
+    fixture = (
+        Path(__file__).resolve().parent / "fixtures" / "series_edge_cases_synthetic.csv"
+    ).read_text(encoding="utf-8")
+    rows = parse_bhavcopy(fixture, FORMAT_UDIFF)
+    store = DailyStore.at(tmp_path / "store")
+    for day in sorted({row.trade_date for row in rows}):
+        same_day = tuple(row for row in rows if row.trade_date == day)
+        store.ingest(
+            Download(
+                DateOutcome(
+                    trade_date=day,
+                    outcome=OUTCOME_PRESENT,
+                    source_format=FORMAT_UDIFF,
+                    row_count=len(same_day),
+                ),
+                same_day,
+            )
+        )
+
+    backfill._print_summary(
+        store, date(2026, 7, 14), date(2026, 7, 15), symbols=["ODDSERIES", "DEBTONLY"]
+    )
+    out = capsys.readouterr().out
+    assert "unknown series : 1" in out
+    assert "ODDSERIES" in out and "Q1" in out
+
+    backfill._print_summary(store, date(2026, 7, 14), date(2026, 7, 15))
+    assert "not checked (no cached F&O universe" in capsys.readouterr().out
+
+
+def test_the_launcher_forwards_to_the_packaged_module_and_runs_nothing_on_import() -> None:
+    """REVIEW_2 Finding 12: scripts/ holds a launcher now, not the implementation."""
+    source = SCRIPT.read_text(encoding="utf-8")
+    assert "from acumen.backfill_daily import main" in source
+    assert "def run(" not in source and "def parse_args(" not in source
+    assert source.count("sys.path.insert") == 1, "only the un-installed fallback remains"
+    assert "def _load_main" in source
+    body_before_guard = source.split('if __name__ == "__main__":')[0]
+    assert "sys.path.insert" in body_before_guard.split("def _load_main")[1], (
+        "the insert must live INSIDE the function, not at module level"
+    )

@@ -240,13 +240,19 @@ def test_a_price_that_is_not_a_whole_number_of_paise_is_refused() -> None:
 
 
 def test_the_paise_conversion_does_not_go_through_a_float() -> None:
-    """float("2251.10") * 100 == 225109.99999999997, so a float path would round a guess."""
+    """int(float("2189.20") * 100) == 218919, so a float path would lose a real paisa.
+
+    2189.20 is TCS's own close on 2026-07-15 in this repo's UDiFF fixture (REVIEW_2 Finding
+    4 replaced the original 2251.10 example, which round-trips through a float perfectly and
+    therefore demonstrated nothing).
+    """
+    assert int(float("2189.20") * 100) == 218919, "the float path is short by a paisa"
     text = (
         "SYMBOL,SERIES,OPEN,HIGH,LOW,CLOSE,LAST,PREVCLOSE,TOTTRDQTY,TOTTRDVAL,TIMESTAMP,\n"
-        "TCS,EQ,2251.10,2251.10,2251.10,2251.10,2251.10,2251.10,1,2251.10,01-JAN-2018,\n"
+        "TCS,EQ,2189.20,2189.20,2189.20,2189.20,2189.20,2189.20,1,2189.20,01-JAN-2018,\n"
     )
     row = parse_bhavcopy(text, FORMAT_ARCHIVE)[0]
-    assert row.close_paise == 225110
+    assert row.close_paise == 218920
     assert isinstance(row.close_paise, int)
 
 
@@ -360,9 +366,27 @@ def test_an_error_on_the_second_format_does_not_become_a_404() -> None:
     assert result.outcome.outcome == OUTCOME_ERROR
 
 
-def test_a_corrupt_download_is_an_error_not_a_missing_day() -> None:
+def test_a_bot_shield_page_is_retried_and_then_recorded_as_an_error() -> None:
+    """NSE serves its shield as HTML behind an HTTP 200.
+
+    Since REVIEW_2 Finding 2 that is treated exactly as the JSON path treats an undecodable
+    200: transient, retried to the end of the budget (CONTEXT 4.3 -- access-denied bursts are
+    NORMAL). When the budget runs out the date is an `error`, never a missing day.
+    """
     day = date(2026, 7, 20)
     session = _StubSession({url_for(day, FORMAT_UDIFF): _Response(200, b"<html>nope</html>")})
+
+    result = download_bhavcopy(day, session=session, sleep=_no_sleep, now=NOW)
+    assert result.outcome.outcome == OUTCOME_ERROR
+    assert "HTML page" in (result.outcome.reason or "")
+    assert "after 4 attempts" in (result.outcome.reason or "")
+
+
+def test_a_corrupt_body_that_is_not_html_is_an_error_not_a_missing_day() -> None:
+    """A truncated or garbled ZIP is a damaged download, and it fails fast rather than
+    burning the retry budget -- only the shield's HTML page is treated as transient."""
+    day = date(2026, 7, 20)
+    session = _StubSession({url_for(day, FORMAT_UDIFF): _Response(200, b"PK\x03\x04garbage")})
 
     result = download_bhavcopy(day, session=session, sleep=_no_sleep, now=NOW)
     assert result.outcome.outcome == OUTCOME_ERROR

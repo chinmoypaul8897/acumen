@@ -30,6 +30,10 @@ dev = [
     "pytest==9.1.1",
 ]
 
+# Proper entry points, so no script has to insert src/ into sys.path (REVIEW_2 Finding 12).
+[project.scripts]
+acumen-backfill = "acumen.backfill_daily:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 

@@ -5,7 +5,7 @@ trimmed. Byte digests are pinned in `tests/test_fixture_integrity.py`; this file
 human-readable half. CLAUDE.md rule 3: nothing here is ever regenerated or edited — a change
 to any expected value requires an architect-signed spec change.
 
-Two kinds of fixture live here, and the difference matters when judging evidence:
+Three kinds of fixture live here, and the difference matters when judging evidence:
 
 - **VERBATIM** — the complete, unmodified response of a source. Evidence of what the source
   actually returns.
@@ -13,6 +13,9 @@ Two kinds of fixture live here, and the difference matters when judging evidence
   can be tested offline without committing a 190 KB ZIP per date. Every retained line is
   unmodified; only whole lines were dropped. A derived fixture proves the parser reads real
   bytes correctly; it is **not** evidence about the whole file.
+- **SYNTHETIC** — authored here, in a real file's shape, for a case no committed real file
+  contains. It is evidence about OUR code's behaviour and about nothing else: a synthetic row
+  can never be cited as a fact about NSE.
 
 ---
 
@@ -79,3 +82,23 @@ cases, `2026-07-19` = `confirmed-404` (a Sunday) and `2026-07-20` = `file-presen
 Attempt timestamps and URLs are deliberately NOT copied: they are run metadata, not
 behaviour, and pinning them would make the fixture look like evidence about a moment rather
 than about the calendar.
+
+## chunk 3 prep (2026-07-24)
+
+### `series_edge_cases_synthetic.csv` — **SYNTHETIC**, the Q-4 cases NSE did not supply
+
+Authored for `tests/test_series_selection.py`, in the UDiFF shape (header line copied
+verbatim from `bhavcopy_udiff_sample.csv`, 34 columns). Four invented symbols, none of them
+real, all with ISINs in the unassigned `INE000…` space so nobody can mistake a row here for
+market data:
+
+| symbol | series | why it exists |
+|---|---|---|
+| `TWOWHITE` | `EQ` + `BE` on 2026-07-14 | the Q-4 ruling's "two whitelist series on one symbol-date -> raise loudly". No real bhavcopy in this repo carries it, and it should never occur — which is exactly why the raise needs a test. |
+| `DEBTONLY` | `N1`, `N2` only | "no whitelist series -> empty result, not an error" — the IRFC-in-2018 shape (IRFC itself is not in the DERIVED archive fixture). |
+| `ODDSERIES` | `EQ` + `Q1`, then `BE` | an UNKNOWN series to surface (`Q1`, which the chunk-2 session measured on the real UPL and which the ruling's families do not cover), plus an EQ -> BE move across two days to prove trade-for-trade is the same instrument. |
+
+Prices are round numbers chosen so a wrong pick is obvious in a failure message (the block /
+debt / partly-paid rows sit nowhere near the equity's). **This file is not evidence about NSE
+and must never be cited as such** — every real-data claim in the Q-4 work is measured on the
+two DERIVED bhavcopy fixtures instead.

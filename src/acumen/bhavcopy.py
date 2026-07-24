@@ -13,8 +13,11 @@ Two things here decide whether the rest of the project can trust its own history
 
 **Prices are integer paise.** CLAUDE.md and CONTEXT 7-E11 make paise the internal price
 domain, and the conversion goes through :class:`~decimal.Decimal` from the CSV TEXT, never
-through a float: ``float("2251.10") * 100`` is 225109.99999999997, and rounding that is a
-guess. A price that is not a whole number of paise is an error, not a rounding opportunity.
+through a float: ``int(float("2189.20") * 100)`` is **218919**, a paisa short of TCS's real
+2026-07-15 close, because the exact product falls just below the nearest double. Ten of the
+217 printed price values in this repo's own UDiFF fixture behave that way (REVIEW_2 Finding
+4 measured them). A price that is not a whole number of paise is an error, not a rounding
+opportunity.
 
 **Every date gets an OUTCOME, and the three outcomes are never confused** (QUESTIONS.md Q-3,
 the architect's ruling and its safeguard 1):
@@ -341,8 +344,9 @@ def _optional_text(value: Any) -> str | None:
 def _paise(value: Any, field: str, line: int) -> int:
     """Convert a printed rupee amount to integer paise EXACTLY (CONTEXT 7-E11).
 
-    Via Decimal on the text, never via float: ``float("2251.10") * 100`` is
-    225109.99999999997, and a price that needed rounding would be a silent price change.
+    Via Decimal on the text, never via float: ``int(float("2189.20") * 100)`` is 218919 --
+    TCS's 2026-07-15 close, one paisa light -- and a price that needed rounding would be a
+    silent price change.
     """
     text = _text(value, field, line)
     try:

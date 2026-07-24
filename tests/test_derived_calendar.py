@@ -194,7 +194,7 @@ def test_a_backwards_range_is_refused(ingested: DailyStore) -> None:
         TradingCalendar.from_daily_store_range(ingested, date(2026, 7, 24), date(2026, 7, 13))
 
 
-# --- whole years, and the weekend-session case (QUESTIONS.md Q-4) -----------------------
+# --- whole years, and the weekend-session case (QUESTIONS.md Q-5) -----------------------
 
 
 def _whole_year_ledger(year: int, *, present: set[date]) -> list[DateOutcome]:
@@ -230,29 +230,44 @@ def test_a_complete_year_derives_cleanly(tmp_path: Path) -> None:
     assert len(_trading_days(calendar, date(2019, 1, 1), date(2019, 12, 31))) == len(weekdays)
 
 
-def test_a_saturday_session_is_represented_honestly(tmp_path: Path) -> None:
-    """NSE does hold weekend sessions (budget Saturdays, DR live sessions), and the ruling
-    says a date with a bhavcopy IS a trading day -- so the derived calendar cannot use the
-    weekday rule. It must answer from evidence, and it must make the case VISIBLE.
+def test_q5_a_saturday_session_is_excluded_and_monday_pairs_to_friday_thursday(
+    tmp_path: Path,
+) -> None:
+    """QUESTIONS.md Q-5, the architect's ruling, executed -- and the exact case REVIEW_2
+    Finding 11 measured, turned into a regression test.
 
-    Whether CONTEXT 7-E2 should additionally exclude such a day from trading is QUESTIONS.md
-    Q-4, unanswered: this test pins the representation, not that decision.
+    NSE does hold weekend sessions (budget Saturdays, DR live sessions) and publishes a full
+    bhavcopy for them, so the Q-3 ruling alone would make Saturday 2019-06-01 a trading day
+    and move Monday's CONTEXT 3.2 bias pair by one whole candle. Q-5 excludes it as a
+    non-standard session (CONTEXT 7-E2): not a trading day, not in a bias pair, not traded --
+    but still SURFACED and counted, because an exclusion nobody can see cannot be audited.
+
+    Before the ruling was executed this measured (REVIEW_2 Finding 11):
+        is_trading_day(Sat) True, is_standard_session(Sat) True, pair(Mon) = (Sat, Fri)
     """
     saturday = date(2019, 6, 1)
-    weekdays = {saturday}
+    assert saturday.weekday() == 5
+    present = {saturday}
     current = date(2019, 1, 1)
     while current.year == 2019:
         if current.weekday() < 5:
-            weekdays.add(current)
+            present.add(current)
         current += timedelta(days=1)
 
     store = DailyStore.at(tmp_path)
-    store.record_outcomes(_whole_year_ledger(2019, present=weekdays))
+    store.record_outcomes(_whole_year_ledger(2019, present=present))
 
     calendar = TradingCalendar.from_daily_store(store, [2019])
-    assert calendar.is_trading_day(saturday) is True
-    assert calendar.weekend_sessions == (saturday,)
-    assert calendar.prev_trading_day(date(2019, 6, 3)) == saturday, "the pair must include it"
+    assert calendar.is_trading_day(saturday) is False, "Q-5: excluded even though it traded"
+    assert calendar.is_standard_session(saturday) is False, "CONTEXT 7-E2 applied"
+    assert calendar.weekend_sessions == (saturday,), "still surfaced"
+    assert calendar.excluded_session_counts() == {"weekend-session": 1}, "and counted"
+
+    monday = date(2019, 6, 3)
+    assert calendar.prev_trading_day(monday) == date(2019, 5, 31), "Friday, not the Saturday"
+    assert calendar.bias_pair(monday) == (date(2019, 5, 31), date(2019, 5, 30))
+
+    assert store.coverage_summary(date(2019, 1, 1), date(2019, 12, 31))["weekend_session"] == 1
 
 
 def test_a_published_calendar_reports_no_weekend_sessions() -> None:

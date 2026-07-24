@@ -219,16 +219,47 @@ def test_a_series_filter_disambiguates(store: DailyStore) -> None:
     assert frame.iloc[0].series == "EQ"
 
 
-def test_two_rows_for_one_symbol_day_raise_instead_of_doubling_a_candle(
+def test_the_block_deal_row_is_ignored_and_the_equity_row_is_returned(
     store: DailyStore,
 ) -> None:
     """Real data: NSE published BIOCON twice on 2026-07-14 (EQ and the block-deal series BL).
 
     Returning both would hand chunk 4 two candles for one day and silently corrupt the bias
-    pair. Which series to trade is QUESTIONS.md Q-4 -- so the store refuses to choose.
+    pair. QUESTIONS.md Q-4 is now RULED: the instrument is the equity series, so `daily()`
+    keeps the EQ row and ignores BL -- which stays in the store, queryable by `frame()`.
     """
-    with pytest.raises(DailyStoreError, match="more than one row on the same date"):
-        store.daily("BIOCON", date(2026, 7, 14), date(2026, 7, 14))
+    frame = store.daily("BIOCON", date(2026, 7, 14), date(2026, 7, 14))
+    assert len(frame) == 1
+    assert frame.iloc[0].series == "EQ"
+    assert sorted(store.frame(["BIOCON"], date(2026, 7, 14), date(2026, 7, 14))["series"]) == [
+        "BL",
+        "EQ",
+    ]
+
+
+def test_two_whitelist_series_on_one_symbol_day_raise_loudly(store: DailyStore) -> None:
+    """The Q-4 ruling's safety net: "Two whitelist series on one symbol-date -> raise loudly".
+
+    No real bhavcopy in this repo carries the case -- a symbol trades as EQ or as BE/BZ, not
+    both -- so it is built here from a synthetic frame. If it ever happens for real, the
+    whitelist itself is wrong and a silent ranking would hide that.
+    """
+    rows = [
+        DailyRow(
+            trade_date=date(2026, 7, 14),
+            symbol="ACME",
+            series=series,
+            open_paise=1000,
+            high_paise=1100,
+            low_paise=900,
+            close_paise=1050,
+            volume=10,
+        )
+        for series in ("EQ", "BE")
+    ]
+    store.write_rows(date(2026, 7, 14), rows)
+    with pytest.raises(DailyStoreError, match="more than one WHITELIST series"):
+        store.daily("ACME", date(2026, 7, 14), date(2026, 7, 14))
 
 
 def test_an_empty_symbol_list_raises_rather_than_meaning_everything(store: DailyStore) -> None:

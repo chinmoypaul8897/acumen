@@ -212,7 +212,7 @@ the answer; the code follows the ruling as written and makes the case visible.
 
 ---
 
-## Q-4 · chunk 2 · class A · open · NON-BLOCKING for chunk 2 (BLOCKS chunks 3, 4 and 9)
+## Q-4 · chunk 2 · class A · **RESOLVED — executed chunk 3 (2026-07-24)** · was BLOCKING chunks 3, 4, 9
 
 **Question.** When NSE publishes the same symbol under more than one SERIES on the same
 date, which series is "the stock" for this strategy?
@@ -264,9 +264,48 @@ counted in the CONTEXT 7-E3 exclusion report.
 Chunk 3 (corporate actions) is the first session that must read a symbol's daily history
 end-to-end and therefore the first that will hit this.
 
+**ARCHITECT'S RULING (relayed to the chunk-3 build session, 2026-07-24), verbatim:**
+
+> "ARCHITECT'S RULING: the instrument is the equity series. daily() selects per symbol-date
+> by whitelist EQ, else BE, else BZ (same equity in trade-for-trade settlement — matches the
+> trader's TradingView chart). All other series (N* debt, P* partly-paid, BL block, and any
+> other) are never the instrument: kept in store, ignored by queries. Two whitelist series on
+> one symbol-date → raise loudly. No whitelist series → the equity did not exist/trade that
+> day: empty result, not an error; a symbol's history starts at its first equity row
+> (consistent with the per-symbol clamp). Unknown series encountered on F&O-universe symbols
+> must be surfaced in the backfill/coverage report. Execution: chunk 3."
+
+**RESOLVED — executed by the chunk-3 build session (2026-07-24).** Every clause is code with
+a test behind it, in `src/acumen/daily_store.py`:
+
+- **The whitelist.** `INSTRUMENT_SERIES = ("EQ", "BE", "BZ")` — one constant, cited to this
+  ruling, used by `daily()` and by the series report. It is the ONLY series choice in `src/`
+  (pinned by `tests/test_review2_probes.py::test_the_only_series_choice_in_src_is_the_q4_whitelist`,
+  an `ast` walk, which replaces the probe that used to assert no choice existed at all).
+- **Selection per symbol-date.** `daily()` now returns one row per date: the whitelist row if
+  exactly one is present. NTPC 2018-01-01 (six series) returns its `EQ` row; BIOCON
+  2026-07-14 (`EQ` + `BL`) returns `EQ`; the explicit `series=` escape still overrides.
+- **Two whitelist series on one symbol-date raise loudly.** The precedence order is recorded
+  in the constant, but the ruling's safety net takes priority over it, so the order never
+  actually decides anything while the raise stands (recorded as decision B35). Proved on a
+  synthetic DERIVED fixture (`tests/fixtures/two_whitelist_series.csv`), because no real
+  bhavcopy in the repo carries the case.
+- **No whitelist series is an empty result, not an error.** IRFC on 2018-01-01 is debt-only;
+  `daily("IRFC", ...)` returns an EMPTY frame with the full column set. A symbol's history
+  therefore starts at its first equity row, exactly as the ruling states.
+- **Unknown series surfaced.** `DailyStore.series_report(symbols, from, to)` classifies every
+  series seen as `instrument` (the whitelist), `known-non-instrument` (the `N*` debt, `P*`
+  partly-paid and `BL` block families this ruling names) or **`unknown`**, and
+  `DailyStore.unknown_series(...)` is the filtered view the backfill run prints, with the
+  symbols and dates that carry each one. The two frozen bhavcopy fixtures contain no unknown
+  series (they carry `EQ`, `N4/N6/N7/NB/NC/ND`, `P2`, `BL` only), so the classifier is pinned
+  by unit test on the codes this item's own evidence table lists — including the one the
+  ruling's examples do NOT cover: **UPL's `Q1`** on 2018-01-01 classifies as `unknown`, not
+  as partly-paid, so it will be reported the moment the operator's full backfill reaches it.
+
 ---
 
-## Q-5 · chunk 2 · class A · open · NON-BLOCKING (relevant to chunk 9's full run and chunk 13)
+## Q-5 · chunk 2 · class A · **RESOLVED — executed chunk 3 (2026-07-24)** · NON-BLOCKING
 
 **Question.** NSE holds occasional **weekend trading sessions** (a Budget-day Saturday, the
 disaster-recovery live sessions). A full bhavcopy is published for them. Under the Q-3 ruling
@@ -298,3 +337,33 @@ turns on the answer; `weekend_sessions` was empty for both.
 literal reading);
 (b) weekend sessions are excluded under E2 and are also skipped when forming bias pairs;
 (c) excluded from trading but retained in the bias pair (they are real candles).
+
+**ARCHITECT'S RULING (relayed to the chunk-3 build session, 2026-07-24), verbatim:**
+
+> "ARCHITECT'S RULING: weekend-dated sessions are EXCLUDED from trading days, bias pairs, and
+> trading, even when a bhavcopy exists (E2 applied: non-standard sessions; the Monday after
+> pairs to Friday/Thursday). weekend_sessions stays surfaced; the backtest report counts
+> these exclusions. CONTEXT E2 wording gains this clarification at its next version bump.
+> Execution: chunk 3."
+
+**RESOLVED — executed by the chunk-3 build session (2026-07-24).** In
+`src/acumen/calendar.py`, `TradingCalendar._derive`:
+
+- a `file-present` date that falls on a Saturday or Sunday is **not** added to
+  `trading_days`. It goes to a new frozen field `excluded_weekend_sessions` instead, so
+  `is_trading_day` and `is_standard_session` both answer **False** for it and `bias_pair`
+  skips it exactly as it skips a holiday;
+- `weekend_sessions` stays the public accessor (same name, same tuple-of-dates shape, still
+  empty for a published calendar) and now reads from that field — the case remains VISIBLE,
+  it simply no longer trades;
+- the exclusions are **counted**: `TradingCalendar.excluded_session_counts()` returns
+  `{"weekend-session": n}` for the chunk-9 report, and `DailyStore.coverage_summary()` counts
+  `weekend_session` file-present dates over any range, which is what the backfill report
+  prints.
+
+Regression test = the exact case REVIEW_2 Finding 11 measured
+(`tests/test_derived_calendar.py::test_q5_a_saturday_session_is_excluded_and_monday_pairs_to_friday_thursday`):
+a synthetic Saturday 2019-06-01 session is `is_trading_day` **False**, `is_standard_session`
+**False**, surfaced in `weekend_sessions`, and `bias_pair(Mon 2019-06-03)` is
+`(Fri 2019-05-31, Thu 2019-05-30)` — the "one whole candle out" the finding warned about is
+gone.

@@ -167,13 +167,38 @@ def fetch_binary(
     """
     return _fetch(
         url,
-        decode=lambda response: response.content,
+        decode=_decode_binary,
         session=session,
         timeout=timeout,
         max_attempts=max_attempts,
         sleep=sleep,
         min_interval=min_interval,
     )
+
+
+#: The openings of NSE's bot-shield page, which it serves behind an HTTP **200**. A body
+#: starting with one of these is not the file we asked for (REVIEW_2 Finding 2).
+_HTML_OPENINGS: tuple[bytes, ...] = (b"<!doctype", b"<html", b"<?xml", b"<head")
+
+
+def looks_like_html(body: bytes) -> bool:
+    """Is this response body an HTML page rather than the file that was requested? PURE."""
+    head = body.lstrip()[:64].lower()
+    return any(head.startswith(opening) for opening in _HTML_OPENINGS)
+
+
+def _decode_binary(response: Any) -> bytes:
+    """Accept a body only if it is not a bot-shield page (REVIEW_2 Finding 2).
+
+    The JSON path already treats an HTTP 200 whose body will not decode as transient and
+    retries it. The download path must apply the SAME policy, or NSE's shield -- which
+    answers 200 with an HTML page -- burns a date to ``error`` on the first attempt, where
+    CONTEXT 4.3 says an access-denied burst is normal and must be retried.
+    """
+    body = response.content
+    if looks_like_html(body):
+        raise _Retry("HTTP 200 whose body is an HTML page, not the requested file")
+    return body
 
 
 def _fetch(
@@ -216,7 +241,9 @@ def _fetch(
                     # Once per call only: a second warm-up would not tell us anything new
                     # and would double our request count against a site we pull once a day.
                     warmed_up = True
-                    _warm_up_cookies(http, timeout=timeout, sleep=sleep)
+                    _warm_up_cookies(
+                        http, timeout=timeout, sleep=sleep, min_interval=min_interval
+                    )
             elif response.status_code == 404:
                 raise NseNotFoundError(
                     f"{url} returned HTTP 404; not a transient status, so no retry was "
@@ -373,14 +400,23 @@ def _throttle(
 
 
 def _warm_up_cookies(
-    session: requests.Session, *, timeout: float, sleep: Callable[[float], None]
+    session: requests.Session,
+    *,
+    timeout: float,
+    sleep: Callable[[float], None],
+    min_interval: float = MIN_SECONDS_BETWEEN_REQUESTS,
 ) -> None:
     """Fetch the NSE home page once so the session picks up its cookies.
 
     Best-effort by design: the home page itself answers 403 to this client, yet the API
     endpoints answer 200, so a failure here must not abort the real request.
+
+    ``min_interval`` is the CALLER's pacing, threaded through deliberately (REVIEW_2
+    Finding 1): the warm-up fires precisely when NSE has just refused us, so inheriting the
+    faster module default would spike the download path to 4x its own advertised rate at the
+    worst possible moment.
     """
-    _throttle(sleep)
+    _throttle(sleep, min_interval)
     try:
         session.get(NSE_HOME_URL, timeout=timeout)
     except requests.RequestException:

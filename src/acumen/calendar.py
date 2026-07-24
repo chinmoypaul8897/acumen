@@ -200,6 +200,9 @@ class TradingCalendar:
             weekday-minus-holidays rule applies.
         covered_days: an explicit set of dates this calendar has evidence for (derived
             calendars over a partial year). ``None`` means the whole of ``covered_years``.
+        excluded_weekend_sessions: weekend dates for which NSE DID publish a bhavcopy and
+            which QUESTIONS.md Q-5 excludes anyway. Kept (rather than discarded) so the
+            exclusion can be surfaced and counted instead of quietly vanishing.
         source: ``"published"`` or ``"derived"`` -- carried into error messages so a caller
             can see WHICH calendar refused, and never used to decide anything.
     """
@@ -208,6 +211,7 @@ class TradingCalendar:
     covered_years: frozenset[int]
     trading_days: frozenset[date] | None = None
     covered_days: frozenset[date] | None = None
+    excluded_weekend_sessions: frozenset[date] = frozenset()
     source: str = "published"
 
     # --- construction -------------------------------------------------------------
@@ -311,6 +315,7 @@ class TradingCalendar:
 
         trading: set[date] = set()
         holidays: set[date] = set()
+        weekend_sessions: set[date] = set()
         unusable: list[str] = []
         missing: list[date] = []
 
@@ -321,7 +326,14 @@ class TradingCalendar:
                 continue
             outcome = ledger.get(current)
             if outcome == OUTCOME_PRESENT:
-                trading.add(current)
+                if current.weekday() in _WEEKEND:
+                    # QUESTIONS.md Q-5, the architect's ruling: a weekend-dated session is a
+                    # NON-STANDARD session under CONTEXT 7-E2 and is excluded from trading
+                    # days, bias pairs and trading, even though NSE published a bhavcopy for
+                    # it. Kept here so the exclusion can be surfaced and counted.
+                    weekend_sessions.add(current)
+                else:
+                    trading.add(current)
             elif outcome == OUTCOME_NOT_FOUND:
                 if current.weekday() not in _WEEKEND:
                     holidays.add(current)
@@ -357,22 +369,27 @@ class TradingCalendar:
             covered_years=frozenset(day.year for day in covered),
             trading_days=frozenset(trading),
             covered_days=covered,
+            excluded_weekend_sessions=frozenset(weekend_sessions),
             source="derived",
         )
 
     @property
     def weekend_sessions(self) -> tuple[date, ...]:
-        """Trading days that fall on a Saturday or Sunday, oldest first.
+        """Weekend dates NSE published a bhavcopy for, oldest first -- all EXCLUDED.
 
-        NSE does hold them (budget Saturdays, disaster-recovery live sessions), and the
-        Q-3 ruling makes them trading days here because NSE published a bhavcopy. Whether
-        CONTEXT 7-E2 should ALSO exclude them as "non-standard sessions" is QUESTIONS.md
-        Q-4, unanswered -- so this property exists to make them visible rather than to
-        decide anything. Always empty for a published calendar.
+        NSE does hold them (budget Saturdays, disaster-recovery live sessions). QUESTIONS.md
+        Q-5, the architect's ruling: they are non-standard sessions under CONTEXT 7-E2, so
+        they are excluded from trading days, from bias pairs and from trading -- the Monday
+        after one pairs to the Friday and Thursday before it, exactly as if the Saturday had
+        never traded. They stay surfaced HERE, and counted by
+        :meth:`excluded_session_counts`, because an exclusion nobody can see is
+        indistinguishable from a bug. Always empty for a published calendar.
         """
-        if self.trading_days is None:
-            return ()
-        return tuple(sorted(day for day in self.trading_days if day.weekday() in _WEEKEND))
+        return tuple(sorted(self.excluded_weekend_sessions))
+
+    def excluded_session_counts(self) -> dict[str, int]:
+        """Exclusions this calendar applied, for the chunk-9 disclosures (Q-5 ruling)."""
+        return {"weekend-session": len(self.excluded_weekend_sessions)}
 
     # --- trading days -------------------------------------------------------------
 
@@ -386,8 +403,9 @@ class TradingCalendar:
         checked = _require_plain_date(day)
         self._require_covered(checked)
         if self.trading_days is not None:
-            # A derived calendar answers from evidence, not from the weekday rule: NSE
-            # publishes a bhavcopy for its occasional weekend sessions (QUESTIONS.md Q-3/Q-4).
+            # A derived calendar answers from evidence, not from the weekday rule
+            # (QUESTIONS.md Q-3). NSE's occasional weekend sessions are evidence too, and
+            # Q-5 excludes them: they are absent from trading_days by construction.
             return checked in self.trading_days
         return checked.weekday() not in _WEEKEND and checked not in self.holidays
 
@@ -396,7 +414,9 @@ class TradingCalendar:
 
         A date absent from the trading calendar is non-standard, which covers Muhurat (NSE
         lists it as a holiday, with its special session outside 09:15-15:30) and every other
-        special session. Kept separate from :meth:`is_trading_day` because they answer
+        special session. A weekend-dated session is non-standard too (QUESTIONS.md Q-5) and
+        is already absent from ``trading_days``, so this predicate answers False for it
+        without a second rule. Kept separate from :meth:`is_trading_day` because they answer
         different questions even where the predicate coincides.
         """
         return self.is_trading_day(day)

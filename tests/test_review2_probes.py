@@ -771,10 +771,15 @@ def test_the_derived_calendar_refuses_the_edge_of_its_own_window(ledgered: Daily
         derived.bias_pair(WINDOW_2026[0])
 
 
-def test_a_weekend_session_is_surfaced_and_moves_the_following_monday(tmp_path: Path) -> None:
-    """Q-5's consequence, made concrete: a Budget Saturday changes Monday's CONTEXT 3.2 pair.
+def test_a_weekend_session_is_surfaced_and_no_longer_moves_the_following_monday(
+    tmp_path: Path,
+) -> None:
+    """Q-5 RULED AND EXECUTED. This probe measured the open question; it now measures the fix.
 
-    Recorded here because Q-5 is open and this is the behaviour the architect is ruling on.
+    The consequence it was written to expose -- a Budget Saturday moving Monday's CONTEXT 3.2
+    pair by a whole candle -- is what the architect's ruling removes: the weekend session is
+    excluded as a non-standard session (CONTEXT 7-E2), stays surfaced, and Monday pairs to
+    Friday/Thursday. The counterpart regression test lives with the calendar's own suite.
     """
     store = DailyStore.at(tmp_path / "store")
     saturday = date(2019, 6, 1)
@@ -791,10 +796,12 @@ def test_a_weekend_session_is_surfaced_and_moves_the_following_monday(tmp_path: 
     store.record_outcomes(rows)
 
     calendar = TradingCalendar.from_daily_store(store, [2019])
-    assert calendar.weekend_sessions == (saturday,)
-    assert calendar.bias_pair(date(2019, 6, 3)) == (saturday, date(2019, 5, 31))
-    # Without the Saturday the pair would have been (31-May, 30-May) -- one whole candle out.
-    assert calendar.bias_pair(date(2019, 6, 3)) != (date(2019, 5, 31), date(2019, 5, 30))
+    assert calendar.weekend_sessions == (saturday,), "surfaced"
+    assert calendar.is_trading_day(saturday) is False, "and excluded"
+    assert calendar.excluded_session_counts() == {"weekend-session": 1}, "and counted"
+    assert calendar.bias_pair(date(2019, 6, 3)) == (date(2019, 5, 31), date(2019, 5, 30))
+    # The pre-ruling behaviour, for the record: this was (2019-06-01, 2019-05-31).
+    assert saturday not in calendar.bias_pair(date(2019, 6, 3))
 
 
 def test_a_published_calendar_is_bit_identical_to_chunk_1(tmp_path: Path) -> None:
@@ -831,28 +838,47 @@ def test_the_2018_multi_series_ambiguity_is_real_in_both_formats(both_eras: Dail
     ) == ["BL", "EQ"]
 
 
-def test_daily_refuses_an_ambiguous_symbol_day_and_names_every_series(
+def test_q4_the_ruling_picks_the_equity_row_out_of_six_series(both_eras: DailyStore) -> None:
+    """QUESTIONS.md Q-4 EXECUTED, measured on the six-series NTPC case this review found.
+
+    Before the ruling `daily()` refused to choose (correct while the question was open).
+    Now it selects the whitelist row and ignores the five debt series, and the explicit
+    `series=` escape still answers exactly as it did.
+    """
+    picked = both_eras.daily("NTPC", date(2018, 1, 1), date(2018, 1, 2))
+    assert list(picked["trade_date"]) == [date(2018, 1, 1), date(2018, 1, 2)]
+    assert set(picked["series"]) == {"EQ"}
+
+    explicit = both_eras.daily("NTPC", date(2018, 1, 1), date(2018, 1, 2), series="N4")
+    assert set(explicit["series"]) == {"N4"}, "the escape hatch is unchanged"
+
+    biocon = both_eras.daily("BIOCON", date(2026, 7, 14), date(2026, 7, 14))
+    assert len(biocon) == 1 and biocon.iloc[0].series == "EQ", "the block-deal row is ignored"
+
+
+def test_q4_a_debt_only_symbol_answers_empty_rather_than_with_a_debenture(
     both_eras: DailyStore,
 ) -> None:
-    """A silent choice here would hand chunk 4 a debenture's candle. The message has to be
-    actionable, so it must name what it found."""
-    with pytest.raises(DailyStoreError) as excinfo:
-        both_eras.daily("NTPC", date(2018, 1, 1), date(2018, 1, 2))
-    message = str(excinfo.value)
-    for series in ("EQ", "N4", "N6", "N7", "NB", "NC"):
-        assert f"'{series}'" in message, series
-    assert "series=" in message
+    """The ruling's most dangerous clause, and the reason a volume rule would have failed.
 
-    picked = both_eras.daily("NTPC", date(2018, 1, 1), date(2018, 1, 2), series="EQ")
-    assert list(picked["trade_date"]) == [date(2018, 1, 1), date(2018, 1, 2)]
+    IRFC listed debt long before its equity. "No whitelist series -> the equity did not
+    exist/trade that day: empty result, not an error." A "largest volume wins" rule would
+    have handed chunk 4 a debenture's price series instead.
+    """
+    frame = both_eras.frame(["IRFC"], date(2018, 1, 1), date(2018, 1, 2))
+    if not frame.empty:  # the DERIVED fixture may or may not carry IRFC's rows
+        assert set(frame["series"]).isdisjoint({"EQ", "BE", "BZ"})
+    daily = both_eras.daily("IRFC", date(2018, 1, 1), date(2018, 1, 2))
+    assert daily.empty
+    assert list(daily.columns) == list(both_eras.frame(None, date(2018, 1, 1), date(2018, 1, 1)).columns)
 
 
-def test_no_series_default_exists_anywhere_in_src() -> None:
-    """Q-4 is open, so `src/` may not contain a choice -- not even a helpful-looking one.
+def test_the_only_series_choice_in_src_is_the_q4_whitelist() -> None:
+    """The ruling licenses ONE choice; `src/` may not grow a second one somewhere else.
 
-    Parsed rather than grepped: the only occurrence of the letters EQ in `src/` is inside a
-    docstring that names it as an EXAMPLE argument, and a grep cannot tell that apart from a
-    default. An `ast` walk for a string constant equal to "EQ" can.
+    Parsed rather than grepped: a docstring naming "EQ" as an example argument reads the same
+    to a grep as a default does. An `ast` walk for the string constants of the whitelist can
+    tell them apart, and it pins them to the single constant that cites the ruling.
     """
     import ast
 
@@ -860,9 +886,15 @@ def test_no_series_default_exists_anywhere_in_src() -> None:
     for source in sorted((REPO / "src").rglob("*.py")) + sorted((REPO / "scripts").rglob("*.py")):
         tree = ast.parse(source.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
-            if isinstance(node, ast.Constant) and node.value == "EQ":
+            if isinstance(node, ast.Constant) and node.value in ("EQ", "BE", "BZ"):
                 offenders.append(f"{source.relative_to(REPO)}:{node.lineno}")
-    assert offenders == [], offenders
+    files = {entry.rsplit(":", 1)[0].replace("\\", "/") for entry in offenders}
+    assert files == {"src/acumen/daily_store.py"}, offenders
+    assert len(offenders) == 3, "exactly the three members of INSTRUMENT_SERIES"
+
+    from acumen.daily_store import INSTRUMENT_SERIES
+
+    assert INSTRUMENT_SERIES == ("EQ", "BE", "BZ")
 
 
 # =========================================================================================
@@ -872,40 +904,45 @@ def test_no_series_default_exists_anywhere_in_src() -> None:
 
 @pytest.fixture(scope="module")
 def backfill() -> ModuleType:
-    spec = importlib.util.spec_from_file_location("backfill_daily_review2", SCRIPT)
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
+    from acumen import backfill_daily
+
+    return backfill_daily
 
 
-def test_importing_the_script_runs_nothing(backfill: ModuleType) -> None:
-    """An entry point that did work on import could not be tested, and would be a hazard the
-    moment anything imported it.
+def test_importing_either_entry_point_runs_nothing(backfill: ModuleType) -> None:
+    """CLOSES REVIEW_2 FINDING 12's import-time half.
 
-    Checked structurally: the module body may hold only its docstring, imports, function
-    definitions and the `if __name__` guard -- plus exactly ONE executed statement, the
-    `sys.path` insert the script needs to find `src/` when run as a file (recorded as
-    REVIEW_2 Finding 5: it is a real import-time side effect, small and deliberate).
+    An entry point that did work on import could not be tested, and would be a hazard the
+    moment anything imported it. Checked structurally on BOTH files: the packaged module
+    (`src/acumen/backfill_daily.py`, where the implementation now lives) and the launcher
+    (`scripts/backfill_daily.py`) may each hold only a docstring, imports, definitions and
+    the `if __name__` guard -- ZERO executed statements. The launcher's `sys.path` insert
+    moved inside a function that only `__main__` calls, and only fires when the package is
+    genuinely not installed; the console entry point in pyproject.toml is the installed path.
     """
     import ast
 
-    assert backfill.__name__ == "backfill_daily_review2"
+    assert backfill.__name__ == "acumen.backfill_daily"
     assert hasattr(backfill, "main") and hasattr(backfill, "run")
 
-    body = ast.parse(SCRIPT.read_text(encoding="utf-8")).body
-    executed = [
-        node
-        for node in body
-        if not isinstance(node, (ast.Import, ast.ImportFrom, ast.FunctionDef, ast.If))
-        and not (isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant))
-    ]
-    assert len(executed) == 1, [ast.dump(n)[:60] for n in executed]
-    assert "sys.path.insert" in ast.unparse(executed[0])
+    for path in (REPO / "src" / "acumen" / "backfill_daily.py", SCRIPT):
+        body = ast.parse(path.read_text(encoding="utf-8")).body
+        executed = [
+            node
+            for node in body
+            if not isinstance(node, (ast.Import, ast.ImportFrom, ast.FunctionDef, ast.If))
+            and not (isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant))
+        ]
+        assert executed == [], (path.name, [ast.dump(n)[:60] for n in executed])
+        guards = [node for node in body if isinstance(node, ast.If)]
+        assert len(guards) == 1 and "__main__" in ast.unparse(guards[0].test), path.name
 
-    guards = [node for node in body if isinstance(node, ast.If)]
-    assert len(guards) == 1 and "__main__" in ast.unparse(guards[0].test)
+    assert "sys.path.insert" not in ast.unparse(
+        ast.parse((REPO / "src" / "acumen" / "backfill_daily.py").read_text(encoding="utf-8"))
+    )
+    assert 'acumen-backfill = "acumen.backfill_daily:main"' in (
+        REPO / "pyproject.toml"
+    ).read_text(encoding="utf-8")
 
 
 def test_a_dry_run_opens_no_session_at_all(
@@ -977,14 +1014,14 @@ def test_the_normal_download_path_never_exceeds_one_request_per_two_seconds() ->
     assert all(gap >= 2.0 for gap in _gaps(log)), _gaps(log)
 
 
-def test_pin_finding_1_the_cookie_warm_up_ignores_the_callers_pacing() -> None:
-    """PINS REVIEW_2 FINDING 1 -- DELETE THIS TEST WHEN THE FINDING IS FIXED.
+def test_the_cookie_warm_up_honors_the_callers_pacing() -> None:
+    """CLOSES REVIEW_2 FINDING 1 (the pin it replaces asserted the wrong 0.5s spacing).
 
-    `_warm_up_cookies` calls `_throttle(sleep)` without the caller's `min_interval`, so it
-    inherits the module default of 0.5s. On the download path (2.0s) the warm-up therefore
-    lands 0.5s after the request NSE just refused -- a 4x rate spike aimed at a server that
-    is already saying no. Fix: pass `min_interval` through to the warm-up. This test asserts
-    the CURRENT, wrong spacing so the fix cannot land unnoticed.
+    `_warm_up_cookies` used to call `_throttle(sleep)` without the caller's `min_interval`,
+    so on the download path (2.0s) the warm-up landed 0.5s after the request NSE had just
+    refused -- a 4x rate spike aimed at a server already saying no. It now threads
+    `min_interval` through, so every gap on the wire obeys the card's one-request-per-two-
+    seconds rule, including the warm-up.
     """
     answers = {
         nse_http.NSE_HOME_URL: _Response(403),
@@ -994,21 +1031,17 @@ def test_pin_finding_1_the_cookie_warm_up_ignores_the_callers_pacing() -> None:
         answers, date(2026, 7, 20), min_interval=2.0, max_attempts=2
     )
     assert [url for _t, url in log][1] == nse_http.NSE_HOME_URL
-    assert _gaps(log)[0] == 0.5, (
-        "REVIEW_2 Finding 1 appears to be FIXED: the warm-up now respects the caller's "
-        "min_interval. Delete this pin and assert >= 2.0 instead."
-    )
+    assert all(gap >= 2.0 for gap in _gaps(log)), _gaps(log)
 
 
-def test_pin_finding_2_a_bot_shield_page_behind_http_200_is_not_retried_on_downloads() -> None:
-    """PINS REVIEW_2 FINDING 2 -- DELETE THIS TEST WHEN THE FINDING IS FIXED.
+def test_a_bot_shield_page_behind_http_200_is_retried_on_downloads_too() -> None:
+    """CLOSES REVIEW_2 FINDING 2 (the pin it replaces asserted the single-attempt defect).
 
-    `fetch_json` treats an HTTP 200 whose body is unusable as transient and retries it;
-    `fetch_binary` has no such check, so NSE's bot-shield HTML behind a 200 burns the date
-    to `error` on the FIRST attempt. Decision B31 records the shared loop as making the
-    CONTEXT 4.3 policy drift-proof between the two paths; this is where it still differs.
-    No data is corrupted -- an error is never a holiday and is retried on the next run --
-    but an unattended 25-year run gives up early where it should retry.
+    `fetch_json` treats an HTTP 200 whose body is unusable as transient and retries it. The
+    download path now applies the SAME policy to NSE's bot-shield HTML, so both paths spend
+    their full retry budget on the burst CONTEXT 4.3 calls NORMAL instead of one giving up
+    immediately. Decision B31's claim -- one loop, so the policy cannot drift between the
+    two paths -- is now true of the policy as well as of the loop.
     """
     day = date(2026, 7, 20)
     html = b"<!DOCTYPE html><html>Access Denied</html>"
@@ -1016,11 +1049,8 @@ def test_pin_finding_2_a_bot_shield_page_behind_http_200_is_not_retried_on_downl
     result = bhavcopy.download_bhavcopy(
         day, session=binary, sleep=lambda _s: None, max_attempts=4, now=NOW
     )
-    assert result.outcome.outcome == OUTCOME_ERROR
-    assert len(binary.log) == 1, (
-        "REVIEW_2 Finding 2 appears to be FIXED: the download path now retries an unusable "
-        "200. Delete this pin and assert 4 attempts instead."
-    )
+    assert result.outcome.outcome == OUTCOME_ERROR, "still an error once the budget is spent"
+    assert len(binary.log) == 4, "and it is spent: four attempts, like the JSON path"
 
     class _JsonResponse(_Response):
         def json(self) -> Any:
@@ -1039,17 +1069,57 @@ def test_pin_finding_2_a_bot_shield_page_behind_http_200_is_not_retried_on_downl
     assert len(json_path.log) == 4, "the JSON path retries the identical body four times"
 
 
-def test_the_raw_csv_archive_is_only_written_for_dates_this_run_fetched(
+def test_a_real_zip_is_still_accepted_on_the_first_attempt() -> None:
+    """The Finding-2 fix must not make a GOOD download retry: only HTML is transient."""
+    day = date(2026, 7, 20)
+    payload = _zip_of(
+        "TradDt,TckrSymb,SctySrs,OpnPric,HghPric,LwPric,ClsPric,TtlTradgVol\n"
+        "2026-07-20,TCS,EQ,2280.10,2283.40,2245.10,2251.10,2202693\n"
+    )
+    session = _Recorder({url_for(day, FORMAT_UDIFF): _Response(200, payload)}, [0.0])
+    result = bhavcopy.download_bhavcopy(
+        day, session=session, sleep=lambda _s: None, max_attempts=4, now=NOW
+    )
+    assert result.outcome.outcome == OUTCOME_PRESENT
+    assert len(session.log) == 1
+
+
+def test_the_raw_csv_archive_is_written_atomically(
     backfill: ModuleType, tmp_path: Path
 ) -> None:
-    """RECORDS REVIEW_2 FINDING 3 (documented behaviour, not a pin).
+    """CLOSES the atomic half of REVIEW_2 FINDING 3; RECORDS the half still open.
 
-    `--raw-dir` writes the CSV inside the fetch loop, so a date settled by an EARLIER run is
-    never archived: the audit trail the DERIVED fixtures were cut from is complete only if
-    every date was fetched in one run that carried the flag.
+    Fixed: `--raw-dir` now writes through `acumen.atomic_io`, so a Ctrl-C mid-write cannot
+    leave a truncated CSV in the archive the DERIVED fixtures are cut from -- measured here
+    by interrupting the write and checking what survives.
+
+    Still true, and still documented rather than fixed (the architect scoped this session to
+    the atomic half): the archive is written INSIDE the fetch loop, so a date settled by an
+    earlier run is never archived, and adding `--raw-dir` to a later run does not backfill it.
     """
-    source = SCRIPT.read_text(encoding="utf-8")
-    assert "_keep_raw(raw_dir, day, download)" in source
-    assert "pending = resolve_dates(" in source
-    # The write itself is a plain write_text, not an atomic_io call.
-    assert "atomic" not in source.split("def _keep_raw")[1].split("def ")[0]
+    raw_dir = tmp_path / "raw"
+    download = Download(
+        DateOutcome(
+            trade_date=date(2026, 7, 20),
+            outcome=OUTCOME_PRESENT,
+            source_format=FORMAT_UDIFF,
+            row_count=1,
+        ),
+        (),
+        raw_csv="TradDt,TckrSymb\n2026-07-20,TCS\n",
+    )
+    backfill._keep_raw(raw_dir, date(2026, 7, 20), download)
+    written = raw_dir / f"2026-07-20_{FORMAT_UDIFF}.csv"
+    assert written.read_text(encoding="utf-8") == download.raw_csv
+
+    with mock.patch("acumen.atomic_io.os.replace", side_effect=KeyboardInterrupt):
+        with pytest.raises(KeyboardInterrupt):
+            backfill._keep_raw(
+                raw_dir, date(2026, 7, 21), Download(download.outcome, (), raw_csv="X")
+            )
+    assert not (raw_dir / f"2026-07-21_{FORMAT_UDIFF}.csv").exists(), "no truncated file"
+    assert sorted(p.name for p in raw_dir.iterdir()) == [written.name], "and no orphan temp"
+
+    source = (REPO / "src" / "acumen" / "backfill_daily.py").read_text(encoding="utf-8")
+    assert "atomic_write_text(raw_dir / name" in source
+    assert "_keep_raw(raw_dir, day, download)" in source, "still inside the fetch loop"

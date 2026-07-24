@@ -41,6 +41,11 @@ FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 #: source file's own SHA-256, its URL and the trimming rule are recorded in
 #: tests/fixtures/PROVENANCE.md; committing the full 190 KB ZIPs per date was the alternative.
 #:
+#: chunk 3 prep (2026-07-24): one SYNTHETIC fixture. It is authored, not measured -- the Q-4
+#: ruling names two cases (two whitelist series on one date; a symbol with no equity row at
+#: all) that no bhavcopy committed here contains. PROVENANCE.md says so in the file's own
+#: entry, and nothing in it may be cited as a fact about NSE.
+#:
 #: Unlike poc/data there is no exact-set assertion here: later chunks legitimately add
 #: fixtures. What may never happen is one of these files CHANGING.
 FROZEN_FIXTURES_SHA256: dict[str, str] = {
@@ -48,6 +53,9 @@ FROZEN_FIXTURES_SHA256: dict[str, str] = {
     "bhavcopy_udiff_sample.csv": "bd477ba42278705a9cde9d7807d04891d076bca0fb974ec9ccc1b6632177c6cd",
     "daily_ledger_window.csv": "73b97a05760c0c6fccabb65aa9b3907ed83cdfe192cfa5f3db85b2e66067067b",
     "holidays_2026.json": "798c545acc5351eb9ed84f353c1fcc665a26967426e3761b7097e7f3c7042424",
+    "series_edge_cases_synthetic.csv": (
+        "fcedeb9c22f9682fdcd99de3fb51196cc0753842c9f14761b5d4ccfb1e8bac5e"
+    ),
     "tick_sizes.json": "61488842568ee632b528dfa3c5f6be44a771520a2aa02cd63cb76b7c0ee146b0",
     "universe_snapshot.json": "3eaa84baf758421fa57754c28dc32dd0a5bb864f8e02ccbab237ed05ef13f912",
 }
