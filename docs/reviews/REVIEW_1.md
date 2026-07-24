@@ -282,3 +282,14 @@ deliverables are all present, including the E2 exclusion helper. Scope disciplin
 
 This review added exactly one file — `tests/test_review1_probes.py` (36 tests) — and modified
 no file under review.
+
+---
+
+## 8. Fix log (appended by later sessions — the review text above is unchanged)
+
+| Finding | Status | Closed by | What changed |
+|---|---|---|---|
+| F1 — offline guard is `requests`-shaped | **CLOSED** | chunk 2 prep, commit `chunk2-prep:` | `tests/conftest.py` now blocks at the socket (`socket.socket.connect`/`connect_ex`, `socket.create_connection`); the `requests` patches are kept on top for the better message. Both pin tests in `tests/test_review1_probes.py` were rewritten to assert the fixed boundary (`test_the_guard_covers_raw_sockets`, `test_the_guard_covers_clients_that_are_not_requests`), per the instruction embedded in the original pin. No new dependency: `pytest-socket` was considered and declined. |
+| F2 — day-cache write is not atomic | **CLOSED** | chunk 2 prep, commit `chunk2-prep:` | New `src/acumen/atomic_io.py` (temp file in the target's directory + `os.replace`, temp removed on any `BaseException` including `KeyboardInterrupt`); `nse_http.write_cache` uses it, and `cached_json` with an explicit `allow_network=True` now overwrites a damaged cache after a `RuntimeWarning` instead of demanding a manual delete. The read path stays loud: `read_cache` and both `load_cached_*` helpers still raise. Pin test rewritten to `test_a_half_written_cache_is_repaired_by_an_explicit_refetch`, plus `test_the_cache_write_is_atomic` and `tests/test_atomic_io.py` (8 tests). |
+| F6 — prep-commit convention / PROGRESS stamp | **ACKNOWLEDGED** | chunk 2 | Architect ruling relayed to the chunk-2 session: prep commits KEEP the `chunk<N>-prep:` prefix (they are reviewed inside chunk N's span), and PROGRESS entries are stamped with the real current clock time. |
+| F3, F4, F5, F7–F10 | open (LOW/INFO) | — | Untouched by chunk 2; F3's and F4's pin tests still assert the current behaviour deliberately. |

@@ -116,7 +116,7 @@ cannot silently move a calibrated fixture.
 
 ---
 
-## Q-3 · chunk 1 · class A · open · NON-BLOCKING for chunk 1 (blocks chunk 9's full run)
+## Q-3 · chunk 1 · class A · **RULING RECORDED (execution: chunk 2, in progress)** · NON-BLOCKING for chunk 1 (blocks chunk 9's full run)
 
 **Question.** Where does the trading calendar for years BEFORE the current one come from?
 
@@ -162,3 +162,14 @@ a published historical holiday list), committing them as a frozen multi-year fix
 
 Chunk 2 is the first session that could act on (a); chunk 9's full-history run is the first
 that is BLOCKED without an answer.
+
+**ARCHITECT'S RULING (relayed to the chunk-2 build session, 2026-07-24), verbatim:**
+
+> "ARCHITECT'S RULING (option a with safeguards): historical trading days are DERIVED from
+> the daily store — a date with a bhavcopy IS a trading day. Safeguards: (1) the downloader
+> records every date's outcome as file-present / confirmed-404 / error; ONLY a
+> confirmed-404 counts as a non-trading day — a download error is NEVER treated as a
+> holiday; (2) the derived calendar's 2026 trading days must exactly equal the published
+> holidays_2026.json snapshot's implied trading days over the ingested range (test);
+> (3) the published endpoint remains authoritative for current/future dates (live
+> screener); the derived calendar serves the backtest past. Execution: chunk 2."

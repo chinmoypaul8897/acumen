@@ -6,10 +6,12 @@ runs offline against the frozen snapshots.
 
 Four groups:
 
-1. **What the offline guard actually covers** (REVIEW_1 Finding 1). Decision B2 claims
-   ``tests/conftest.py`` "FAILS any test making a real HTTP request". It patches
-   ``requests.Session`` only, so a raw socket or ``urllib`` call reaches NSE from inside a
-   test. That was demonstrated during the review. These tests pin the real boundary.
+1. **What the offline guard actually covers** (REVIEW_1 Finding 1). Decision B2 claimed
+   ``tests/conftest.py`` "FAILS any test making a real HTTP request"; it patched
+   ``requests.Session`` only, and the review demonstrated a raw socket and a ``urllib`` call
+   reaching NSE from inside a test. **Chunk 2 widened the guard to the socket layer**, so the
+   two tests here now pin the fixed boundary instead of the defect (the originals were
+   written to fail when the fix landed, which is what happened).
 2. **CONTEXT 7-E2/E12 bar containment** at every boundary stamp, including the 15-minute
    15:00 stamp the build did not cover.
 3. **CONTEXT 7-E8 naive-IST enforcement** across the WHOLE public surface, not the two
@@ -22,6 +24,7 @@ from __future__ import annotations
 
 import json
 import socket
+import urllib.request
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -29,7 +32,7 @@ from typing import Any
 import pytest
 import requests
 
-from acumen import nse_http, universe
+from acumen import atomic_io, nse_http, universe
 from acumen.calendar import (
     CalendarError,
     TradingCalendar,
@@ -82,33 +85,51 @@ def test_the_guard_trips_through_the_real_fetch_layer() -> None:
         )
 
 
-def test_the_guard_does_not_cover_raw_sockets() -> None:
-    """REVIEW_1 Finding 1, pinned: the guard is `requests`-shaped, not network-shaped.
-
-    Proven here without sending a byte anywhere: a socket to a CLOSED local port is refused
-    by the OS, and the refusal is an OSError -- NOT the guard's AssertionError. During the
-    review the same call to a real NSE address CONNECTED, and a `urllib` request reached the
-    live site, from inside a test.
-
-    If a later session widens the guard to cover sockets, this test fails. That is the
-    intended signal: delete it, and close Finding 1 in docs/reviews/REVIEW_1.md.
-    """
+def _closed_loopback_port() -> int:
+    """A local port nothing is listening on, so no byte can leave this machine either way."""
     probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     probe.bind(("127.0.0.1", 0))
-    closed_port = probe.getsockname()[1]
+    port = probe.getsockname()[1]
     probe.close()
+    return port
 
+
+def test_the_guard_covers_raw_sockets() -> None:
+    """REVIEW_1 Finding 1, CLOSED by chunk 2: the guard is now network-shaped.
+
+    This test replaces the chunk-1 review's pin, which asserted the opposite and was written
+    to fail the moment the guard was widened -- exactly what happened. `tests/conftest.py`
+    now patches `socket.socket.connect`/`connect_ex` and `socket.create_connection`, so a
+    client that never touches `requests` cannot open an outbound connection from a test.
+
+    Still sends nothing anywhere: the target is a CLOSED loopback port. Before the fix this
+    call raised OSError (the OS refusing the connection); now the guard refuses it first.
+    """
+    port = _closed_loopback_port()
     client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     client.settimeout(2)
     try:
-        with pytest.raises(OSError) as excinfo:
-            client.connect(("127.0.0.1", closed_port))
+        with pytest.raises(AssertionError, match=_GUARD_MESSAGE):
+            client.connect(("127.0.0.1", port))
+        with pytest.raises(AssertionError, match=_GUARD_MESSAGE):
+            client.connect_ex(("127.0.0.1", port))
     finally:
         client.close()
-    assert not isinstance(excinfo.value, AssertionError), (
-        "socket access is now intercepted by the conftest guard -- REVIEW_1 Finding 1 is "
-        "fixed; delete this test and close the finding."
-    )
+
+    with pytest.raises(AssertionError, match=_GUARD_MESSAGE):
+        socket.create_connection(("127.0.0.1", port), timeout=2)
+
+
+def test_the_guard_covers_clients_that_are_not_requests() -> None:
+    """The forward risk Finding 1 actually named: chunk 2 is a download-heavy chunk.
+
+    `urllib` reached the live NSE site from inside a test during the chunk-1 review. It now
+    fails at the socket, and so would `pandas.read_csv(url)`, `httpx` or `aiohttp` -- none of
+    which the old `requests`-shaped guard could have seen.
+    """
+    port = _closed_loopback_port()
+    with pytest.raises(AssertionError, match=_GUARD_MESSAGE):
+        urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=2)  # noqa: S310
 
 
 # --- 2. CONTEXT 7-E2 / 7-E12: bar containment at every boundary -------------------------
@@ -339,14 +360,18 @@ def _write_envelope(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
-def test_a_half_written_cache_cannot_be_repaired_by_refetching(tmp_path: Path) -> None:
-    """REVIEW_1 Finding 2, pinned: `write_cache` writes in place, so a crash mid-write
-    leaves a truncated file -- and `cached_json` reads the cache BEFORE it considers the
-    network, so even `allow_network=True` cannot heal it. The operator must delete the file.
+def test_a_half_written_cache_is_repaired_by_an_explicit_refetch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """REVIEW_1 Finding 2, CLOSED by chunk 2 -- this replaces the chunk-1 review's pin.
 
-    Loud, not silent, which is why this is a finding and not a failure. If a later session
-    makes the write atomic (temp + rename) or lets a refetch overwrite a damaged file, the
-    second half of this test starts failing -- update it and close the finding.
+    Two halves, and both matter:
+
+    * OFFLINE the damage is still LOUD. A truncated cache raises; it is never quietly
+      treated as "nothing cached", which is what would hide it forever (chunk-0 B5).
+    * With an explicit `allow_network=True` the operator now has a way out: the refetch
+      overwrites the damaged file instead of demanding a manual `rm`. It warns while doing
+      it, so the repair is on the record rather than silent.
     """
     path = universe.cache_path(tmp_path)
     envelope = json.dumps({"source_url": "u", "fetched_on": "2026-07-24", "payload": {}})
@@ -355,10 +380,40 @@ def test_a_half_written_cache_cannot_be_repaired_by_refetching(tmp_path: Path) -
     with pytest.raises(NseFetchError, match="not valid JSON"):
         universe.fetch_universe(cache_dir=tmp_path, today=date(2026, 7, 24))
 
-    with pytest.raises(NseFetchError, match="not valid JSON"):
-        universe.fetch_universe(
+    payload = json.loads((FIXTURES / "universe_snapshot.json").read_text(encoding="utf-8"))
+    monkeypatch.setattr(nse_http, "cached_json_fetch", lambda url, **kwargs: payload)
+
+    with pytest.warns(RuntimeWarning, match="damaged day-cache"):
+        symbols = universe.fetch_universe(
             cache_dir=tmp_path, today=date(2026, 7, 24), allow_network=True
         )
+    assert len(symbols) == 210
+
+    # ...and the file on disk is a well-formed envelope again, readable offline.
+    assert nse_http.read_cache(path)[0] == date(2026, 7, 24)
+    assert universe.fetch_universe(cache_dir=tmp_path, today=date(2026, 7, 24)) == symbols
+
+
+def test_the_cache_write_is_atomic(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """REVIEW_1 Finding 2, the other half: a crash mid-write must not truncate the target.
+
+    `write_cache` now writes a temp file beside the target and `os.replace`s it. Simulated
+    here by making the rename itself fail: the previous good cache must survive intact, and
+    no temp debris may be left in the directory (code_reviewer checklist 2).
+    """
+    path = universe.cache_path(tmp_path)
+    nse_http.write_cache(path, {"good": True}, url="u", fetched_on=date(2026, 7, 24))
+    before = path.read_bytes()
+
+    def _crash(src: Any, dst: Any) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(atomic_io.os, "replace", _crash)
+    with pytest.raises(OSError, match="disk full"):
+        nse_http.write_cache(path, {"good": False}, url="u", fetched_on=date(2026, 7, 25))
+
+    assert path.read_bytes() == before
+    assert sorted(p.name for p in path.parent.iterdir()) == [path.name]
 
 
 def test_a_failed_live_pull_never_clobbers_a_good_cache(

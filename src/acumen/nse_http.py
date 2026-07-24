@@ -28,11 +28,14 @@ from __future__ import annotations
 
 import json
 import time
+import warnings
 from datetime import date
 from pathlib import Path
 from typing import Any, Callable
 
 import requests
+
+from .atomic_io import atomic_write_text
 
 #: NSE serves HTTP 403 to clients without a browser-like User-Agent. This is not evasion:
 #: the pull is one request per endpoint per day of a page the site publishes publicly.
@@ -175,16 +178,20 @@ def read_cache(cache_path: Path) -> tuple[date, Any] | None:
 
 
 def write_cache(cache_path: Path, payload: Any, *, url: str, fetched_on: date) -> Path:
-    """Write the day-cache envelope for ``payload``, creating parent directories."""
-    path = Path(cache_path)
-    path.parent.mkdir(parents=True, exist_ok=True)
+    """Write the day-cache envelope for ``payload`` ATOMICALLY, creating parent directories.
+
+    The write goes to a temp file in the same directory and is then ``os.replace``d into
+    position, so an interrupted run leaves either the previous cache or the complete new one
+    -- never a truncated file (REVIEW_1 Finding 2).
+    """
     envelope = {
         "source_url": url,
         "fetched_on": fetched_on.isoformat(),
         "payload": payload,
     }
-    path.write_text(json.dumps(envelope, indent=1, sort_keys=True), encoding="utf-8")
-    return path
+    return atomic_write_text(
+        Path(cache_path), json.dumps(envelope, indent=1, sort_keys=True) + "\n"
+    )
 
 
 def cached_json(
@@ -213,9 +220,26 @@ def cached_json(
         sleep: injected for tests.
 
     Raises:
-        NseFetchError: offline with no cache for ``today``, or the live pull failed.
+        NseFetchError: offline with no cache for ``today``, the cache is damaged and no live
+            pull was authorised, or the live pull failed.
     """
-    cached = read_cache(cache_path)
+    try:
+        cached = read_cache(cache_path)
+    except NseFetchError as exc:
+        # A damaged cache stays LOUD on the read path (read_cache and the load_cached_*
+        # helpers still raise). What changes here is that the operator has a way out: an
+        # explicit allow_network=True refetch is allowed to overwrite it, so a truncated
+        # file no longer has to be deleted by hand (REVIEW_1 Finding 2).
+        if not allow_network:
+            raise
+        warnings.warn(
+            f"Replacing a damaged day-cache at {Path(cache_path)} with a fresh pull "
+            f"({exc}).",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        cached = None
+
     if cached is not None and cached[0] == today:
         return cached[1]
 
