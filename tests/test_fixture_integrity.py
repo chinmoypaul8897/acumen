@@ -129,6 +129,14 @@ FROZEN_FIXTURES_SHA256: dict[str, str] = {
     "minute/SYNTH_2099-01-06_1min.csv": (
         "d234acb10a959473e7c11671a57172263973c681945b683715a803d8c078ccc9"
     ),
+    # chunk 5A (2026-07-25): a DERIVED instrument-master sample -- five real NSE -EQ rows
+    # (the F7 calibration symbols) lifted byte-for-byte out of the daily OpenAPIScripMaster
+    # dump, plus two distractors (a BSE row and an NFO option sharing the name 'TCS') that
+    # force the exch_seg==NSE AND symbol==<SYMBOL>-EQ selection. Provenance in PROVENANCE.md;
+    # QUESTIONS.md Q-2 froze the five ticks separately (tick_sizes.json), which this must match.
+    "instrument_master_sample.json": (
+        "0071b7b03417fc43b9a5ceeb4453031991795ab76983188777c98ea1e614c993"
+    ),
 }
 
 #: CONTEXT 4.2's own test ORACLE, frozen at docs/ (not under tests/fixtures/, because it is a

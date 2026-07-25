@@ -669,3 +669,85 @@ flag in the evidence pack. Assumptions UNCHANGED pending Q38/Q39; OPEN-4 stays o
 confirmed at the chunk-4 TRADER GATE. This receipt only records that the red-case WHY is now
 explicitly the trader's own words, closing the gap between "we inferred his rule" and "he stated
 his rule" for the red case.
+
+---
+
+## OPEN-8 RESOLVED -> **ADJUSTED** (STOP) · chunk 5A gate 3 · 25-Jul-2026 (CONTEXT §9 registry item; architect owns the CONTEXT edit)
+
+OPEN-8 ("SmartAPI 1-min historical: raw or pre-adjusted?", CONTEXT §9; interim "treated as
+RAW") is **RESOLVED by the chunk-5A gate-3 live run: the SmartAPI 1-minute historical feed is
+CORPORATE-ACTION BACK-ADJUSTED, not raw.** The interim RAW assumption is WRONG. Recording the
+evidence + verdict here at the architect's direction (CONTEXT ownership stays with the
+architect); this triggers the STOP the chunk-5A card names ("if verdict is ADJUSTED -> STOP after
+recording; architect must amend §7-E11 before chunk 6 consumes minute data").
+
+**Evidence (live, 25-Jul-2026), honoring the GATE LESSON (raw-to-raw, no intervening CA):**
+
+1. **TCS whole-history cross-check.** For every TCS symbol-day BEFORE its 2018 1:1 bonus, the
+   SmartAPI 1-minute prices are EXACTLY half the raw daily-store prices and the 1-minute volume
+   is EXACTLY double -- the signature of a feed back-adjusted for that bonus. Measured on the
+   SAME day (no CA between a day and itself, a clean raw-to-raw comparison):
+   - 2016-10-03: 1-min close 120585 paise vs raw daily close 241170 -> ratio **0.5000**;
+     1-min volume 1,818,222 vs raw daily 909,440 -> ratio **1.9993**.
+   - 2016-10-04: price ratio **0.5000**, volume ratio **1.9991**.
+   - 2016-12-01: price ratio **0.5000**, volume ratio **1.9998**.
+   The gate-1 volume-reconciliation pass rate by year makes it unmistakable: **0% (2016), 0%
+   (2017), ~56% (2018 -- the bonus ex-date splits the year), ~98-99% every year from 2019 on**
+   (2019+ is post-bonus, so adjusted == raw and gate-1 passes). A raw feed would pass every year.
+
+2. **RELIANCE gate-3 probe (the decisive, self-contained event).** RELIANCE 1:1 bonus ex
+   2024-10-28. Pre-ex day 2024-10-25: SmartAPI 1-min-derived daily OHLC vs the RAW daily store:
+   - 1-min OHLC (paise): O 134348 / H 134435 / L 132200 / C 132815.
+   - raw daily OHLC (paise): O 268700 / H 268870 / L 264400 / C 265570.
+   - ratios (1-min / raw daily): high **0.5000**, low **0.5000**, close **0.50011** -- i.e.
+     raw x k, with k = 0.5024 read from the raw store's own price gap across the ex-date.
+   VERDICT for RELIANCE = **ADJUSTED**.
+
+3. **KOTHARIPRO (bonus ex 2016-01-05) and GREENPLY (FV split ex 2016-01-06): INDETERMINATE** --
+   their ex-dates predate the 2016-10 one-minute floor (RESULTS.md B), so there is no pre-ex
+   1-minute data to compare. Attempted honestly and recorded indeterminate; they neither confirm
+   nor contradict. The one decisive event (RELIANCE) plus the TCS whole-history cross-check are
+   consistent: **COMBINED OPEN-8 VERDICT = ADJUSTED.**
+
+This confirms and extends the chunk-4 dailies finding (SmartAPI ONE_DAY is CA-back-adjusted):
+the ONE_MINUTE feed is adjusted TOO. Full numeric evidence + the per-year gate-1 table are in
+`docs/gate_chunk5A_open8_evidence.md`.
+
+## Q-10 · chunk 5A · class A · **OPEN (STOP)** · BLOCKS chunk 6 (POC) build
+
+**Question.** OPEN-8 resolved ADJUSTED, which CONTRADICTS CONTEXT §7-E11: "intraday engines
+(POC, signals, simulator) run on **RAW same-day 1-min prices** (tick grid preserved; PnL in that
+day's real rupees)." The SmartAPI feed does NOT provide raw same-day prices for any day BEFORE a
+later corporate action -- it provides those prices back-adjusted by every CA after them. How
+should the intraday layer obtain the raw same-day prices E11 requires?
+
+**Why it matters.** For a RECENT day (after the symbol's last CA) adjusted == raw, so the F10
+calibration days (all 2026) and any recent backtest window are unaffected -- which is why F10
+still passes and the pipeline works. But for an OLD day before an intervening CA, the stored
+1-minute prices are NOT the rupees that traded that day and the tick grid is NOT preserved (0.5 x
+a tick-aligned price can be half-tick). This reaches the POC row grid (`round((top-bottom)/tick)`
+uses the tick), every signal price comparison, and the per-trade PnL. Silently trading on
+half-scaled old prices would be a large, invisible error -- exactly what E11 exists to prevent.
+
+**What chunk 5A did meanwhile (STOP, no silent decision).** The backfill, store, gates,
+aggregator and minute loader are all BUILT and correct as infrastructure; the store holds the
+feed AS FETCHED (adjusted), and gate-1 already FLAGS the affected old symbol-days (they fail
+volume reconciliation, so they are excluded and counted, never silently traded -- CONTEXT §7-E3).
+No un-adjustment was applied and no E11 change was made: both are the architect's call.
+
+**Options for the architect (not decided here):**
+(a) **Un-adjust on ingest** to recover raw same-day prices, using the CHUNK-3 CA factor table:
+raw_same_day = adjusted / (product of factors of CAs with ex-date AFTER that day). The CA engine
+already computes exactly these factors (`factors_between` / `adjust_pair`); this keeps E11 intact
+and is the natural fit, but must handle demerger/suppression windows (no factor) and volume
+(divide by the same k) and re-verify the tick grid lands back on-grid.
+(b) **Amend E11** to run the intraday engines on ADJUSTED prices -- simplest, but abandons
+"PnL in that day's real rupees" and "tick grid preserved", and needs the trader's awareness
+since it changes what the numbers mean on old days.
+(c) **Restrict the intraday backtest window** to each symbol's post-last-CA span (where adjusted
+== raw), disclosed as a survivorship-style limitation.
+(d) **Switch source** for raw 1-minute (CONTEXT §4.3 names Zerodha Kite as the fallback), if it
+serves raw historical minutes.
+
+Chunk 6 (POC) is the first consumer of minute data and is **BLOCKED** until this is answered;
+chunk 5A/5B (ingestion + gates) are not blocked -- they store and flag the feed as it is.

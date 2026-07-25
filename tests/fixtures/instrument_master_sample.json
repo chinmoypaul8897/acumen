@@ -1,0 +1,86 @@
+[
+  {
+    "token": "11536",
+    "symbol": "TCS-EQ",
+    "name": "TCS",
+    "expiry": "",
+    "strike": "-1.000000",
+    "lotsize": "1",
+    "instrumenttype": "",
+    "exch_seg": "NSE",
+    "tick_size": "10.000000",
+    "freeze_qty": "43417"
+  },
+  {
+    "token": "2885",
+    "symbol": "RELIANCE-EQ",
+    "name": "RELIANCE",
+    "expiry": "",
+    "strike": "-1.000000",
+    "lotsize": "1",
+    "instrumenttype": "",
+    "exch_seg": "NSE",
+    "tick_size": "10.000000",
+    "freeze_qty": "67662"
+  },
+  {
+    "token": "1333",
+    "symbol": "HDFCBANK-EQ",
+    "name": "HDFCBANK",
+    "expiry": "",
+    "strike": "-1.000000",
+    "lotsize": "1",
+    "instrumenttype": "",
+    "exch_seg": "NSE",
+    "tick_size": "5.000000",
+    "freeze_qty": "123206"
+  },
+  {
+    "token": "21690",
+    "symbol": "DIXON-EQ",
+    "name": "DIXON",
+    "expiry": "",
+    "strike": "-1.000000",
+    "lotsize": "1",
+    "instrumenttype": "",
+    "exch_seg": "NSE",
+    "tick_size": "100.000000",
+    "freeze_qty": "6841"
+  },
+  {
+    "token": "19061",
+    "symbol": "MANAPPURAM-EQ",
+    "name": "MANAPPURAM",
+    "expiry": "",
+    "strike": "-1.000000",
+    "lotsize": "1",
+    "instrumenttype": "",
+    "exch_seg": "NSE",
+    "tick_size": "5.000000",
+    "freeze_qty": "295890"
+  },
+  {
+    "token": "532540",
+    "symbol": "TCS",
+    "name": "TCS",
+    "expiry": "",
+    "strike": "-1.000000",
+    "lotsize": "1",
+    "instrumenttype": "",
+    "exch_seg": "BSE",
+    "tick_size": "5.000000",
+    "freeze_qty": "0"
+  },
+  {
+    "token": "144307",
+    "symbol": "TCS28JUL261840CE",
+    "name": "TCS",
+    "expiry": "28JUL2026",
+    "strike": "184000.000000",
+    "lotsize": "225",
+    "instrumenttype": "OPTSTK",
+    "exch_seg": "NFO",
+    "tick_size": "5.000000",
+    "freeze_qty": "9001"
+  }
+]

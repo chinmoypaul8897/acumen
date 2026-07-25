@@ -227,3 +227,18 @@ market prices only, no credential of any kind.
   not real: a far-future date (2099) and a `SYNTH` symbol. Real-day Rule-3 verification needs
   real 1-minute data and lands in chunk 12 (per plan.md chunk-4 card); these drive the engine's
   Rule-3 and tie branches offline until then.
+
+### The instrument-master sample (chunk 5A, 2026-07-25)
+
+- **`instrument_master_sample.json`** (DERIVED) -- 7 rows lifted byte-for-byte out of the daily
+  Angel One `OpenAPIScripMaster.json` dump (CONTEXT 4.3), cached at `cache/scrip_master.json`
+  (gitignored) on 2026-07-25. Five are the real NSE cash-equity rows for the F7 calibration
+  symbols (`TCS-EQ` token 11536, `RELIANCE-EQ` 2885, `HDFCBANK-EQ` 1333, `DIXON-EQ` 21690,
+  `MANAPPURAM-EQ` 19061), each carrying its real `tick_size` in paise (`10.000000`,
+  `10.000000`, `5.000000`, `100.000000`, `5.000000` -> 0.10, 0.10, 0.05, 1.00, 0.05 rupees).
+  Two are DISTRACTORS that force the `exch_seg == NSE AND symbol == <SYMBOL>-EQ` selection: a
+  **BSE** `TCS` row (token 532540, symbol `TCS`) and an **NFO** `TCS` option (token 144307,
+  symbol `TCS28JUL261840CE`, name `TCS`) -- neither may be chosen for `TCS`. The five ticks are
+  cross-checked against the separately frozen `tick_sizes.json` (QUESTIONS.md Q-2); production
+  code always reads the live master (this file is a TEST input only). No credential of any kind
+  appears in the master -- it is a public instrument dump of tokens, tick sizes and lot sizes.

@@ -34,6 +34,7 @@ dev = [
 [project.scripts]
 acumen-backfill = "acumen.backfill_daily:main"
 acumen-ca-report = "acumen.ca_report:main"
+acumen-minute-backfill = "acumen.minute_backfill:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
