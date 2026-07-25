@@ -45,6 +45,7 @@ from __future__ import annotations
 import calendar as _calendar
 import csv
 import io
+import json
 import re
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
@@ -119,9 +120,21 @@ PRICED_KINDS: frozenset[str] = frozenset(
 )
 ALL_KINDS: frozenset[str] = PRICED_KINDS | {KIND_DEMERGER, KIND_INFORMATIONAL}
 
-#: CONTEXT 4.2: "Ordinary cash dividend (<2% of pre-announcement close) -> 1"; at or above
-#: the threshold it is a special dividend. Spec law, not a tunable.
+#: QUESTIONS.md Q-7, the architect's ruling: the OPERATIONAL special-dividend test is
+#: ``D / P_cum >= 2%`` -- a documented, disclosed deviation from CONTEXT 4.2's
+#: pre-announcement-close reference (that price exists in no source this project holds).
+#: CONTEXT 4.2's factor ``k = 1 - D/P_cum`` is unchanged; only the CLASSIFICATION reference
+#: moves to P_cum, the formula's own price. CONTEXT gains this at its next version bump.
 SPECIAL_DIVIDEND_THRESHOLD: Decimal = Decimal("0.02")
+#: Below this, a dividend is ordinary with NO further checks (the ruling's fast path). Between
+#: this and the special threshold it is still ordinary (``k = 1``) but tagged NEAR-THRESHOLD,
+#: so the ~2% boundary uncertainty the ruling accepts is visible rather than hidden.
+ORDINARY_DIVIDEND_FAST_PATH_THRESHOLD: Decimal = Decimal("0.01")
+
+#: The three dividend bands of the Q-7 classification, carried on the built :class:`Factor`.
+DIVIDEND_ORDINARY: str = "ordinary"  # D/P_cum < 1%
+DIVIDEND_NEAR_THRESHOLD: str = "near-threshold"  # 1% <= D/P_cum < 2%
+DIVIDEND_SPECIAL: str = "special"  # D/P_cum >= 2%
 
 
 class CorporateActionError(RuntimeError):
@@ -241,7 +254,13 @@ class ParseReport:
 
 @dataclass(frozen=True)
 class Factor:
-    """A pre-ex price multiplier ``k`` for one symbol's ex-date (CONTEXT 4.2)."""
+    """A pre-ex price multiplier ``k`` for one symbol's ex-date (CONTEXT 4.2).
+
+    ``classification`` carries the Q-7 dividend band (``ordinary`` / ``near-threshold`` /
+    ``special``) for dividend factors, and is empty for every other kind. It is what lets
+    :func:`special_dividend_verifications` build the verification list without re-deriving
+    D/P_cum.
+    """
 
     symbol: str
     ex_date: date
@@ -249,6 +268,7 @@ class Factor:
     k: Decimal
     basis: str
     source: str = SOURCE_NSE
+    classification: str = ""
 
     def __post_init__(self) -> None:
         if not isinstance(self.k, Decimal):
@@ -272,12 +292,50 @@ class PendingFactor:
 
 
 @dataclass(frozen=True)
+class Suppression:
+    """An ex-date across which the bias pair and trading must be SUPPRESSED (CONTEXT 3.2).
+
+    Two kinds of event produce one: a **demerger** (no valid factor exists -- CONTEXT 4.2)
+    and a **rights** issue whose issue price S is unrecoverable (QUESTIONS.md Q-6 tier 2,
+    which applies the demerger precedent). The bias engine unions these via
+    :func:`suppression_dates` and, for a trading day D where ``D-1 == ex_date`` or
+    ``D-2 == ex_date``, makes no bias update and takes no trade.
+    """
+
+    symbol: str
+    ex_date: date
+    kind: str
+    reason: str
+
+
+@dataclass(frozen=True)
+class RightsPrice:
+    """The result of trying to recover a rights issue price S (QUESTIONS.md Q-6)."""
+
+    price_paise: int | None
+    basis: str
+    recoverable: bool
+
+
+@dataclass(frozen=True)
+class RightsOverride:
+    """A curated issue price S for one rights event, citing its NSE circular (Q-6 tier 3)."""
+
+    symbol: str
+    ex_date: date
+    issue_price_paise: int
+    nse_circular: str
+    note: str = ""
+
+
+@dataclass(frozen=True)
 class FactorTable:
-    """The factors that could be built, and the events still waiting on an input."""
+    """The factors that could be built, the events still pending, and the suppressions."""
 
     factors: tuple[Factor, ...] = ()
     pending: tuple[PendingFactor, ...] = ()
     demergers: tuple[ParsedEvent, ...] = ()
+    suppressions: tuple[Suppression, ...] = ()
 
     def for_symbol(self, symbol: str) -> tuple[Factor, ...]:
         wanted = symbol.strip().upper()
@@ -495,7 +553,6 @@ def factor_for(
     event: ParsedEvent,
     *,
     cum_close_paise: int | None = None,
-    pre_announcement_close_paise: int | None = None,
     rights_issue_price_paise: int | None = None,
 ) -> Factor:
     """The pre-ex multiplier ``k`` for one typed event, per CONTEXT 4.2's table. PURE.
@@ -503,11 +560,11 @@ def factor_for(
     Args:
         event: a typed event from :func:`parse_action`.
         cum_close_paise: the close on the last cum date -- ``P`` for rights, ``P_cum`` for a
-            special dividend.
-        pre_announcement_close_paise: the close before the announcement, which is what
-            CONTEXT 4.2 tests the 2% dividend threshold against (a DIFFERENT reference price
-            from ``P_cum``, deliberately, per NSE's own rule).
-        rights_issue_price_paise: ``S``, the price the rights are offered at.
+            dividend. Under QUESTIONS.md Q-7 the dividend threshold AND the special-dividend
+            factor both use this single reference price (the pre-announcement close is gone --
+            it exists in no source this project holds).
+        rights_issue_price_paise: ``S``, the price the rights are offered at (QUESTIONS.md
+            Q-6). :func:`recover_rights_price` is how the caller obtains it.
 
     Raises:
         CorporateActionError: for a demerger (no factor exists -- CONTEXT 4.2), or when a
@@ -571,36 +628,31 @@ def factor_for(
     if event.kind == KIND_DIVIDEND:
         if event.dividend_paise is None:
             raise CorporateActionError(f"{event.symbol}: dividend event carries no amount")
-        if pre_announcement_close_paise is None:
-            raise CorporateActionError(
-                f"{event.symbol} {event.ex_date.isoformat()}: CONTEXT 4.2 tests the 2% "
-                "threshold against the PRE-ANNOUNCEMENT close, and this source publishes no "
-                "announcement date (QUESTIONS.md Q-7). Pass pre_announcement_close_paise."
-            )
-        if pre_announcement_close_paise <= 0:
-            raise CorporateActionError("pre-announcement close must be positive")
-        ratio = Decimal(event.dividend_paise) / Decimal(pre_announcement_close_paise)
-        if ratio < SPECIAL_DIVIDEND_THRESHOLD:
-            return _factor(
-                event,
-                Decimal(1),
-                f"ordinary dividend {event.dividend_paise / 100:g} = {ratio:.4%} of the "
-                "pre-announcement close (< 2%), k = 1",
-            )
         if cum_close_paise is None:
             raise CorporateActionError(
-                f"{event.symbol} {event.ex_date.isoformat()}: this dividend is {ratio:.4%} of "
-                "the pre-announcement close, so it is SPECIAL and k = 1 - D/P_cum needs the "
-                "cum-date close. Pass cum_close_paise."
+                f"{event.symbol} {event.ex_date.isoformat()}: QUESTIONS.md Q-7 classifies a "
+                "dividend by D/P_cum, so it needs the cum-date close. Pass cum_close_paise "
+                "(the pre-announcement close is gone -- it exists in no source we hold)."
             )
         if cum_close_paise <= 0:
-            raise CorporateActionError("cum close must be positive")
-        k = Decimal(1) - Decimal(event.dividend_paise) / Decimal(cum_close_paise)
+            raise CorporateActionError("cum close (P_cum) must be positive")
+        band, ratio = classify_dividend(event.dividend_paise, cum_close_paise)
+        if band == DIVIDEND_SPECIAL:
+            k = Decimal(1) - Decimal(event.dividend_paise) / Decimal(cum_close_paise)
+            return _factor(
+                event,
+                k,
+                f"special dividend {event.dividend_paise / 100:g} = {ratio:.4%} of P_cum "
+                "(>= 2%), k = 1 - D/P_cum (Q-7)",
+                classification=DIVIDEND_SPECIAL,
+            )
+        note = "< 1%, fast path" if band == DIVIDEND_ORDINARY else "1%-2%, near threshold"
         return _factor(
             event,
-            k,
-            f"special dividend {event.dividend_paise / 100:g} = {ratio:.4%} of the "
-            f"pre-announcement close (>= 2%), k = 1 - D/P_cum",
+            Decimal(1),
+            f"ordinary dividend {event.dividend_paise / 100:g} = {ratio:.4%} of P_cum "
+            f"({note}), k = 1 (Q-7)",
+            classification=band,
         )
 
     if event.kind == KIND_BUYBACK:
@@ -624,6 +676,20 @@ def rights_factor(
         raise CorporateActionError(f"rights ratio {ratio_new}:{ratio_held} is not positive")
     if cum_close_paise <= 0:
         raise CorporateActionError("the cum-date close must be positive")
+    if issue_price_paise <= 0:
+        raise CorporateActionError("the rights issue price S must be positive")
+    if issue_price_paise >= cum_close_paise:
+        # REVIEW_3 Finding 3: a rights issue is ALWAYS at a discount to the market. S >= P
+        # gives TERP >= P and k >= 1, which is economically impossible -- it would INFLATE the
+        # pre-ex history instead of discounting it. Refuse rather than return a k > 1 that
+        # silently corrupts every price before the ex-date. Whoever supplies S (subject
+        # premium, or a Q-6 tier-3 override) must double-check it against the NSE circular.
+        raise CorporateActionError(
+            f"rights {ratio_new}:{ratio_held} at S={issue_price_paise / 100:g} on "
+            f"P={cum_close_paise / 100:g}: the issue price is not below the cum close "
+            "(S >= P), so TERP >= P and k >= 1 -- economically impossible for a rights issue "
+            "(REVIEW_3 F3). Verify S against the NSE circular (QUESTIONS.md Q-6)."
+        )
     price = Decimal(cum_close_paise)
     benefit = (price - Decimal(issue_price_paise)) * Decimal(ratio_new)
     per_share = benefit / Decimal(ratio_new + ratio_held)
@@ -642,7 +708,7 @@ def _require_ratio(event: ParsedEvent) -> tuple[int, int]:
     return event.ratio_new, event.ratio_held
 
 
-def _factor(event: ParsedEvent, k: Decimal, basis: str) -> Factor:
+def _factor(event: ParsedEvent, k: Decimal, basis: str, *, classification: str = "") -> Factor:
     return Factor(
         symbol=event.symbol,
         ex_date=event.ex_date,
@@ -650,7 +716,112 @@ def _factor(event: ParsedEvent, k: Decimal, basis: str) -> Factor:
         k=k,
         basis=basis,
         source=event.source,
+        classification=classification,
     )
+
+
+def classify_dividend(dividend_paise: int, cum_close_paise: int) -> tuple[str, Decimal]:
+    """The Q-7 band for a dividend of ``dividend_paise`` against ``P_cum``, and D/P_cum. PURE.
+
+    ``>= 2%`` special, ``1%-2%`` ordinary/near-threshold, ``< 1%`` ordinary/fast-path. The 2%
+    boundary is INCLUSIVE (CONTEXT 4.2's ``<`` / ``>=`` wording).
+    """
+    if cum_close_paise <= 0:
+        raise CorporateActionError("cum close (P_cum) must be positive")
+    ratio = Decimal(dividend_paise) / Decimal(cum_close_paise)
+    if ratio >= SPECIAL_DIVIDEND_THRESHOLD:
+        return DIVIDEND_SPECIAL, ratio
+    if ratio >= ORDINARY_DIVIDEND_FAST_PATH_THRESHOLD:
+        return DIVIDEND_NEAR_THRESHOLD, ratio
+    return DIVIDEND_ORDINARY, ratio
+
+
+def reconstruct_face_value_paise(
+    ex_date: date, split_events: Iterable[ParsedEvent]
+) -> int | None:
+    """Face value (paise) in effect at ``ex_date`` from parsed FACE-VALUE-SPLIT events. PURE.
+
+    QUESTIONS.md Q-6 tier 1: the rights issue price ``S = face value + premium``, and the face
+    value must be the one AT the ex-date, not the stale as-of-query ``faceVal`` the NSE row
+    carries. Only a face-value split moves the face value; a bonus does not. So the value at
+    ``ex_date`` is:
+
+    * the ``face_to`` of the LATEST split on or before ``ex_date`` (that split has taken
+      effect), else
+    * the ``face_from`` of the EARLIEST split after ``ex_date`` (the value that preceded it).
+
+    Returns ``None`` when no split touches this symbol at all -- the caller may then fall back
+    to the row's ``faceVal``, which is trustworthy PRECISELY because nothing split it. This is
+    what defuses the GREENPLY trap (faceVal 1 shown for a pre-split rights issue): a split in
+    the history overrides the stale field.
+    """
+    splits = sorted(
+        (
+            event
+            for event in split_events
+            if event.kind == KIND_SPLIT
+            and event.face_from_paise is not None
+            and event.face_to_paise is not None
+        ),
+        key=lambda event: event.ex_date,
+    )
+    if not splits:
+        return None
+    on_or_before = [s for s in splits if s.ex_date <= ex_date]
+    if on_or_before:
+        return on_or_before[-1].face_to_paise
+    return splits[0].face_from_paise
+
+
+def recover_rights_price(
+    event: ParsedEvent,
+    *,
+    face_history: Iterable[ParsedEvent] = (),
+    overrides: Mapping[tuple[str, date], RightsOverride] | None = None,
+) -> RightsPrice:
+    """Try to recover the rights issue price S for one event (QUESTIONS.md Q-6 tiers 1/3). PURE.
+
+    Fixed precedence, recorded in the Q-6 ruling:
+
+    1. an explicit issue price already parsed from the subject;
+    2. a curated override (tier 3) -- a deliberate, circular-cited value;
+    3. ``S = face value + premium``, with the face value reconstructed from the symbol's
+       :func:`reconstruct_face_value_paise` split history, or the row ``faceVal`` when no split
+       has moved it.
+
+    Returns a :class:`RightsPrice`; ``recoverable=False`` means tier 2 -- suppress the bias
+    pair across the ex-date (:func:`build_factor_table` emits a :class:`Suppression`).
+    """
+    if event.kind != KIND_RIGHTS:
+        raise CorporateActionError(f"{event.symbol}: recover_rights_price needs a rights event")
+
+    if event.rights_price_paise is not None:
+        return RightsPrice(event.rights_price_paise, "explicit issue price in subject", True)
+
+    if overrides is not None:
+        override = overrides.get((event.symbol, event.ex_date))
+        if override is not None:
+            return RightsPrice(
+                override.issue_price_paise,
+                f"curated override (NSE circular {override.nse_circular})",
+                True,
+            )
+
+    if event.rights_premium_paise is not None:
+        face = reconstruct_face_value_paise(event.ex_date, face_history)
+        face_basis = "face reconstructed from split/FV history"
+        if face is None:
+            face = event.action.face_value_paise
+            face_basis = "row faceVal (no split in parsed history moved it)"
+        if face is not None:
+            return RightsPrice(
+                face + event.rights_premium_paise,
+                f"S = face {face / 100:g} ({face_basis}) + premium "
+                f"{event.rights_premium_paise / 100:g}",
+                True,
+            )
+
+    return RightsPrice(None, "no issue price, no premium+face, and no curated override", False)
 
 
 PriceLookup = Callable[[str, date], int | None]
@@ -660,39 +831,102 @@ def build_factor_table(
     events: Iterable[ParsedEvent],
     *,
     cum_close: PriceLookup | None = None,
-    pre_announcement_close: PriceLookup | None = None,
-    rights_issue_price: PriceLookup | None = None,
+    rights_overrides: Mapping[tuple[str, date], RightsOverride] | None = None,
 ) -> FactorTable:
-    """Build every factor that CAN be built; collect the rest as pending, with the reason.
+    """Build every factor that CAN be built; collect the rest as pending or suppressed.
 
-    The lookups are injected so this stays pure and so a missing price is visible in the
-    output rather than absorbed into a plausible-looking ``k``.
+    Executes the Q-6 and Q-7 rulings end to end:
+
+    * a **demerger** and a **rights** issue with an unrecoverable S both become a
+      :class:`Suppression` (Q-6 tier 2 applies the demerger precedent);
+    * a **rights** issue with a recoverable S (subject price, override, or face+premium --
+      :func:`recover_rights_price`) becomes a factor once the cum close ``P`` is supplied, and
+      stays pending on ``P`` until then;
+    * a **dividend** is classified by ``D / P_cum`` (Q-7) and becomes an ``ordinary`` (k=1) or
+      ``special`` (k=1-D/P_cum) factor once ``P_cum`` is supplied.
+
+    The ``cum_close`` lookup is injected so this stays pure and a missing price is visible in
+    the output rather than absorbed into a plausible-looking ``k``. ``rights_overrides``
+    defaults to none; pass :func:`load_rights_overrides` to consult the committed file.
     """
+    events = list(events)
+    # The face-value-split history per symbol, used to reconstruct the face value at a rights
+    # ex-date (Q-6 tier 1). Built from the same event stream, so callers pass the FULL history
+    # for a correct reconstruction (a 3-month window sees only the splits inside it).
+    face_history: dict[str, list[ParsedEvent]] = {}
+    for event in events:
+        if event.kind == KIND_SPLIT:
+            face_history.setdefault(event.symbol, []).append(event)
+
     factors: list[Factor] = []
     pending: list[PendingFactor] = []
     demergers: list[ParsedEvent] = []
+    suppressions: list[Suppression] = []
 
     for event in events:
-        if event.kind == KIND_DEMERGER:
-            demergers.append(event)
-            continue
         if event.kind == KIND_INFORMATIONAL:
             continue
-        try:
-            factors.append(
-                factor_for(
-                    event,
-                    cum_close_paise=_lookup(cum_close, event),
-                    pre_announcement_close_paise=_lookup(pre_announcement_close, event),
-                    rights_issue_price_paise=_lookup(rights_issue_price, event),
+        if event.kind == KIND_DEMERGER:
+            demergers.append(event)
+            suppressions.append(
+                Suppression(
+                    event.symbol,
+                    event.ex_date,
+                    KIND_DEMERGER,
+                    "demerger: no valid factor exists (CONTEXT 4.2); suppress the bias pair "
+                    "across the ex-date",
                 )
             )
+            continue
+        if event.kind == KIND_RIGHTS:
+            recovered = recover_rights_price(
+                event,
+                face_history=face_history.get(event.symbol, ()),
+                overrides=rights_overrides,
+            )
+            if not recovered.recoverable:
+                suppressions.append(
+                    Suppression(
+                        event.symbol,
+                        event.ex_date,
+                        KIND_RIGHTS,
+                        f"rights: issue price unrecoverable (Q-6 tier 2) -- {recovered.basis}",
+                    )
+                )
+                continue
+            cum = _lookup(cum_close, event)
+            if cum is None:
+                pending.append(
+                    PendingFactor(
+                        event,
+                        f"rights S recoverable ({recovered.basis}); needs the cum-date close "
+                        "P (pass cum_close)",
+                    )
+                )
+                continue
+            try:
+                factors.append(
+                    factor_for(
+                        event,
+                        cum_close_paise=cum,
+                        rights_issue_price_paise=recovered.price_paise,
+                    )
+                )
+            except CorporateActionError as exc:
+                pending.append(PendingFactor(event, str(exc)))
+            continue
+        try:
+            factors.append(factor_for(event, cum_close_paise=_lookup(cum_close, event)))
         except CorporateActionError as exc:
             pending.append(PendingFactor(event=event, needs=str(exc)))
 
     factors.sort(key=lambda f: (f.symbol, f.ex_date, f.kind))
+    suppressions.sort(key=lambda s: (s.ex_date, s.symbol, s.kind))
     return FactorTable(
-        factors=tuple(factors), pending=tuple(pending), demergers=tuple(demergers)
+        factors=tuple(factors),
+        pending=tuple(pending),
+        demergers=tuple(demergers),
+        suppressions=tuple(suppressions),
     )
 
 
@@ -708,6 +942,157 @@ def demerger_table(events: Iterable[ParsedEvent]) -> tuple[ParsedEvent, ...]:
             key=lambda event: (event.ex_date, event.symbol),
         )
     )
+
+
+def suppression_dates(
+    table: FactorTable, *, symbol: str | None = None
+) -> tuple[Suppression, ...]:
+    """The suppression events the bias engine consumes (demergers + Q-6 tier-2 rights).
+
+    CONTEXT 3.2 makes a bias pair spanning a suppression ex-date invalid: for a trading day D
+    where ``D-1 == ex_date`` or ``D-2 == ex_date`` there is no bias update and no trade. This
+    is the single list the bias orchestration checks, so a demerger and an unrecoverable
+    rights issue are handled by one code path.
+    """
+    wanted = None if symbol is None else symbol.strip().upper()
+    return tuple(
+        sorted(
+            (s for s in table.suppressions if wanted is None or s.symbol == wanted),
+            key=lambda s: (s.ex_date, s.symbol, s.kind),
+        )
+    )
+
+
+def special_dividend_verifications(table: FactorTable) -> tuple[Factor, ...]:
+    """Every dividend classified SPECIAL, for checking against NSE F&O adjustment circulars.
+
+    Q-7's verification list: a special-dividend classification (``D/P_cum >= 2%``) is the one
+    dividend outcome that MOVES a price, so each one is surfaced for a human cross-check.
+    """
+    return tuple(
+        f for f in table.factors
+        if f.kind == KIND_DIVIDEND and f.classification == DIVIDEND_SPECIAL
+    )
+
+
+def near_threshold_dividends(table: FactorTable) -> tuple[Factor, ...]:
+    """Ordinary dividends in the 1%-2% band -- the ones the ~2% boundary could reclassify."""
+    return tuple(
+        f for f in table.factors
+        if f.kind == KIND_DIVIDEND and f.classification == DIVIDEND_NEAR_THRESHOLD
+    )
+
+
+def unresolved_rights(
+    table: FactorTable, universe: Iterable[str] | None = None
+) -> tuple[Suppression, ...]:
+    """Rights issues that could NOT be priced (Q-6 tier 2), optionally on the F&O universe.
+
+    The operator's work-list: each is a candidate for a curated tier-3 override once its NSE
+    circular is transcribed. With ``universe`` given, only the F&O-underlying ones -- the
+    rights the ruling says the report must list.
+    """
+    rights = tuple(s for s in table.suppressions if s.kind == KIND_RIGHTS)
+    if universe is None:
+        return rights
+    wanted = {str(symbol).strip().upper() for symbol in universe}
+    return tuple(s for s in rights if s.symbol in wanted)
+
+
+def redistribution_summary(
+    events: Iterable[ParsedEvent],
+    *,
+    cum_close: PriceLookup | None = None,
+    rights_overrides: Mapping[tuple[str, date], RightsOverride] | None = None,
+) -> dict[str, int]:
+    """How a set of parsed events settles under the Q-6/Q-7 rulings, as headline counts.
+
+    The buckets the chunk-4 prep card names -- factor / suppression / ordinary / special /
+    still-pending -- computed once the cum close is supplied. PURE (the price source is
+    injected). Used to report how the frozen-window pendings redistribute.
+    """
+    table = build_factor_table(events, cum_close=cum_close, rights_overrides=rights_overrides)
+    dividends = [f for f in table.factors if f.kind == KIND_DIVIDEND]
+    rights_factors = [f for f in table.factors if f.kind == KIND_RIGHTS]
+    return {
+        "rights_factor": len(rights_factors),
+        "rights_suppression": sum(1 for s in table.suppressions if s.kind == KIND_RIGHTS),
+        "demerger_suppression": sum(1 for s in table.suppressions if s.kind == KIND_DEMERGER),
+        "dividend_ordinary_fast": sum(
+            1 for f in dividends if f.classification == DIVIDEND_ORDINARY
+        ),
+        "dividend_ordinary_near": sum(
+            1 for f in dividends if f.classification == DIVIDEND_NEAR_THRESHOLD
+        ),
+        "dividend_special": sum(
+            1 for f in dividends if f.classification == DIVIDEND_SPECIAL
+        ),
+        "still_pending": len(table.pending),
+        "bonus_split_buyback_factor": sum(
+            1 for f in table.factors if f.kind in (KIND_BONUS, KIND_SPLIT, KIND_BUYBACK)
+        ),
+    }
+
+
+def rights_overrides_path() -> Path:
+    """The committed curated-overrides file (QUESTIONS.md Q-6 tier 3)."""
+    return Path(__file__).resolve().parent / "rights_overrides.json"
+
+
+def load_rights_overrides(
+    path: Path | None = None,
+) -> dict[tuple[str, date], RightsOverride]:
+    """Load the curated rights-price overrides. Every entry MUST cite its NSE circular.
+
+    Q-6 tier 3: a committed file may supply the issue price S for a specific rights event
+    later, each entry citing the NSE circular it came from. An entry with no citation RAISES
+    -- an override that cannot be audited back to a circular is exactly the silent guess this
+    whole item exists to prevent.
+    """
+    source = rights_overrides_path() if path is None else Path(path)
+    if not source.is_file():
+        raise CorporateActionError(f"Rights overrides file not found: {source}")
+    try:
+        payload = json.loads(source.read_text(encoding="utf-8"))
+    except ValueError as exc:
+        raise CorporateActionError(f"{source} is not valid JSON: {exc}") from exc
+    rows = payload.get("overrides", []) if isinstance(payload, Mapping) else None
+    if not isinstance(rows, list):
+        raise CorporateActionError(f"{source} must carry an 'overrides' array.")
+    result: dict[tuple[str, date], RightsOverride] = {}
+    for index, row in enumerate(rows):
+        if not isinstance(row, Mapping):
+            raise CorporateActionError(f"override {index} is not an object")
+        circular = str(row.get("nse_circular") or "").strip()
+        if not circular:
+            raise CorporateActionError(
+                f"rights override {index} ({row.get('symbol')!r} {row.get('ex_date')!r}) "
+                "cites no NSE circular. Q-6 tier 3: every override must be auditable back to "
+                "a circular -- refusing to load an un-sourced issue price."
+            )
+        symbol = str(row.get("symbol") or "").strip().upper()
+        if not symbol:
+            raise CorporateActionError(f"rights override {index} has no symbol")
+        try:
+            ex_date = date.fromisoformat(str(row["ex_date"]))
+        except (KeyError, ValueError) as exc:
+            raise CorporateActionError(
+                f"rights override {index} has no valid ex_date (YYYY-MM-DD)"
+            ) from exc
+        price = row.get("issue_price_paise")
+        if not isinstance(price, int) or isinstance(price, bool) or price <= 0:
+            raise CorporateActionError(
+                f"rights override {index} ({symbol} {ex_date}) needs a positive integer "
+                "issue_price_paise"
+            )
+        result[(symbol, ex_date)] = RightsOverride(
+            symbol=symbol,
+            ex_date=ex_date,
+            issue_price_paise=price,
+            nse_circular=circular,
+            note=str(row.get("note") or ""),
+        )
+    return result
 
 
 def factors_between(

@@ -1,0 +1,4 @@
+{
+  "_note": "Curated rights ISSUE PRICE (S) overrides -- QUESTIONS.md Q-6 tier 3. EMPTY BY DESIGN. Each entry supplies S (integer paise) for one symbol + ex_date and MUST cite the NSE circular it came from in 'nse_circular'; acumen.corp_actions.load_rights_overrides() RAISES on any entry with no citation. It is consulted AFTER an explicit issue price in the subject and BEFORE face-value reconstruction (recover_rights_price). Entry shape (illustrative only -- keep 'overrides' empty until a real circular is transcribed): {\"symbol\": \"EXAMPLE\", \"ex_date\": \"2020-01-01\", \"issue_price_paise\": 12345, \"nse_circular\": \"NSE/FAOP/00000 dd-mmm-yyyy\", \"note\": \"why this S\"}.",
+  "overrides": []
+}

@@ -303,6 +303,14 @@ a test behind it, in `src/acumen/daily_store.py`:
   ruling's examples do NOT cover: **UPL's `Q1`** on 2018-01-01 classifies as `unknown`, not
   as partly-paid, so it will be reported the moment the operator's full backfill reaches it.
 
+**Appended by the chunk-4 prep session (2026-07-25).** IL and D1 series
+(institutional/auxiliary) confirmed non-instrument — ignored by whitelist, surfaced in reports
+(REVIEW_2/3 sightings: HDFCBANK, KOTAKBANK, MCX, INDHOTEL). These are `unknown` under
+`classify_series` (neither the EQ/BE/BZ whitelist nor the named `N*`/`P*`/`BL` families), so
+`daily()` never selects them and `series_report`/`unknown_series` surface them on the
+F&O-universe symbols above — the ruling's "reported, never chosen" applied to two more codes.
+`tests/test_series_selection.py` pins `IL` and `D1` as `unknown`.
+
 ---
 
 ## Q-5 · chunk 2 · class A · **RESOLVED — executed chunk 3 (2026-07-24)** · NON-BLOCKING
@@ -370,7 +378,7 @@ gone.
 
 ---
 
-## Q-6 · chunk 3 · class A · open · NON-BLOCKING for chunk 3 (BLOCKS rights factors on real events)
+## Q-6 · chunk 3 · class A · **RESOLVED — executed chunk 4 prep (2026-07-25)** · was BLOCKING rights factors on real events
 
 **Question.** CONTEXT §4.2's rights factor needs the **issue price S**. NSE's subject states a
 **PREMIUM**, not S. How is S to be obtained?
@@ -424,9 +432,49 @@ candles;
 Chunk 4 (bias) is the first session that consumes factors on real dates; the first rights
 issue on an F&O underlying inside the backtest window is the first thing that needs this.
 
+**ARCHITECT'S RULING (relayed to the chunk-4 prep session, 2026-07-25), verbatim:**
+
+> "ARCHITECT'S RULING (three tiers, no guessing): (1) where the rights issue price S is
+> recoverable from held data — subject price/premium plus face value AT the ex-date
+> reconstructed from our own parsed split/FV history — compute k per CONTEXT §4.2. (2) Where
+> S is unrecoverable: apply the demerger precedent — suppress the bias pair spanning that
+> ex-date (no bias update, no trade, 2 days), counted in the report. Never invent a factor.
+> (3) A curated overrides file (committed; every entry cites its NSE circular) may supply S
+> later; every unresolved rights event on an F&O-universe symbol is listed by the report.
+> Execution: chunk 4 prep (CA-engine side) + bias engine consumes the suppression list."
+
+**RESOLVED — executed by the chunk-4 prep session (2026-07-25).** Every tier is code with a
+test behind it, in `src/acumen/corp_actions.py`:
+
+- **Tier 1 — recoverable S.** `recover_rights_price(event, *, face_history, overrides)`
+  resolves S in a fixed precedence: (a) an explicit issue price in the subject; (b) a curated
+  override (tier 3); (c) `S = face value + premium`, where the face value AT the ex-date is
+  reconstructed from the symbol's parsed FACE-VALUE-SPLIT history by
+  `reconstruct_face_value_paise(ex_date, splits)` — the value BEFORE the earliest split after
+  the ex-date, or AFTER the latest split on/before it, or (no split touches the symbol) the
+  row's `faceVal`, which is only trustworthy precisely when no split has moved it. The stale
+  as-of-query `faceVal` is NEVER used when a split contradicts it (the GREENPLY trap this item
+  documents). With S and the cum-close P in hand, `factor_for` computes k per CONTEXT §4.2.
+- **Tier 2 — unrecoverable S -> SUPPRESSION.** When S cannot be recovered (no price, no
+  premium+face, no override — JMCPROJECT `Rights 2:7` is the live case), `build_factor_table`
+  emits a `Suppression(kind="rights")` instead of a factor, exactly as it does for a demerger.
+  `suppression_dates()` unions the demerger and unrecoverable-rights ex-dates; the bias engine
+  suppresses the bias pair and trading across each (CONTEXT 3.2's demerger precedent: for a
+  day D where `D-1 == E` or `D-2 == E`, no bias update and no trade).
+- **Tier 3 — curated overrides.** `src/acumen/rights_overrides.json` is committed and EMPTY
+  by design; its `_note` states that every entry must carry an `nse_circular` citation and an
+  issue price in integer paise. `load_rights_overrides()` reads it; an entry with no citation
+  raises. The report (`acumen.ca_report`) lists every UNRESOLVED rights event on an
+  F&O-universe symbol — the operator's work-list for transcribing a circular into an override.
+
+Frozen-window redistribution (the 7 rights): 1 suppression (JMCPROJECT, no price), 6 with a
+recoverable S once the cum close is supplied; **zero** are on an F&O-universe symbol, so the
+unresolved-F&O-rights list is empty in these windows. Full detail in the CHUNK 4 REPORT and in
+`test_ca_goldens.py` / `test_corp_actions.py`.
+
 ---
 
-## Q-7 · chunk 3 · class A · open · NON-BLOCKING for chunk 3 (BLOCKS automatic special-dividend classification)
+## Q-7 · chunk 3 · class A · **RESOLVED — executed chunk 4 prep (2026-07-25)** · was BLOCKING automatic special-dividend classification
 
 **Question.** CONTEXT §4.2 tests the 2% dividend threshold against the **pre-announcement
 close**. Which date is "the announcement", and where does it come from?
@@ -463,3 +511,33 @@ endpoint, not yet researched, and a second daily pull);
 
 Ordinary dividends are the overwhelming majority (240 of 343 rows in the July-2023 window
 alone), so whatever is ruled here runs on almost every symbol in the backtest.
+
+**ARCHITECT'S RULING (relayed to the chunk-4 prep session, 2026-07-25), verbatim:**
+
+> "ARCHITECT'S RULING: operational special-dividend test is D / P_cum >= 2% — a documented,
+> disclosed deviation from NSE's pre-announcement-close letter (that price exists in no held
+> source; P_cum is the factor formula's own reference; boundary misclassification costs <=
+> ~2% on one day, below the strategy's noise floor). Dividends < 1% of P_cum are ordinary
+> with no further checks. Every dividend classified special lands on a verification list (vs
+> NSE F&O adjustment circulars). CONTEXT gains this at next version bump. Execution: chunk 4
+> prep."
+
+**RESOLVED — executed by the chunk-4 prep session (2026-07-25).** `factor_for` now classifies
+a dividend against the CUM-date close P_cum ONLY — the pre-announcement close is gone from the
+path, because it exists in no source this project holds (this item's own evidence: `caBroadcastDate`
+is null on all 438 frozen rows). Three bands, in `src/acumen/corp_actions.py`:
+
+- **D / P_cum < 1%** -> ordinary, `k = 1`, no further checks (the fast path).
+- **1% <= D / P_cum < 2%** -> ordinary, `k = 1`, but tagged `near-threshold` so the operator
+  can see the classifications the ~2% boundary uncertainty could touch (the ruling's
+  "boundary misclassification costs <= ~2% on one day").
+- **D / P_cum >= 2%** -> SPECIAL, `k = 1 - D/P_cum` (CONTEXT §4.2's formula, unchanged), and
+  the event lands on the **verification list** (`special_dividend_verifications()`) to be
+  checked against NSE's F&O adjustment circulars.
+
+The 2% threshold is inclusive at the boundary (`>=`), matching CONTEXT §4.2's `<` / `>=`
+wording. This is a documented, disclosed deviation from CONTEXT §4.2's PRE-ANNOUNCEMENT-close
+reference; CONTEXT gains it at its next version bump (the architect owns that edit — this
+session records the ruling here and executes it, and does not touch CONTEXT.md). The 289
+frozen-window dividends redistribute (once P_cum is supplied from the daily store) into
+ordinary / near-threshold / special / still-pending — full counts in the CHUNK 4 REPORT.

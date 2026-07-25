@@ -270,8 +270,45 @@ def test_rights_follows_nses_own_terp_formula() -> None:
     assert k == Decimal(280) / Decimal(300)
 
 
+def _rights(
+    *,
+    ratio_new: int,
+    ratio_held: int,
+    premium_paise: int | None = None,
+    price_paise: int | None = None,
+    face_value_paise: int | None = None,
+    symbol: str = "ACME",
+    ex_date: date = EX,
+) -> ParsedEvent:
+    act = CorporateAction(
+        symbol=symbol,
+        ex_date=ex_date,
+        subject="Rights",
+        source=ca.SOURCE_NSE,
+        series="EQ",
+        face_value_paise=face_value_paise,
+    )
+    return ParsedEvent(
+        action=act,
+        kind=KIND_RIGHTS,
+        ratio_new=ratio_new,
+        ratio_held=ratio_held,
+        rights_premium_paise=premium_paise,
+        rights_price_paise=price_paise,
+    )
+
+
+def _split_event(ex_date: date, face_from: int, face_to: int, symbol: str = "ACME") -> ParsedEvent:
+    act = CorporateAction(
+        symbol=symbol, ex_date=ex_date, subject="split", source=ca.SOURCE_NSE, series="EQ"
+    )
+    return ParsedEvent(
+        action=act, kind=KIND_SPLIT, face_from_paise=face_from, face_to_paise=face_to
+    )
+
+
 def test_a_rights_factor_refuses_to_run_without_the_issue_price() -> None:
-    """NSE publishes a PREMIUM, not S (QUESTIONS.md Q-6). Guessing S would move real money."""
+    """factor_for is the arithmetic; S is recovered by build_factor_table, not guessed here."""
     rights = event(KIND_RIGHTS, ratio_new=2, ratio_held=7, rights_premium_paise=9000)
     with pytest.raises(CorporateActionError, match="ISSUE PRICE"):
         factor_for(rights, cum_close_paise=30000)
@@ -279,30 +316,51 @@ def test_a_rights_factor_refuses_to_run_without_the_issue_price() -> None:
         factor_for(rights, rights_issue_price_paise=20000)
 
 
-def test_an_ordinary_dividend_is_not_adjusted_and_a_special_one_is() -> None:
-    """CONTEXT 4.2's two DIFFERENT reference prices, deliberately, per NSE's own rule: the 2%
-    test uses the PRE-ANNOUNCEMENT close, the factor uses the CUM close."""
-    small = event(KIND_DIVIDEND, dividend_paise=100)
-    assert factor_for(small, pre_announcement_close_paise=10000).k == Decimal(1)
+def test_a_rights_issue_priced_at_or_above_the_cum_close_is_refused() -> None:
+    """REVIEW_3 F3: rights are always at a discount, so S >= P (k >= 1) is impossible."""
+    with pytest.raises(CorporateActionError, match="economically impossible"):
+        ca.rights_factor(cum_close_paise=10000, issue_price_paise=10000, ratio_new=1, ratio_held=4)
+    with pytest.raises(CorporateActionError, match="economically impossible"):
+        ca.rights_factor(cum_close_paise=10000, issue_price_paise=15000, ratio_new=1, ratio_held=4)
+    assert (
+        ca.rights_factor(cum_close_paise=10000, issue_price_paise=9999, ratio_new=1, ratio_held=4)
+        < Decimal(1)
+    )
 
-    big = event(KIND_DIVIDEND, dividend_paise=200)
-    factor = factor_for(big, pre_announcement_close_paise=10000, cum_close_paise=9000)
-    assert factor.k == Decimal(1) - Decimal(200) / Decimal(9000)
-    assert "special" in factor.basis
+
+def test_a_dividend_is_classified_by_D_over_P_cum() -> None:
+    """QUESTIONS.md Q-7: three bands against P_cum -- < 1% fast, 1-2% near, >= 2% special."""
+    fast = factor_for(event(KIND_DIVIDEND, dividend_paise=100), cum_close_paise=20000)  # 0.5%
+    assert fast.k == Decimal(1) and fast.classification == ca.DIVIDEND_ORDINARY
+
+    near = factor_for(event(KIND_DIVIDEND, dividend_paise=150), cum_close_paise=10000)  # 1.5%
+    assert near.k == Decimal(1) and near.classification == ca.DIVIDEND_NEAR_THRESHOLD
+
+    special = factor_for(event(KIND_DIVIDEND, dividend_paise=200), cum_close_paise=9000)  # 2.22%
+    assert special.k == Decimal(1) - Decimal(200) / Decimal(9000)
+    assert special.classification == ca.DIVIDEND_SPECIAL and "P_cum" in special.basis
 
 
 def test_the_two_percent_threshold_is_inclusive_at_the_boundary() -> None:
-    """CONTEXT 4.2 writes ordinary as "<2%" and special as ">=2%", so exactly 2% is special."""
-    exactly = event(KIND_DIVIDEND, dividend_paise=200)
-    with pytest.raises(CorporateActionError, match="SPECIAL"):
-        factor_for(exactly, pre_announcement_close_paise=10000)  # 2.0000% -> needs P_cum
-    just_under = event(KIND_DIVIDEND, dividend_paise=199)
-    assert factor_for(just_under, pre_announcement_close_paise=10000).k == Decimal(1)
+    """Q-7 keeps CONTEXT 4.2's "<2%" / ">=2%" wording, now against P_cum: exactly 2% is special."""
+    exactly = factor_for(event(KIND_DIVIDEND, dividend_paise=200), cum_close_paise=10000)  # 2.0%
+    assert exactly.classification == ca.DIVIDEND_SPECIAL
+    assert exactly.k == Decimal(1) - Decimal(200) / Decimal(10000)
+    just_under = factor_for(event(KIND_DIVIDEND, dividend_paise=199), cum_close_paise=10000)  # 1.99%
+    assert just_under.k == Decimal(1) and just_under.classification == ca.DIVIDEND_NEAR_THRESHOLD
 
 
-def test_a_dividend_factor_refuses_to_run_without_its_reference_price() -> None:
+def test_the_one_percent_fast_path_boundary_is_inclusive() -> None:
+    """Exactly 1% is NEAR-THRESHOLD (>= 1%); just under it is the fast-path ordinary."""
+    at = factor_for(event(KIND_DIVIDEND, dividend_paise=100), cum_close_paise=10000)  # 1.0%
+    assert at.classification == ca.DIVIDEND_NEAR_THRESHOLD
+    under = factor_for(event(KIND_DIVIDEND, dividend_paise=99), cum_close_paise=10000)  # 0.99%
+    assert under.classification == ca.DIVIDEND_ORDINARY
+
+
+def test_a_dividend_factor_refuses_to_run_without_P_cum() -> None:
     """A missing price must never become k = 1: that is what "no adjustment" looks like."""
-    with pytest.raises(CorporateActionError, match="PRE-ANNOUNCEMENT"):
+    with pytest.raises(CorporateActionError, match="cum-date close"):
         factor_for(event(KIND_DIVIDEND, dividend_paise=500))
 
 
@@ -319,29 +377,105 @@ def test_a_factor_must_be_a_positive_decimal() -> None:
         Factor(symbol="X", ex_date=EX, kind=KIND_BONUS, k=Decimal(0), basis="zero")
 
 
-def test_build_factor_table_collects_what_it_cannot_compute() -> None:
-    """The STOP rule in a data structure: what is missing is listed, with the reason."""
+# --- Q-6: face reconstruction, tier-1 recovery, tier-2 suppression, tier-3 overrides -------
+
+
+def test_reconstruct_face_value_prefers_split_history_over_a_stale_faceval() -> None:
+    """The GREENPLY trap: a split in the parsed history overrides the as-of-query faceVal."""
+    split = _split_event(date(2016, 1, 6), face_from=500, face_to=100)  # 5 -> 1
+    assert ca.reconstruct_face_value_paise(date(2015, 1, 1), [split]) == 500  # before -> from
+    assert ca.reconstruct_face_value_paise(date(2020, 1, 1), [split]) == 100  # after -> to
+    assert ca.reconstruct_face_value_paise(date(2016, 1, 6), [split]) == 100  # on ex -> to (effected)
+    assert ca.reconstruct_face_value_paise(date(2020, 1, 1), []) is None  # no split -> None
+
+
+def test_build_factor_table_suppresses_a_rights_with_no_recoverable_price() -> None:
+    """Q-6 tier 2: no price, no premium+face, no override -> SUPPRESSION (the demerger precedent)."""
     events = [
         event(KIND_BONUS, ratio_new=1, ratio_held=1),
-        event(KIND_RIGHTS, ratio_new=1, ratio_held=4),
+        event(KIND_RIGHTS, ratio_new=2, ratio_held=7),  # bare ratio -> unrecoverable
         event(KIND_DEMERGER),
     ]
     table = ca.build_factor_table(events)
     assert [f.kind for f in table.factors] == [KIND_BONUS]
-    assert [p.event.kind for p in table.pending] == [KIND_RIGHTS]
-    assert "ISSUE PRICE" in table.pending[0].needs
-    assert [d.kind for d in table.demergers] == [KIND_DEMERGER]
+    assert table.pending == (), "an unrecoverable rights is suppressed, not left pending"
+    assert {s.kind for s in table.suppressions} == {KIND_DEMERGER, KIND_RIGHTS}
+    rights_supp = [s for s in table.suppressions if s.kind == KIND_RIGHTS]
+    assert rights_supp and "tier 2" in rights_supp[0].reason
 
 
-def test_build_factor_table_uses_the_injected_prices_when_they_exist() -> None:
-    rights = event(KIND_RIGHTS, ratio_new=1, ratio_held=4)
-    table = ca.build_factor_table(
-        [rights],
-        cum_close=lambda symbol, day: 30000,
-        rights_issue_price=lambda symbol, day: 20000,
-    )
-    assert table.pending == ()
+def test_build_factor_table_prices_a_rights_when_S_is_recoverable_and_P_given() -> None:
+    """Q-6 tier 1: S = face + premium; k once the cum close is supplied. Face 100 + prem 100
+    = S 200 on P 300 -> k = 280/300 (the F8 numbers)."""
+    rights = _rights(ratio_new=1, ratio_held=4, premium_paise=10000, face_value_paise=10000)
+    table = ca.build_factor_table([rights], cum_close=lambda symbol, day: 30000)
+    assert table.pending == () and table.suppressions == ()
     assert table.factors[0].k == Decimal(280) / Decimal(300)
+
+
+def test_a_recoverable_rights_stays_pending_until_the_cum_close_arrives() -> None:
+    rights = _rights(ratio_new=1, ratio_held=4, premium_paise=10000, face_value_paise=10000)
+    table = ca.build_factor_table([rights])  # no cum_close
+    assert table.factors == () and table.suppressions == ()
+    assert len(table.pending) == 1 and "needs the cum-date close" in table.pending[0].needs
+
+
+def test_a_split_in_history_reprices_a_rights_that_the_stale_faceval_would_misprice() -> None:
+    """A rights BEFORE a 5->1 split: face is 5 (from history), not the row's stale 1."""
+    split = _split_event(date(2016, 1, 6), face_from=500, face_to=100)
+    rights = _rights(
+        ratio_new=1, ratio_held=1, premium_paise=0, face_value_paise=100, ex_date=date(2015, 6, 1)
+    )
+    table = ca.build_factor_table([split, rights], cum_close=lambda symbol, day: 100000)
+    # S = face 5 + premium 0 = 5 (500 paise), NOT the stale faceVal 1 (100 paise)
+    pending = table.pending
+    factor = [f for f in table.factors if f.kind == KIND_RIGHTS][0]
+    expected = ca.rights_factor(
+        cum_close_paise=100000, issue_price_paise=500, ratio_new=1, ratio_held=1
+    )
+    assert pending == () and factor.k == expected
+
+
+def test_a_rights_override_supplies_S_and_must_cite_a_circular(tmp_path) -> None:
+    """Q-6 tier 3: the committed file is empty; an entry with no circular is refused."""
+    assert ca.load_rights_overrides() == {}, "the committed overrides file is empty by design"
+
+    bad = tmp_path / "bad.json"
+    bad.write_text(
+        '{"overrides":[{"symbol":"ACME","ex_date":"2020-01-15","issue_price_paise":20000}]}',
+        encoding="utf-8",
+    )
+    with pytest.raises(CorporateActionError, match="circular"):
+        ca.load_rights_overrides(bad)
+
+    good = tmp_path / "good.json"
+    good.write_text(
+        '{"overrides":[{"symbol":"ACME","ex_date":"2020-01-15",'
+        '"issue_price_paise":20000,"nse_circular":"NSE/FAOP/123 15-Jan-2020"}]}',
+        encoding="utf-8",
+    )
+    overrides = ca.load_rights_overrides(good)
+    # a premium that would give a different S is overridden by the curated value
+    rights = _rights(ratio_new=1, ratio_held=4, premium_paise=99999, face_value_paise=10000)
+    recovered = ca.recover_rights_price(rights, overrides=overrides)
+    assert recovered.recoverable and recovered.price_paise == 20000
+    assert "circular" in recovered.basis.lower()
+
+
+def test_suppression_dates_union_demergers_and_unrecoverable_rights() -> None:
+    """The single list the bias engine consumes (CONTEXT 3.2 + Q-6 tier 2)."""
+    table = ca.build_factor_table([event(KIND_DEMERGER), event(KIND_RIGHTS, ratio_new=2, ratio_held=7)])
+    supp = ca.suppression_dates(table)
+    assert len(supp) == 2 and {s.kind for s in supp} == {KIND_DEMERGER, KIND_RIGHTS}
+
+
+def test_special_dividend_verification_list() -> None:
+    """Q-7: every SPECIAL classification lands on the verification list; ordinary ones do not."""
+    big = event(KIND_DIVIDEND, dividend_paise=300)  # 3% -> special
+    small = event(KIND_DIVIDEND, dividend_paise=50)  # 0.5% -> ordinary
+    table = ca.build_factor_table([big, small], cum_close=lambda symbol, day: 10000)
+    verifications = ca.special_dividend_verifications(table)
+    assert len(verifications) == 1 and verifications[0].classification == ca.DIVIDEND_SPECIAL
 
 
 # --- adjust_pair (CONTEXT 3.2 + 7-E11) ----------------------------------------------------

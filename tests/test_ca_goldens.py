@@ -98,25 +98,23 @@ def test_f8_rights_one_for_four_at_200_on_a_300_close() -> None:
     assert (Decimal(30000) * k).quantize(Decimal(1)) == Decimal(28000), "TERP is 280.00"
 
 
-def test_f8_a_special_dividend_uses_the_two_reference_prices_it_is_meant_to() -> None:
-    """The chunk-3 card's "one special-dividend case validated against the 4.2 formula".
+def test_a_special_dividend_uses_D_over_P_cum_per_the_q7_ruling() -> None:
+    """The chunk-3 card's special-dividend case, now under QUESTIONS.md Q-7.
 
-    D = 25.00 on a pre-announcement close of 1000.00 is 2.5% -> SPECIAL. The factor then uses
-    the CUM close (990.00), NOT the pre-announcement one: k = 1 - 25/990.
+    Q-7 tests the 2% threshold against P_cum (the factor's own reference), not the
+    pre-announcement close: D = 25.00 on a cum close of 990.00 is 2.53% -> SPECIAL, and the
+    factor is k = 1 - 25/990. CONTEXT 4.2's formula is unchanged; only the classification
+    reference moved.
     """
-    event = _synthetic("dividend", dividend_paise=2500)
-    factor = factor_for(
-        event, pre_announcement_close_paise=100000, cum_close_paise=99000
-    )
-    assert factor.k == Decimal(1) - Decimal(2500) / Decimal(99000)
-    assert factor.k.quantize(Decimal("0.00000001")) == Decimal("0.97474747")
+    special = factor_for(_synthetic("dividend", dividend_paise=2500), cum_close_paise=99000)
+    assert special.k == Decimal(1) - Decimal(2500) / Decimal(99000)
+    assert special.k.quantize(Decimal("0.00000001")) == Decimal("0.97474747")
+    assert special.classification == ca.DIVIDEND_SPECIAL
 
-    ordinary = factor_for(
-        _synthetic("dividend", dividend_paise=1900),
-        pre_announcement_close_paise=100000,
-        cum_close_paise=99000,
-    )
-    assert ordinary.k == Decimal(1), "1.9% of the pre-announcement close is ordinary"
+    # D = 19.00 on P_cum 990.00 is 1.92% -> ordinary (k = 1), tagged near-threshold.
+    ordinary = factor_for(_synthetic("dividend", dividend_paise=1900), cum_close_paise=99000)
+    assert ordinary.k == Decimal(1)
+    assert ordinary.classification == ca.DIVIDEND_NEAR_THRESHOLD
 
 
 # =========================================================================================
@@ -648,7 +646,13 @@ def test_the_report_counts_are_the_goldens(capsys) -> None:
     assert counts["universe_exceptions"] == 0
     assert counts["demergers"] == 5
     assert counts["yahoo_splits"] == 3
-    assert counts["pending"] == 296, "7 rights (Q-6) + 289 dividends (Q-7)"
+    # After the Q-6/Q-7 rulings, the 296 old pendings redistribute (offline, no price source):
+    # JMCPROJECT (a bare "Rights 2:7") is now a Q-6 tier-2 SUPPRESSION, leaving 6 rights (S
+    # recoverable, awaiting the cum close) + 289 dividends (awaiting P_cum) still pending.
+    assert counts["pending"] == 295, "6 rights (S recoverable, need P) + 289 dividends (need P_cum)"
+    assert counts["suppressions"] == 6, "5 demergers + 1 unrecoverable rights (JMCPROJECT)"
+    assert counts["rights_suppressions"] == 1
+    assert counts["unresolved_universe_rights"] == 0, "no F&O-universe rights in these windows"
 
 
 def test_the_report_refuses_a_live_run_without_a_window(capsys) -> None:

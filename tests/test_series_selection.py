@@ -201,6 +201,12 @@ def test_the_explicit_series_escape_still_reaches_the_ignored_rows(real: DailySt
         ("Q1", SERIES_UNKNOWN),
         ("GB", SERIES_UNKNOWN),
         ("IV", SERIES_UNKNOWN),
+        # QUESTIONS.md Q-4 note (chunk-4 prep): IL and D1 (institutional/auxiliary) were sighted
+        # on real F&O-universe symbols (HDFCBANK/KOTAKBANK/MCX, INDHOTEL) in REVIEW_2/3. They are
+        # neither the whitelist nor a named N*/P*/BL family, so they must classify as UNKNOWN --
+        # ignored by daily(), surfaced by the reports.
+        ("IL", SERIES_UNKNOWN),
+        ("D1", SERIES_UNKNOWN),
         ("", SERIES_UNKNOWN),
     ],
 )

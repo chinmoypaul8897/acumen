@@ -83,6 +83,14 @@ def load_live(
     return nse, bse, yahoo
 
 
+def _overrides() -> dict:
+    """The committed rights-price overrides (QUESTIONS.md Q-6 tier 3); empty by design."""
+    try:
+        return ca.load_rights_overrides()
+    except ca.CorporateActionError:
+        return {}
+
+
 def universe_symbols() -> tuple[str, ...]:
     """The F&O list, from the cached pull if there is one, else the frozen snapshot."""
     try:
@@ -124,10 +132,10 @@ def print_report(
         print(f"      {item.action.symbol} {item.action.ex_date} {item.action.subject!r}")
         print(f"          -> {item.reason}")
 
-    table = ca.build_factor_table(nse.events)
+    table = ca.build_factor_table(nse.events, rights_overrides=_overrides())
     print("\nFACTOR TABLE (NSE) " + "-" * 57)
     print(f"  built: {len(table.factors)}   pending: {len(table.pending)}   "
-          f"demergers: {len(table.demergers)}")
+          f"demergers: {len(table.demergers)}   suppressions: {len(table.suppressions)}")
     in_universe = [f for f in table.factors if f.symbol in set(symbols)]
     for factor in in_universe:
         print(f"      {factor.symbol:12} {factor.ex_date} {factor.kind:9} k={factor.k}")
@@ -138,8 +146,8 @@ def print_report(
     print("\nPENDING FACTORS (a missing price is NEVER k=1) " + "-" * 30)
     reasons: dict[str, int] = {}
     for item in table.pending:
-        key = "Q-6 rights issue price" if "ISSUE PRICE" in item.needs else (
-            "Q-7 pre-announcement close" if "PRE-ANNOUNCEMENT" in item.needs else "other"
+        key = "Q-6 rights, S recoverable, needs cum-close P" if "rights S recoverable" in item.needs else (
+            "Q-7 dividend, needs P_cum" if "cum-date close" in item.needs else "other"
         )
         reasons[key] = reasons.get(key, 0) + 1
     for key, count in sorted(reasons.items()):
@@ -149,6 +157,18 @@ def print_report(
     for event in ca.demerger_table(nse.events):
         mark = "  <-- F&O universe" if event.symbol in set(symbols) else ""
         print(f"      {event.symbol:12} {event.ex_date}  {event.subject!r}{mark}")
+
+    print("\nSUPPRESSIONS (demerger + Q-6 tier-2 rights; bias engine suppresses these) " + "-" * 2)
+    for supp in ca.suppression_dates(table):
+        mark = "  <-- F&O universe" if supp.symbol in set(symbols) else ""
+        print(f"      {supp.symbol:12} {supp.ex_date} {supp.kind:9}{mark}  {supp.reason}")
+
+    unresolved_rights = ca.unresolved_rights(table, symbols)
+    print("\nUNRESOLVED RIGHTS ON F&O-UNIVERSE SYMBOLS (Q-6 override work-list) " + "-" * 8)
+    if not unresolved_rights:
+        print("      (none in this window)")
+    for supp in unresolved_rights:
+        print(f"      {supp.symbol:12} {supp.ex_date}  {supp.reason}")
 
     print("\nCROSS-SOURCE JOIN (NSE vs BSE vs Yahoo) " + "-" * 36)
     comparisons = ca.cross_source_report(nse.events, bse.events, splits)
@@ -178,6 +198,9 @@ def print_report(
         "factors": len(table.factors),
         "pending": len(table.pending),
         "demergers": len(table.demergers),
+        "suppressions": len(table.suppressions),
+        "rights_suppressions": sum(1 for s in table.suppressions if s.kind == ca.KIND_RIGHTS),
+        "unresolved_universe_rights": len(unresolved_rights),
         "comparisons": len(comparisons),
         "disagreements": len(disagreements),
     }
