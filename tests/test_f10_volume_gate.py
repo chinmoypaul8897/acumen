@@ -21,8 +21,12 @@ from pathlib import Path
 
 import pytest
 
+from decimal import Decimal
+
+from acumen import minute_unadjust as u
 from acumen import quality_gates as qg
 from acumen import smartapi_client as sac
+from acumen.corp_actions import Factor, Suppression, KIND_BONUS, KIND_DEMERGER
 from acumen.minute_store import MinuteStore
 
 POC_DATA = Path(__file__).resolve().parents[1] / "poc" / "data"
@@ -87,3 +91,27 @@ def test_f10_extremes_are_the_expected_days(summary: list[dict]) -> None:
     gaps = {(r["symbol"], r["date"]): float(r["gap_pct"]) for r in summary}
     assert min(gaps.values()) == gaps[("MANAPPURAM", "2026-07-20")] == 0.025
     assert max(gaps.values()) == gaps[("HDFCBANK", "2026-07-16")] == 3.581
+
+
+def test_f10_days_unadjust_to_the_exact_identity(summary: list[dict]) -> None:
+    """Q-10 acceptance 4d: F10 is untouched by un-adjustment. Every F10 day is in 2026, and each
+    symbol's corporate actions all pre-date it (TCS's only bonus is 2018), so the factor window
+    (D, F] is EMPTY, k_cum == 1, and un-adjustment is the EXACT identity -- the stored raw bars
+    equal the fetched bars byte-for-byte. Proven by running the un-adjuster with a factor table
+    whose events (a 2018 bonus, a 2023 demerger) are all before the F10 dates and a 2026 fetch
+    date: the bars come back unchanged."""
+    fetch_date = date(2026, 7, 25)
+    for row in summary:
+        symbol = row["symbol"]
+        day = date.fromisoformat(row["date"])
+        assert day.year == 2026  # the whole point: F10 is a recent, post-CA window
+        csv_path = POC_DATA / f"{symbol}_{day.isoformat()}_1min.csv"
+        bars = sac.parse_candles(_minute_csv_as_smartapi_rows(csv_path))
+        # a realistic (pre-2026) factor table -- none of it falls in (D, F] for a 2026 day
+        factors = (Factor(symbol=symbol, ex_date=date(2018, 6, 1), kind=KIND_BONUS,
+                          k=Decimal(1) / 2, basis="pre-2026 bonus"),)
+        supp = (Suppression(symbol, date(2023, 7, 20), KIND_DEMERGER, "pre-2026 demerger"),)
+        result = u.unadjust_bars(bars, factors=factors, fetch_date=fetch_date, symbol=symbol,
+                                 tick_paise=5, suppressions=supp)
+        assert result.raw_bars == tuple(bars)  # identity: byte-for-byte unchanged
+        assert all(d.identity and d.provable for d in result.days)

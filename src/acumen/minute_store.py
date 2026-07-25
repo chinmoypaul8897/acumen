@@ -6,16 +6,18 @@ lesson (CONTEXT 6: "Parquet flat files. No database"):
     <root>/minute/<SYMBOL>/<SYMBOL>_<YYYY>-<MM>.parquet   one file per symbol per month
     <root>/ledger/<SYMBOL>.parquet                        one row per WINDOW ever attempted
 
-**Prices are integer paise** (CONTEXT 7-E11). The store holds the SmartAPI feed AS FETCHED.
-CONTEXT 7-E11 wants the intraday engines to run on RAW same-day prices, but the chunk-5A
-gate-3 run RESOLVED OPEN-8 to **ADJUSTED**: SmartAPI's 1-minute historical feed is
-corporate-action back-adjusted (a pre-CA day comes back at raw x k, e.g. 0.5 across a 1:1
-bonus; QUESTIONS.md OPEN-8 / Q-10). So for a RECENT day (after the symbol's last CA) the stored
-prices are raw, but for an OLD day before an intervening CA they are NOT the rupees that traded
-that day. Recovering raw same-day prices (or amending E11) is an OPEN architect decision (Q-10),
-and chunk 6 is BLOCKED on it; gate 1 already FLAGS the affected old days (they fail volume
-reconciliation) so none is silently traded. This module does not un-adjust -- it stores what the
-API returns, faithfully and labelled.
+**Prices are integer paise** (CONTEXT 7-E11). The store holds **RAW same-day prices** -- the
+rupees that actually traded that day, on that day's tick grid, exactly as CONTEXT 7-E11
+requires. The SmartAPI 1-minute feed is corporate-action back-adjusted (OPEN-8 resolved
+ADJUSTED: a pre-CA day comes back at raw x k, e.g. 0.5 across a 1:1 bonus), so the ingest path
+UN-ADJUSTS every window back to raw before it is stored here, using the chunk-3 factor table
+(QUESTIONS.md Q-10 ruling; :mod:`acumen.minute_unadjust`). A RECENT day (after the symbol's
+last CA) has an empty factor window, so its un-adjustment is the exact identity and the fetched
+prices are stored unchanged; an OLD day before an intervening CA is divided back by ``k_cum``.
+The window ledger records the FETCH DATE per window, because ``k_cum`` is fetch-dated (a future
+top-up un-adjusts with a refreshed CA table). A day whose CA in ``(D, F]`` has no factor (a
+demerger, a Q-6-pending rights) is un-provable: it is stored but gate 1 fails it, so it is
+excluded and counted (CONTEXT 7-E3) rather than silently traded on a half-scaled price.
 
 **Stamps are naive IST, open-stamped** (CONTEXT 7-E8/E12): the +05:30 the API sends is
 normalized away on ingest (in :mod:`acumen.smartapi_client`), so nothing stored here carries
@@ -92,6 +94,11 @@ WINDOW_LEDGER_SCHEMA: pa.Schema = pa.schema(
         pa.field("last_date", pa.date32()),
         pa.field("reason", pa.string()),
         pa.field("attempted_at", pa.timestamp("s")),
+        # QUESTIONS.md Q-10: k_cum is fetch-dated, so the FETCH DATE of each window is recorded
+        # explicitly (not merely implied by attempted_at) -- a future top-up un-adjusts the
+        # extended tail with a refreshed CA table keyed on this date. Nullable so a ledger
+        # written before this column (or by --rebuild-ledger, which cannot know it) still reads.
+        pa.field("fetch_date", pa.date32()),
     ]
 )
 
@@ -134,6 +141,7 @@ class WindowOutcome:
     last_date: date | None = None
     reason: str | None = None
     attempted_at: datetime | None = None
+    fetch_date: date | None = None  # F: the date this window was fetched (k_cum is fetch-dated)
 
     def __post_init__(self) -> None:
         if self.outcome not in ALL_WINDOW_OUTCOMES:
@@ -282,7 +290,10 @@ class MinuteStore:
         if not path.is_file():
             return {}
         try:
-            table = pq.read_table(path, schema=WINDOW_LEDGER_SCHEMA)
+            # Read the file's own schema (not forced to WINDOW_LEDGER_SCHEMA): a ledger written
+            # before the fetch_date column simply lacks that key below, read as None -- the
+            # write path always emits the full schema, so no NEW ledger drifts.
+            table = pq.read_table(path)
         except Exception as exc:  # a truncated ledger: report, do not surface a raw traceback
             raise MinuteStoreError(
                 f"The window ledger at {path} exists but cannot be read "
@@ -291,17 +302,19 @@ class MinuteStore:
             ) from exc
         result: dict[date, WindowOutcome] = {}
         for record in table.to_pylist():
-            stamp = record["attempted_at"]
+            stamp = record.get("attempted_at")
+            fetch = record.get("fetch_date")
             result[record["window_start"]] = WindowOutcome(
                 symbol=record["symbol"],
                 window_start=record["window_start"],
                 window_end=record["window_end"],
                 outcome=record["outcome"],
-                candle_count=record["candle_count"],
-                first_date=record["first_date"],
-                last_date=record["last_date"],
-                reason=record["reason"],
+                candle_count=record.get("candle_count"),
+                first_date=record.get("first_date"),
+                last_date=record.get("last_date"),
+                reason=record.get("reason"),
                 attempted_at=stamp if isinstance(stamp, datetime) else None,
+                fetch_date=fetch if isinstance(fetch, date) else None,
             )
         return result
 
@@ -392,6 +405,7 @@ def _windows_to_table(outcomes: Sequence[WindowOutcome]) -> pa.Table:
         columns["last_date"].append(outcome.last_date)
         columns["reason"].append(outcome.reason)
         columns["attempted_at"].append(outcome.attempted_at)
+        columns["fetch_date"].append(outcome.fetch_date)
     return pa.table(columns, schema=WINDOW_LEDGER_SCHEMA)
 
 

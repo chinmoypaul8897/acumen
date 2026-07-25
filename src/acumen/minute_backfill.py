@@ -37,6 +37,8 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Callable, Sequence
 
+from . import corp_actions as ca
+from . import minute_unadjust as unadj
 from . import quality_gates as gates
 from . import smartapi_client as sac
 from .aggregate import aggregate_15min
@@ -85,6 +87,92 @@ OPEN8_EVENTS: tuple[AdjustmentEvent, ...] = (
 )
 
 
+# --- the per-symbol factor table used to un-adjust on ingest (Q-10) --------------------
+
+
+@dataclass(frozen=True)
+class SymbolFactors:
+    """Everything the ingest path needs to un-adjust one symbol's minutes back to RAW (Q-10).
+
+    Assembled by :func:`build_symbol_factors` from the symbol's CONTEXT 4.2 corporate-action
+    history (with cum-closes read from the raw daily store) and its instrument-master tick.
+    The empty default (:data:`NO_FACTORS` via ``SymbolFactors.identity``) makes un-adjustment
+    the exact identity -- correct for a symbol with no split/bonus/rights in the window, and the
+    behaviour the offline tests rely on when they inject bars directly.
+    """
+
+    symbol: str
+    factors: tuple[ca.Factor, ...] = ()
+    suppressions: tuple[ca.Suppression, ...] = ()
+    pending_ex_dates: tuple[date, ...] = ()
+    tick_paise: int | None = None
+
+    @classmethod
+    def identity(cls, symbol: str, *, tick_paise: int | None = None) -> "SymbolFactors":
+        return cls(symbol=symbol.strip().upper(), tick_paise=tick_paise)
+
+
+def build_symbol_factors(
+    symbol: str,
+    start: date,
+    end: date,
+    daily_store: DailyStore,
+    *,
+    allow_network: bool = False,
+    cache_dir: Path | None = None,
+    today: date | None = None,
+    tick_paise: int | None = None,
+) -> SymbolFactors:
+    """Assemble ``symbol``'s Q-10 un-adjustment factor table over ``[start.year, end.year]``.
+
+    Pulls the NSE corporate-action history one year per request (the day-cached, opt-in fetcher
+    -- CONTEXT 4.2), parses it, and builds the CONTEXT 4.2 factor table with cum-date closes
+    read from the RAW daily store (so bonus/split/rights/special-dividend factors are all
+    concrete). Demergers and Q-6-pending rights come back as suppressions / pending ex-dates:
+    the vendor adjusts by factors we do not hold there, so those spans are un-provable (gate 1
+    excludes and counts them; a systematic pre-event span moves the clamp).
+
+    Network is opt-in: with ``allow_network=False`` this reads only the day-cache, so a reviewer
+    with the frozen cache gets a deterministic table and a bare clone gets an empty one.
+    """
+    sym = symbol.strip().upper()
+    actions: list[ca.CorporateAction] = []
+    for year in range(start.year, end.year + 1):
+        actions.extend(
+            ca.fetch_nse_corporate_actions(
+                date(year, 1, 1),
+                date(year, 12, 31),
+                allow_network=allow_network,
+                cache_dir=cache_dir,
+                today=today,
+            )
+        )
+    report = ca.parse_actions([a for a in actions if a.symbol == sym])
+
+    def cum_close(lookup_symbol: str, ex_date: date) -> int | None:
+        prev = _last_daily_before(daily_store, lookup_symbol, ex_date)
+        if prev is None:
+            return None
+        frame = daily_store.daily(lookup_symbol, prev, prev)
+        return None if frame.empty else int(frame.iloc[0]["close_paise"])
+
+    try:
+        overrides = ca.load_rights_overrides()
+    except ca.CorporateActionError:
+        overrides = {}
+    table = ca.build_factor_table(report.events, cum_close=cum_close, rights_overrides=overrides)
+    pending_rights = tuple(
+        sorted({p.event.ex_date for p in table.pending if p.event.kind == ca.KIND_RIGHTS})
+    )
+    return SymbolFactors(
+        symbol=sym,
+        factors=table.factors,
+        suppressions=table.suppressions,
+        pending_ex_dates=pending_rights,
+        tick_paise=tick_paise,
+    )
+
+
 # --- clamp + window planning (PURE) ----------------------------------------------------
 
 
@@ -123,6 +211,8 @@ class BackfillProgress:
     empty: int = 0
     error: int = 0
     candles: int = 0
+    unprovable_days: int = 0
+    tick_flagged_days: int = 0
 
 
 @dataclass
@@ -135,6 +225,9 @@ class BackfillResult:
     ledger_summary: dict[str, int]
     first_stored_date: date | None
     errors: list[tuple[date, date, str]] = field(default_factory=list)
+    #: Q-10 un-adjustment diagnostics accumulated across the fetched windows.
+    unprovable_days: list[date] = field(default_factory=list)
+    tick_flagged_days: list[date] = field(default_factory=list)
 
 
 def backfill_symbol(
@@ -145,6 +238,7 @@ def backfill_symbol(
     requested_start: date,
     end: date,
     *,
+    symbol_factors: SymbolFactors | None = None,
     retry_errors: bool = True,
     now: Callable[[], datetime] = datetime.now,
     on_progress: Callable[[BackfillProgress, date, date, str], None] | None = None,
@@ -152,23 +246,35 @@ def backfill_symbol(
     """Download ``symbol``'s 1-minute candles over ``[requested_start, end]``, resumably.
 
     Walks the clamped 30-day windows, skips windows already settled in the ledger, fetches the
-    rest, stores the candles and records each window's outcome. Safe to interrupt and re-run:
-    a settled window is never refetched, an ``error`` window is retried next time.
+    rest, UN-ADJUSTS each window back to RAW (Q-10; using ``symbol_factors`` and the fetch date
+    ``now().date()``), stores the raw candles and records each window's outcome incl. its fetch
+    date. Safe to interrupt and re-run: a settled window is never refetched, an ``error`` window
+    is retried next time. ``symbol_factors`` defaults to the identity table (no CA -> fetched ==
+    raw), so a symbol with no split/bonus/rights stores unchanged.
     """
     token = master.token(symbol)
+    factors = symbol_factors or SymbolFactors.identity(symbol)
     windows = plan_windows(requested_start, end)
     pending = store.pending_windows(symbol, windows, retry_errors=retry_errors)
 
     progress = BackfillProgress(windows_total=len(pending))
     errors: list[tuple[date, date, str]] = []
+    unprovable: list[date] = []
+    tick_flagged: list[date] = []
 
     for window_start, window_end in pending:
-        outcome = _fetch_and_store_window(client, store, symbol, token, window_start, window_end, now)
+        outcome, diag = _fetch_and_store_window(
+            client, store, symbol, token, window_start, window_end, factors, now
+        )
         store.record_window(outcome)
         progress.windows_done += 1
         if outcome.outcome == WINDOW_PRESENT:
             progress.present += 1
             progress.candles += outcome.candle_count or 0
+            unprovable.extend(diag.unprovable_days)
+            tick_flagged.extend(diag.tick_flagged_days)
+            progress.unprovable_days = len(unprovable)
+            progress.tick_flagged_days = len(tick_flagged)
         elif outcome.outcome == WINDOW_EMPTY:
             progress.empty += 1
         else:
@@ -184,6 +290,8 @@ def backfill_symbol(
         ledger_summary=store.ledger_summary(symbol),
         first_stored_date=store.first_stored_date(symbol),
         errors=errors,
+        unprovable_days=sorted(set(unprovable)),
+        tick_flagged_days=sorted(set(tick_flagged)),
     )
 
 
@@ -194,54 +302,93 @@ def _fetch_and_store_window(
     token: str,
     window_start: date,
     window_end: date,
+    symbol_factors: SymbolFactors,
     now: Callable[[], datetime],
-) -> WindowOutcome:
+) -> tuple[WindowOutcome, unadj.UnadjustResult]:
+    sym = symbol.strip().upper()
+    when = now()
+    fetch_date = when.date()
     from_dt = datetime.combine(window_start, dtime(9, 15))
     to_dt = datetime.combine(window_end, dtime(15, 30))
+    empty = unadj.UnadjustResult(raw_bars=(), days=())
     try:
         bars = client.get_candles(token, sac.INTERVAL_ONE_MINUTE, from_dt, to_dt)
     except sac.SmartApiError as exc:
-        return WindowOutcome(
-            symbol=symbol.strip().upper(),
-            window_start=window_start,
-            window_end=window_end,
-            outcome=WINDOW_ERROR,
-            reason=str(exc),
-            attempted_at=now(),
+        return (
+            WindowOutcome(
+                symbol=sym,
+                window_start=window_start,
+                window_end=window_end,
+                outcome=WINDOW_ERROR,
+                reason=str(exc),
+                attempted_at=when,
+                fetch_date=fetch_date,
+            ),
+            empty,
         )
     if not bars:
-        return WindowOutcome(
-            symbol=symbol.strip().upper(),
+        return (
+            WindowOutcome(
+                symbol=sym,
+                window_start=window_start,
+                window_end=window_end,
+                outcome=WINDOW_EMPTY,
+                candle_count=0,
+                reason="no candles in window (before listing or suspended)",
+                attempted_at=when,
+                fetch_date=fetch_date,
+            ),
+            empty,
+        )
+    # Q-10: un-adjust the fetched (CA-back-adjusted) window back to RAW before it is stored.
+    result = unadj.unadjust_bars(
+        bars,
+        factors=symbol_factors.factors,
+        fetch_date=fetch_date,
+        symbol=sym,
+        tick_paise=symbol_factors.tick_paise,
+        suppressions=symbol_factors.suppressions,
+        pending_ex_dates=symbol_factors.pending_ex_dates,
+    )
+    store.write_bars(sym, result.raw_bars)
+    dates = sorted({b.stamp.date() for b in result.raw_bars})
+    reason = _window_reason(len(bars), result)
+    return (
+        WindowOutcome(
+            symbol=sym,
             window_start=window_start,
             window_end=window_end,
-            outcome=WINDOW_EMPTY,
-            candle_count=0,
-            reason="no candles in window (before listing or suspended)",
-            attempted_at=now(),
-        )
-    store.write_bars(symbol, bars)
-    dates = sorted({b.stamp.date() for b in bars})
+            outcome=WINDOW_PRESENT,
+            candle_count=len(result.raw_bars),
+            first_date=dates[0],
+            last_date=dates[-1],
+            reason=reason,
+            attempted_at=when,
+            fetch_date=fetch_date,
+        ),
+        result,
+    )
+
+
+def _window_reason(fetched_count: int, result: unadj.UnadjustResult) -> str | None:
+    """The ledger ``reason`` for a stored window: the 8000-cap warning + un-adjust diagnostics."""
+    parts: list[str] = []
     # Safety net for the 8000-candle response cap: with a 28-day window this cannot fire, but
     # if a future caller widens the window and the server drops the oldest candles, flag it so
     # the truncation is visible in the ledger rather than silent. Gate 2 also excludes the
     # resulting partial first-day, so no truncated day ever reaches the backtest either way.
-    reason = None
-    if len(bars) >= sac.ONE_MINUTE_RESPONSE_CAP:
-        reason = (
-            f"WARNING: {len(bars)} candles >= the {sac.ONE_MINUTE_RESPONSE_CAP} response cap; "
-            "the oldest candles may have been dropped -- narrow the window"
+    if fetched_count >= sac.ONE_MINUTE_RESPONSE_CAP:
+        parts.append(
+            f"WARNING: {fetched_count} candles >= the {sac.ONE_MINUTE_RESPONSE_CAP} response "
+            "cap; the oldest candles may have been dropped -- narrow the window"
         )
-    return WindowOutcome(
-        symbol=symbol.strip().upper(),
-        window_start=window_start,
-        window_end=window_end,
-        outcome=WINDOW_PRESENT,
-        candle_count=len(bars),
-        first_date=dates[0],
-        last_date=dates[-1],
-        reason=reason,
-        attempted_at=now(),
-    )
+    unprovable = result.unprovable_days
+    if unprovable:
+        parts.append(f"un-provable days (gate-1 will exclude): {len(unprovable)}")
+    flagged = result.tick_flagged_days
+    if flagged:
+        parts.append(f"tick-grid-flagged days (vendor rounding > tol): {len(flagged)}")
+    return "; ".join(parts) or None
 
 
 # --- the REAL chunk-4 minute loader ----------------------------------------------------
@@ -305,6 +452,162 @@ def gate1_for_day(
 def gate2_for_day(minute_store: MinuteStore, symbol: str, day: date) -> gates.IntegrityGateResult:
     """Gate 2 for one symbol-day."""
     return gates.integrity_gate(minute_store.minutes(symbol, day), day)
+
+
+# --- rebuild an already-fetched store to RAW + the Q-10 acceptance (read-only) ----------
+
+
+def fetch_date_for_day(store: MinuteStore, symbol: str, day: date) -> date | None:
+    """The fetch date F of the window covering ``day`` (``fetch_date``, else ``attempted_at``)."""
+    for outcome in store.window_outcomes(symbol).values():
+        if outcome.window_start <= day <= outcome.window_end and outcome.outcome == WINDOW_PRESENT:
+            if outcome.fetch_date is not None:
+                return outcome.fetch_date
+            if outcome.attempted_at is not None:
+                return outcome.attempted_at.date()
+    return None
+
+
+def unadjust_stored_day(
+    store: MinuteStore,
+    symbol: str,
+    day: date,
+    symbol_factors: SymbolFactors,
+    *,
+    fetch_date: date | None = None,
+) -> tuple[StoredBar, ...]:
+    """Read a stored (as-fetched/adjusted) day and return its RAW bars IN MEMORY (read-only).
+
+    The migration primitive: it does NOT write. ``fetch_date`` defaults to the ledger's recorded
+    F for the window covering ``day`` (:func:`fetch_date_for_day`), because ``k_cum`` is
+    fetch-dated. Used by :func:`rebuild_symbol_raw` (which then writes) and by the acceptance
+    checks (which only read).
+    """
+    stored = store.minutes(symbol, day)
+    if not stored:
+        return ()
+    fd = fetch_date or fetch_date_for_day(store, symbol, day)
+    if fd is None:
+        raise DailyStoreError(
+            f"{symbol} {day}: no fetch date recorded for the covering window; cannot un-adjust "
+            "(k_cum is fetch-dated). Re-pull the window so its fetch date is recorded."
+        )
+    as_fetched = [
+        sac.OneMinuteBar(b.stamp, b.open_paise, b.high_paise, b.low_paise, b.close_paise, b.volume)
+        for b in stored
+    ]
+    result = unadj.unadjust_bars(
+        as_fetched,
+        factors=symbol_factors.factors,
+        fetch_date=fd,
+        symbol=symbol,
+        tick_paise=symbol_factors.tick_paise,
+        suppressions=symbol_factors.suppressions,
+        pending_ex_dates=symbol_factors.pending_ex_dates,
+    )
+    sym = symbol.strip().upper()
+    return tuple(
+        StoredBar(sym, rb.stamp, rb.open_paise, rb.high_paise, rb.low_paise, rb.close_paise, rb.volume)
+        for rb in result.raw_bars
+    )
+
+
+@dataclass
+class RebuildResult:
+    """The outcome of un-adjusting an already-fetched store to RAW in place."""
+
+    symbol: str
+    days_rewritten: int
+    identity_days: int
+    unadjusted_days: int
+    unprovable_days: list[date] = field(default_factory=list)
+    tick_flagged_days: list[date] = field(default_factory=list)
+
+
+def rebuild_symbol_raw(
+    store: MinuteStore, symbol: str, symbol_factors: SymbolFactors
+) -> RebuildResult:
+    """Un-adjust an already-fetched (adjusted) store to RAW IN PLACE, day by day (Q-10).
+
+    This is the one-time migration for a store built before Q-10: it reads each stored day,
+    un-adjusts it against the factor table using the window's recorded fetch date, and writes
+    the raw bars back (per-date replacement -- :meth:`MinuteStore.write_bars`). NOT idempotent
+    against re-running on an ALREADY-raw store (it would divide a second time), so it is run once
+    and only on an adjusted store; the clean, idempotent alternative is a fresh re-pull through
+    the (now un-adjusting) ingest path. The candles are gitignored and reproducible either way.
+    """
+    sym = symbol.strip().upper()
+    supp_dates = sorted({s.ex_date for s in symbol_factors.suppressions})
+    pend_dates = sorted(symbol_factors.pending_ex_dates)
+    result = RebuildResult(symbol=sym, days_rewritten=0, identity_days=0, unadjusted_days=0)
+    for day in store.stored_days(sym):
+        fd = fetch_date_for_day(store, sym, day)
+        stored = store.minutes(sym, day)
+        if not stored or fd is None:
+            continue
+        k = unadj.cumulative_factor(symbol_factors.factors, day, fd, symbol=sym)
+        if unadj._unknown_factor_between(day, fd, supp_dates, pend_dates) is not None:  # noqa: SLF001
+            result.unprovable_days.append(day)  # gate-1 excludes it; count regardless of the skip
+        if k == Decimal(1):
+            # A recent (post-last-CA) day is already RAW as fetched -- no rewrite needed. Skipping
+            # it keeps the migration to the handful of days that actually change (and avoids
+            # rewriting thousands of identical files, which is also what a flaky Windows
+            # os.replace trips over). The write path is idempotent, so this is safe to re-run.
+            result.identity_days += 1
+            continue
+        raw = unadjust_stored_day(store, sym, day, symbol_factors, fetch_date=fd)
+        store.write_bars(sym, raw)
+        result.days_rewritten += 1
+        result.unadjusted_days += 1
+    return result
+
+
+@dataclass
+class YearGate1:
+    """Gate-1 pass tally for one year (the Q-10 acceptance table, evidence 4a)."""
+
+    year: int
+    passed: int
+    total: int
+
+    @property
+    def pct(self) -> float:
+        return 100.0 * self.passed / self.total if self.total else 0.0
+
+
+def gate1_by_year(
+    daily_store: DailyStore,
+    minute_store: MinuteStore,
+    symbol: str,
+    *,
+    symbol_factors: SymbolFactors | None = None,
+) -> list[YearGate1]:
+    """Gate-1 pass rate per year over a symbol's stored days (Q-10 acceptance 4a).
+
+    With ``symbol_factors`` given, each day's stored bars are UN-ADJUSTED in memory (read-only)
+    before their volume is summed -- so this reports the "after" rate over a store that still
+    holds the adjusted feed. With ``None`` it reports the store's volume as-is (the "before"
+    rate, or the "after" rate once the store has been rebuilt to raw).
+    """
+    per_year_pass: dict[int, int] = {}
+    per_year_total: dict[int, int] = {}
+    for day in minute_store.stored_days(symbol):
+        frame = daily_store.daily(symbol, day, day)
+        if frame.empty:
+            continue
+        daily_volume = int(frame.iloc[0]["volume"])
+        if symbol_factors is None:
+            bars = minute_store.minutes(symbol, day)
+        else:
+            bars = unadjust_stored_day(minute_store, symbol, day, symbol_factors)
+        minute_volume = sum(int(b.volume) for b in bars)
+        per_year_total[day.year] = per_year_total.get(day.year, 0) + 1
+        if gates.volume_gate(daily_volume, minute_volume).passed:
+            per_year_pass[day.year] = per_year_pass.get(day.year, 0) + 1
+    return [
+        YearGate1(year=y, passed=per_year_pass.get(y, 0), total=per_year_total[y])
+        for y in sorted(per_year_total)
+    ]
 
 
 # --- gate 3 / OPEN-8 adjustment probe --------------------------------------------------
@@ -431,6 +734,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--allow-network", action="store_true", help="REQUIRED to fetch anything")
     parser.add_argument("--no-gate3", action="store_true", help="skip the OPEN-8 adjustment probe")
     parser.add_argument("--max-windows", type=int, default=None, help="cap windows this run (debug)")
+    parser.add_argument("--rebuild", action="store_true",
+                        help="Q-10: un-adjust an already-fetched (adjusted) store to RAW in place, "
+                             "then report; makes NO SmartAPI pulls")
+    parser.add_argument("--acceptance", action="store_true",
+                        help="Q-10 acceptance (read-only): print gate-1 by year BEFORE (as stored) "
+                             "and AFTER (un-adjusted in memory); makes NO SmartAPI pulls")
     return parser.parse_args(argv)
 
 
@@ -441,17 +750,11 @@ def _default_root(subdir: str) -> Path:
 
 
 def run(args: argparse.Namespace) -> int:
-    if not args.allow_network:
-        print("STOPPING: --allow-network is required. This script makes live SmartAPI pulls "
-              "(CONTEXT 4.3); nothing was fetched.")
-        return 0
-
     symbol = args.symbol.strip().upper()
     start = date.fromisoformat(args.start)
     end = date.fromisoformat(args.end) if args.end else datetime.now().date()
     minute_root = Path(args.store) if args.store else _default_root("minute_store")
     daily_root = Path(args.daily_store) if args.daily_store else _default_root("daily_store")
-
     minute_store = MinuteStore.at(minute_root)
     daily_store = DailyStore.at(daily_root)
 
@@ -459,14 +762,43 @@ def run(args: argparse.Namespace) -> int:
     print(f"range        : {start} .. {end}  (clamped to {clamp_start(start)} = 1-min floor)")
     print(f"minute store : {minute_root}")
     print(f"daily store  : {daily_root}")
-    print("logging in to SmartAPI ...")
 
+    # The Q-10 offline modes (rebuild / acceptance) read the already-fetched store and the CA
+    # history; they make NO SmartAPI pulls, so they need no login (the master loads from cache
+    # for the tick). Building the factor table needs the NSE CA history -- opt-in via --allow-network.
+    if args.rebuild or args.acceptance:
+        master = load_instrument_master(cache_dir=args.cache_dir, allow_network=args.allow_network)
+        tick_paise = _tick_paise(master, symbol)
+        print(f"  instrument master loaded; {symbol} tick = {master.tick_size(symbol)} "
+              f"({tick_paise} paise)")
+        sf = build_symbol_factors(symbol, start, end, daily_store, allow_network=args.allow_network,
+                                  cache_dir=args.cache_dir, tick_paise=tick_paise)
+        _print_symbol_factors(sf)
+        if args.acceptance:
+            _print_acceptance(daily_store, minute_store, symbol, sf)
+        if args.rebuild:
+            _print_rebuild(minute_store, symbol, sf)
+        return 0
+
+    if not args.allow_network:
+        print("STOPPING: --allow-network is required. This script makes live SmartAPI pulls "
+              "(CONTEXT 4.3); nothing was fetched. (Use --rebuild / --acceptance for the offline "
+              "Q-10 modes.)")
+        return 0
+
+    print("logging in to SmartAPI ...")
     credentials = sac.Credentials.from_env()
     client = sac.SmartApiClient(credentials).login()
     print("  login OK")
     master = load_instrument_master(cache_dir=args.cache_dir, allow_network=True)
+    tick_paise = _tick_paise(master, symbol)
     print(f"  instrument master loaded ({len(master)} NSE equities); {symbol} token = {master.token(symbol)} "
-          f"tick = {master.tick_size(symbol)}")
+          f"tick = {master.tick_size(symbol)} ({tick_paise} paise)")
+
+    # Q-10: assemble the symbol's factor table so the ingest path un-adjusts each window to RAW.
+    sf = build_symbol_factors(symbol, start, end, daily_store, allow_network=True,
+                              cache_dir=args.cache_dir, tick_paise=tick_paise)
+    _print_symbol_factors(sf)
 
     started = time.monotonic()
 
@@ -475,7 +807,7 @@ def run(args: argparse.Namespace) -> int:
             elapsed = time.monotonic() - started
             print(f"  {p.windows_done:>4}/{p.windows_total}  {ws}..{we}  "
                   f"present={p.present} empty={p.empty} error={p.error} candles={p.candles} "
-                  f"elapsed={int(elapsed)}s")
+                  f"unprovable={p.unprovable_days} tick_flag={p.tick_flagged_days} elapsed={int(elapsed)}s")
 
     if args.max_windows is not None:
         # Debug cap: only plan the first N windows this run (still resumable).
@@ -485,14 +817,17 @@ def run(args: argparse.Namespace) -> int:
             end = min(end, pending[min(args.max_windows, len(pending)) - 1][1])
             print(f"  (debug) capping this run to {args.max_windows} pending windows -> end {end}")
 
-    print("\nbackfilling ...")
-    result = backfill_symbol(client, master, minute_store, symbol, start, end, on_progress=on_progress)
+    print("\nbackfilling (un-adjusting each window to RAW on ingest) ...")
+    result = backfill_symbol(client, master, minute_store, symbol, start, end,
+                             symbol_factors=sf, on_progress=on_progress)
 
     print("\nWINDOW LEDGER " + "-" * 60)
     print(f"  windows planned  : {result.windows_planned}")
     print(f"  windows attempted: {result.windows_attempted}")
     print(f"  ledger totals    : {result.ledger_summary}")
     print(f"  depth found      : first 1-min date = {result.first_stored_date}")
+    print(f"  un-provable days : {len(result.unprovable_days)} (excluded + counted by gate 1)")
+    print(f"  tick-flag days   : {len(result.tick_flagged_days)} (vendor rounding > 2 paise)")
     if result.errors:
         print(f"  windows in ERROR : {len(result.errors)} (retried next run)")
         for ws, we, reason in result.errors[:10]:
@@ -505,6 +840,52 @@ def run(args: argparse.Namespace) -> int:
 
     client.logout()
     return 0
+
+
+def _tick_paise(master: InstrumentMaster, symbol: str) -> int | None:
+    """The symbol's tick in integer paise (from the instrument master), or ``None``."""
+    try:
+        tick = master.tick_size(symbol)
+    except InstrumentMasterError:
+        return None
+    scaled = Decimal(tick) * 100
+    return int(scaled) if scaled == scaled.to_integral_value() else None
+
+
+def _print_symbol_factors(sf: SymbolFactors) -> None:
+    print(f"\nQ-10 FACTOR TABLE for {sf.symbol} " + "-" * 40)
+    print(f"  factors (k!=1 affect un-adjust): {len(sf.factors)}")
+    for f in sf.factors:
+        if f.k != Decimal(1):
+            print(f"      {f.ex_date}  {f.kind:9s} k={f.k}  ({f.basis})")
+    print(f"  suppressions (no factor -> un-provable spans): {len(sf.suppressions)}")
+    for s in sf.suppressions:
+        print(f"      {s.ex_date}  {s.kind}: {s.reason}")
+    if sf.pending_ex_dates:
+        print(f"  Q-6-pending rights ex-dates: {list(sf.pending_ex_dates)}")
+
+
+def _print_acceptance(daily_store: DailyStore, minute_store: MinuteStore, symbol: str,
+                      sf: SymbolFactors) -> None:
+    print("\nQ-10 ACCEPTANCE 4a -- gate-1 pass rate by year " + "-" * 20)
+    before = gate1_by_year(daily_store, minute_store, symbol)  # as stored (adjusted)
+    after = gate1_by_year(daily_store, minute_store, symbol, symbol_factors=sf)  # un-adjusted
+    after_by_year = {y.year: y for y in after}
+    print(f"  {'year':>6} {'before':>18} {'after (un-adjusted)':>22}")
+    for row in before:
+        aft = after_by_year.get(row.year)
+        aft_txt = f"{aft.passed}/{aft.total} ({aft.pct:.1f}%)" if aft else "-"
+        print(f"  {row.year:>6} {f'{row.passed}/{row.total} ({row.pct:.1f}%)':>18} {aft_txt:>22}")
+
+
+def _print_rebuild(minute_store: MinuteStore, symbol: str, sf: SymbolFactors) -> None:
+    print("\nQ-10 REBUILD -- un-adjusting the stored feed to RAW in place " + "-" * 8)
+    result = rebuild_symbol_raw(minute_store, symbol, sf)
+    print(f"  days rewritten   : {result.days_rewritten}")
+    print(f"  identity days    : {result.identity_days} (k_cum=1, stored unchanged)")
+    print(f"  un-adjusted days : {result.unadjusted_days} (k_cum!=1, divided back to raw)")
+    print(f"  un-provable days : {len(result.unprovable_days)} (gate 1 excludes + counts)")
+    print("  store now holds RAW same-day prices (CONTEXT 7-E11).")
 
 
 def _print_gate_report(daily_store: DailyStore, minute_store: MinuteStore, symbol: str) -> None:
@@ -570,7 +951,7 @@ def _print_gate3_report(client: sac.SmartApiClient, master: InstrumentMaster, da
 def main(argv: list[str] | None = None) -> int:
     try:
         return run(parse_args(argv))
-    except (DailyStoreError, InstrumentMasterError, sac.SmartApiError) as exc:
+    except (DailyStoreError, InstrumentMasterError, sac.SmartApiError, ca.CorporateActionError) as exc:
         print(f"\nERROR: {type(exc).__name__}: {exc}")
         return 2
 

@@ -713,7 +713,7 @@ This confirms and extends the chunk-4 dailies finding (SmartAPI ONE_DAY is CA-ba
 the ONE_MINUTE feed is adjusted TOO. Full numeric evidence + the per-year gate-1 table are in
 `docs/gate_chunk5A_open8_evidence.md`.
 
-## Q-10 · chunk 5A · class A · **OPEN (STOP)** · BLOCKS chunk 6 (POC) build
+## Q-10 · chunk 5A · class A · **RESOLVED — executed chunk 5A-fix (2026-07-25)** · was BLOCKING chunk 6 (POC) build
 
 **Question.** OPEN-8 resolved ADJUSTED, which CONTRADICTS CONTEXT §7-E11: "intraday engines
 (POC, signals, simulator) run on **RAW same-day 1-min prices** (tick grid preserved; PnL in that
@@ -751,3 +751,57 @@ serves raw historical minutes.
 
 Chunk 6 (POC) is the first consumer of minute data and is **BLOCKED** until this is answered;
 chunk 5A/5B (ingestion + gates) are not blocked -- they store and flag the feed as it is.
+
+**ARCHITECT'S RULING (relayed to the chunk-5A-fix session, 2026-07-25), verbatim:**
+
+> "ARCHITECT'S RULING (option a, with surgical fallback): SmartAPI 1-min candles are
+> UN-ADJUSTED ON INGEST back to RAW using the chunk-3 factor table: for a candle on day
+> D fetched on date F, k_cum = product of factors of events with ex-date in (D, F];
+> raw_price = fetched_price / k_cum ; raw_volume = fetched_volume × k_cum. The minute
+> store holds RAW ONLY — CONTEXT §7-E11 stands unchanged. Gate-1 (volume reconciliation
+> vs raw bhavcopy) is hereby the per-day PROOF of factor correctness. Symbol-day spans
+> where un-adjustment is unprovable (unknown factor, e.g. pre-demerger spans if the
+> vendor demerger-adjusts, or Q-6-pending rights) and gate-1 fails → excluded + counted,
+> and if a whole pre-event span fails systematically, that symbol's minute clamp moves
+> to post-event (surgical restriction, disclosed). Source switch (Kite) stays in reserve
+> only if raw-restoration fails broadly. Ingest ledger must record the FETCH DATE per
+> window (k_cum is fetch-dated); future top-ups un-adjust with a refreshed CA table."
+
+**RESOLVED — executed by the chunk-5A-fix session (2026-07-25).** Every clause is code with a
+test behind it. The un-adjustment is the exact inverse of the chunk-3 pairwise adjustment: the
+ruling's `k_cum = product of factors with ex-date in (D, F]` is precisely
+`corp_actions.factors_between(factors, D, F)` (the same half-open `(previous, current]` window
+the bias engine adjusts *with*), so no new factor logic exists -- the same chunk-3 table the
+bias engine multiplies by is the one this un-adjusts against.
+
+- **The un-adjustment core** (`src/acumen/minute_unadjust.py`, PURE): `raw_price =
+  round_half_even(fetched / k_cum)` and `raw_volume = round_half_even(fetched × k_cum)` --
+  Decimal throughout, one half-even rounding at the end (CONTEXT §7-E11). `k_cum == 1` (a recent
+  day whose factor window is empty) is the EXACT identity: fetched is stored unchanged, so F10's
+  2026 days and every post-last-CA backtest window are untouched.
+- **Tick-snap** (the ruling implicit in "tick grid preserved", E11): an un-adjusted price within
+  2 paise of the nearest tick is snapped onto it; one further off is left as the divided value
+  and the day is FLAGGED and counted (vendor rounding beyond tolerance). Snap runs only when
+  un-adjustment actually happened (`k_cum != 1`), never re-gridding an identity day against a
+  possibly-coarser current tick.
+- **Volume direction** exactly as ruled (`× k_cum`): a 1:1 bonus doubled a pre-ex volume, so
+  recovering the raw share count multiplies BACK by k_cum (RELIANCE pre-ex volume ÷ 2 = raw).
+- **Un-provable spans**: where an event in `(D, F]` has NO factor -- a demerger (Suppression) or
+  a Q-6-pending rights -- day D is marked un-provable; the partial un-adjustment is still stored
+  so the day is visible, but gate 1 (the ruling's per-day PROOF) fails it, so it is excluded and
+  counted (CONTEXT §7-E3). A systematically-failing leading span moves the symbol's minute clamp
+  to post-event (`systematic_unprovable_floor`, the ruling's surgical fallback, disclosed).
+- **The ingest ledger records the FETCH DATE per window** (new `fetch_date` column on the window
+  ledger; `MinuteStore`/`WindowOutcome`): k_cum is fetch-dated, so a future top-up un-adjusts the
+  extended tail with a refreshed CA table keyed on its own fetch date.
+- **The store holds RAW ONLY**: un-adjustment runs in the ingest path
+  (`minute_backfill._fetch_and_store_window` -> `unadjust_bars`) before `write_bars`, and a
+  one-time `rebuild_symbol_raw` migration un-adjusts a store fetched before this ruling. CONTEXT
+  §7-E11 is unchanged (the store now satisfies its "RAW same-day prices" requirement). Kite stays
+  in reserve (untouched).
+
+Acceptance evidence + the before/after gate-1-by-year table are in
+`docs/gate_chunk5A_open8_evidence.md`. OPEN-8 stays **RESOLVED = ADJUSTED** (that was the finding
+about the feed); Q-10 is the remedy for the E11 contradiction the finding created, now executed.
+Chunk 6 (POC) is UNBLOCKED: the minute store, once rebuilt/re-pulled through the un-adjusting
+ingest path, holds the RAW same-day prices E11 requires.
