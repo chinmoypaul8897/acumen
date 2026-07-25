@@ -22,6 +22,15 @@ import pytest
 from acumen import minute_backfill as mb
 from acumen import minute_unadjust as u
 from acumen import quality_gates as qg
+from acumen.bhavcopy import (
+    FORMAT_ARCHIVE,
+    OUTCOME_NOT_FOUND,
+    OUTCOME_PRESENT,
+    DailyRow,
+    DateOutcome,
+)
+from acumen.bias_engine import BiasEngine
+from acumen.calendar import TradingCalendar
 from acumen.corp_actions import (
     Factor,
     Suppression,
@@ -30,8 +39,10 @@ from acumen.corp_actions import (
     KIND_SPLIT,
     KIND_DIVIDEND,
     KIND_DEMERGER,
+    KIND_RIGHTS,
     DIVIDEND_SPECIAL,
 )
+from acumen.daily_store import DailyStore
 from acumen.minute_store import MinuteStore, WINDOW_PRESENT, WindowOutcome
 from acumen.smartapi_client import OneMinuteBar, SmartApiError
 
@@ -225,21 +236,52 @@ def test_unadjust_bars_special_dividend_plus_bonus_volume_by_bonus_only() -> Non
     assert u.unadjust_volume(2000, day.k_price) == 900 != raw.volume
 
 
-def test_unadjust_bars_marks_a_demerger_span_unprovable() -> None:
+def test_unprovable_suppression_dates_excludes_demergers_keeps_rights() -> None:
+    """Q-10 ADDENDUM 2: the un-provability helper drops demerger suppressions (the 1-minute feed
+    is not demerger-adjusted) and keeps tier-2 unrecoverable-rights suppressions (it IS
+    rights-adjusted, but the factor is unknown)."""
+    supps = [
+        Suppression("RELIANCE", date(2023, 7, 20), KIND_DEMERGER, "Jio demerger: no factor"),
+        Suppression("ACME", date(2019, 4, 1), KIND_RIGHTS, "rights: issue price unrecoverable"),
+        Suppression("ACME", date(2020, 4, 1), KIND_DEMERGER, "another demerger"),
+    ]
+    # only the tier-2 rights ex-date survives; both demergers are excluded
+    assert u.unprovable_suppression_dates(supps) == [date(2019, 4, 1)]
+    # a list with only demergers yields nothing un-provable
+    assert u.unprovable_suppression_dates([supps[0], supps[2]]) == []
+
+
+def test_unadjust_bars_demerger_span_is_provable_tier2_rights_still_unprovable() -> None:
+    """Q-10 ADDENDUM 2: a demerger in (D, F] NO LONGER marks a minute day un-provable -- the day
+    is un-adjusted by the other events (the bonus) only and stays provable. A tier-2 unrecoverable
+    rights in (D, F] STILL marks the day un-provable (the fix does not over-reach)."""
     sym = "RELIANCE"
     factors = [_bonus(sym, date(2024, 10, 28), Decimal("0.5"))]  # the bonus we HAVE
-    supp = [Suppression(sym, date(2023, 7, 20), KIND_DEMERGER, "Jio demerger: no factor")]
+    supp = [
+        Suppression(sym, date(2023, 7, 20), KIND_DEMERGER, "Jio demerger: no factor"),
+        Suppression(sym, date(2020, 5, 13), KIND_RIGHTS, "rights: issue price unrecoverable"),
+    ]
     fetch = date(2026, 7, 25)
-    # a 2016 day: the demerger (2023) lies in (D, F] and has NO factor -> un-provable
-    old = _bars(date(2016, 11, 1), [100000])
-    # a 2024-10-25 day: the demerger is BEFORE it, only the bonus is in (D, F] -> provable
-    recent = _bars(date(2024, 10, 25), [268700])
-    result = u.unadjust_bars(old + recent, factors=factors, fetch_date=fetch, symbol=sym,
-                             suppressions=supp)
+    # a 2019 day: only the demerger (2023) and the bonus (2024) lie in (D, F]; the rights (2020)
+    # is AFTER it too. Both the demerger and the rights are in-window -> the rights makes it
+    # un-provable (guard case).
+    with_rights = _bars(date(2019, 1, 2), [100000])
+    # a 2021 day: the demerger (2023) and bonus (2024) are in (D, F]; the rights (2020) is BEFORE
+    # it -> only the demerger is an unknown-factor event, and a demerger no longer counts ->
+    # PROVABLE, un-adjusted by the bonus only.
+    post_rights = _bars(date(2021, 1, 4), [120000], vol=2000)
+    result = u.unadjust_bars(with_rights + post_rights, factors=factors, fetch_date=fetch,
+                             symbol=sym, suppressions=supp)
     by_day = {d.day: d for d in result.days}
-    assert by_day[date(2016, 11, 1)].provable is False   # demerger in window
-    assert by_day[date(2024, 10, 25)].provable is True    # only the bonus in window
-    assert result.unprovable_days == (date(2016, 11, 1),)
+    assert by_day[date(2019, 1, 2)].provable is False    # tier-2 rights in window -> un-provable
+    assert by_day[date(2021, 1, 4)].provable is True     # only the demerger in window -> provable
+    assert result.unprovable_days == (date(2019, 1, 2),)
+    # the provable post-rights day is un-adjusted by the bonus (k_price = k_shares = 0.5)
+    assert by_day[date(2021, 1, 4)].k_price == Decimal("0.5")
+    assert by_day[date(2021, 1, 4)].k_shares == Decimal("0.5")
+    raw = {b.stamp.date(): b for b in result.raw_bars}
+    assert raw[date(2021, 1, 4)].open_paise == 240000    # 120000 / 0.5 -- bonus only
+    assert raw[date(2021, 1, 4)].volume == 1000          # 2000 * 0.5
 
 
 def _day_report(day: date, *, k_price: Decimal, k_shares: Decimal, provable: bool) -> u.DayUnadjust:
@@ -428,3 +470,79 @@ def test_gate1_by_year_before_fails_after_passes(tmp_path: Path) -> None:
     after = {y.year: y for y in mb.gate1_by_year(daily, store, "TCS", symbol_factors=sf)}
     assert before[2016].passed == 0 and before[2016].total == 1   # adjusted volume fails gate-1
     assert after[2016].passed == 1 and after[2016].total == 1     # un-adjusted volume reconciles
+
+
+# --- Q-10 ADDENDUM 2: demerger scope for minutes vs the daily bias layer ----------------
+
+
+def _daily_store(
+    root: Path, symbol: str, candles: dict[date, tuple[int, int, int, int]]
+) -> tuple[DailyStore, TradingCalendar]:
+    """A temp daily store + derived calendar over synthetic candles (trading days = candle dates).
+
+    Mirrors test_bias_engine._store_from_candles: every candle date is confirmed-present, every
+    other in-range date is confirmed-404, so the derived calendar answers exactly the frozen set.
+    """
+    store = DailyStore.at(root)
+    for day, (o, h, l, c) in sorted(candles.items()):
+        store.write_rows(day, [DailyRow(
+            trade_date=day, symbol=symbol, series="EQ",
+            open_paise=o, high_paise=h, low_paise=l, close_paise=c,
+            volume=1000, source_format=FORMAT_ARCHIVE,
+        )])
+    first, last = min(candles), max(candles)
+    outcomes = []
+    d = first
+    while d <= last:
+        if d in candles:
+            outcomes.append(DateOutcome(d, OUTCOME_PRESENT, source_format=FORMAT_ARCHIVE,
+                                        http_status=200, row_count=1))
+        else:
+            outcomes.append(DateOutcome(d, OUTCOME_NOT_FOUND, http_status=404))
+        d += timedelta(days=1)
+    store.record_outcomes(outcomes)
+    return store, TradingCalendar.from_daily_store_range(store, first, last)
+
+
+def test_demerger_provable_for_minutes_but_still_suppressed_for_bias(tmp_path: Path) -> None:
+    """Q-10 ADDENDUM 2 -- both halves of the ruling's separation, on one demerger+bonus symbol:
+
+    * MINUTE layer: a pre-demerger minute day is PROVABLE, un-adjusted by the symbol's OTHER
+      events (the bonus) only; the demerger no longer marks it un-provable.
+    * DAILY BIAS layer (SEPARATE, unchanged): the demerger still suppresses the bias pair and
+      trading across its ex-date (CONTEXT 3.2).
+    """
+    sym = "ACME"
+    demerger_ex = date(2023, 7, 20)
+    bonus = _bonus(sym, date(2024, 10, 28), Decimal("0.5"))
+    supp = Suppression(sym, demerger_ex, KIND_DEMERGER, "demerger: no factor")
+
+    # --- MINUTE layer: a 2016 pre-demerger day is PROVABLE, un-adjusted by the bonus only -------
+    fetch = date(2026, 7, 25)
+    pre = _bars(date(2016, 11, 1), [120000], vol=2000)  # demerger(2023) + bonus(2024) both in (D, F]
+    result = u.unadjust_bars(pre, factors=[bonus], fetch_date=fetch, symbol=sym, suppressions=[supp])
+    minute_day = {d.day: d for d in result.days}[date(2016, 11, 1)]
+    assert minute_day.provable is True                 # the demerger no longer marks it un-provable
+    assert result.unprovable_days == ()
+    assert minute_day.k_price == Decimal("0.5") and minute_day.k_shares == Decimal("0.5")  # bonus only
+    raw = result.raw_bars[0]
+    assert raw.open_paise == 240000                    # 120000 / 0.5 -- bonus, NOT the demerger
+    assert raw.volume == 1000                          # 2000 * 0.5
+
+    # --- DAILY BIAS layer (SEPARATE, unchanged): the demerger still suppresses the pair ---------
+    base = date(2023, 7, 17)  # Monday; demerger ex on Thursday days[3]
+    days = [base + timedelta(days=i) for i in range(5)]  # Mon..Fri
+    candles = {
+        days[0]: (10000, 11000, 9000, 10500),
+        days[1]: (10450, 12000, 10400, 11800),   # breakout -> seeds bullish on Wed's pair
+        days[2]: (11800, 12500, 11700, 12100),
+        days[3]: (12100, 12300, 11000, 11100),   # 2023-07-20 = demerger ex-date
+        days[4]: (11100, 11500, 10800, 11200),
+    }
+    store, calendar = _daily_store(tmp_path / "daily", sym, candles)
+    engine = BiasEngine(store=store, calendar=calendar, factors=(bonus,), suppressions=(supp,))
+    series = {b.trade_date: b for b in engine.bias_series(sym, days[2], days[4])}
+    # Friday's pair is (Thu 07-20 = D-1, Wed 07-19 = D-2); Thu is the demerger ex-date -> suppressed
+    fri = series[days[4]]
+    assert fri.suppressed is True and fri.tradeable is False and fri.rule == "suppressed"
+    assert fri.suppression_reason == "demerger: no factor"

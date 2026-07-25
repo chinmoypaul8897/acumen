@@ -40,12 +40,22 @@ Two guards ride along, both per the ruling:
   divided value and the day is FLAGGED and counted (vendor rounding beyond tolerance). The snap
   runs only when the price was actually divided (``k_price != 1``): an identity day is stored
   byte-for-byte as fetched, never re-gridded against a possibly-coarser *current* tick.
-* **Provability.** Where an event in ``(D, F]`` has NO factor -- a demerger (a Suppression) or a
-  Q-6-pending rights -- the vendor adjusted by a factor we do not hold, so day ``D`` cannot be
-  un-adjusted. It is marked UN-PROVABLE: the partial un-adjustment is still applied, but gate 1
-  (volume reconciliation vs the raw bhavcopy) will fail it, so it is excluded and counted
-  (CONTEXT 7-E3), and a systematically-failing pre-event span moves the symbol's minute clamp
-  to post-event (:func:`systematic_unprovable_floor` -- the ruling's surgical fallback).
+* **Provability.** Where an event in ``(D, F]`` is one the vendor adjusted the MINUTE feed by
+  but for which we hold NO factor -- a Q-6 tier-2 unrecoverable rights (a Suppression) or a
+  Q-6-pending rights -- day ``D`` cannot be un-adjusted. It is marked UN-PROVABLE: the partial
+  un-adjustment is still applied, but gate 1 (volume reconciliation vs the raw bhavcopy) will
+  fail it, so it is excluded and counted (CONTEXT 7-E3), and a systematically-failing pre-event
+  span moves the symbol's minute clamp to post-event (:func:`systematic_unprovable_floor` --
+  the ruling's surgical fallback).
+
+  A **demerger** is the exception, per the Q-10 ADDENDUM 2 ruling: FIX-2's live RELIANCE probe
+  proved the 1-MINUTE feed is NOT demerger-adjusted (unlike the ONE_DAY feed), so a demerger
+  ex-date in ``(D, F]`` does NOT mark a minute day un-provable -- the pre-demerger span is
+  un-adjusted by the symbol's OTHER events (bonus/split/rights) only and proved by gate 1 like
+  any other span. Demergers never had a factor, so they were already absent from ``k_price`` and
+  ``k_shares``; this only stops them marking the span un-provable (see
+  :func:`unprovable_suppression_dates`). The demerger's DAILY bias-pair suppression (CONTEXT 3.2,
+  :mod:`acumen.bias_engine`) is a SEPARATE rule and is unchanged.
 
 Gate 1 is, by the ruling, "the per-day PROOF of factor correctness": if the factor table is
 right the un-adjusted 1-minute volume reconciles to the raw daily volume; if it is wrong or
@@ -65,7 +75,13 @@ from datetime import date
 from decimal import ROUND_HALF_EVEN, Decimal
 from typing import Iterable, Sequence
 
-from .corp_actions import Factor, SHARE_COUNT_KINDS, Suppression, factors_between
+from .corp_actions import (
+    Factor,
+    KIND_DEMERGER,
+    SHARE_COUNT_KINDS,
+    Suppression,
+    factors_between,
+)
 from .smartapi_client import OneMinuteBar
 
 #: The vendor rounds ``raw x k`` to paise, so the recovered ``raw = adjusted / k_price`` can sit
@@ -202,6 +218,21 @@ def _nearest_tick(paise: int, tick_paise: int) -> int:
     return int(steps) * tick_paise
 
 
+def unprovable_suppression_dates(suppressions: Iterable[Suppression]) -> list[date]:
+    """The suppression ex-dates that make a MINUTE day un-provable, sorted. PURE.
+
+    Q-10 ADDENDUM 2: a **demerger** suppression is EXCLUDED. FIX-2's live RELIANCE probe proved
+    the vendor's 1-MINUTE feed is NOT demerger-adjusted (median un-adjusted ratio ~1.000, not the
+    ~0.908 a demerger-adjusted feed would show), so a pre-demerger minute span is un-adjusted by
+    the symbol's other events only and proved by gate 1 -- the demerger must not mark it
+    un-provable. A Q-6 tier-2 unrecoverable rights suppression (``kind == KIND_RIGHTS``) is KEPT:
+    the minute feed IS rights-adjusted (FIX-2 2b), but its factor is unknown, so those days
+    genuinely cannot be un-adjusted. The demerger's DAILY bias-pair suppression (CONTEXT 3.2) is a
+    SEPARATE rule and consumes the full suppression list unchanged (:mod:`acumen.bias_engine`).
+    """
+    return sorted({s.ex_date for s in suppressions if s.kind != KIND_DEMERGER})
+
+
 def unadjust_bars(
     bars: Sequence[OneMinuteBar],
     *,
@@ -219,9 +250,12 @@ def unadjust_bars(
     (all of a day's bars share them), and rebuilds each
     :class:`~acumen.smartapi_client.OneMinuteBar` with raw prices (``/ k_price``, tick-snapped)
     and raw volume (``x k_shares`` -- FIX-2: share-count factors only). A day whose ``(D, F]``
-    window contains an event with NO factor -- a demerger Suppression or a Q-6-pending rights --
-    is marked UN-PROVABLE (``provable=False``): the partial un-adjustment is still applied so the
-    day is stored and visible, but gate 1 will fail it and it is excluded and counted.
+    window contains an un-provable rights event -- a Q-6 tier-2 unrecoverable rights Suppression
+    or a Q-6-pending rights -- is marked UN-PROVABLE (``provable=False``): the partial
+    un-adjustment is still applied so the day is stored and visible, but gate 1 will fail it and
+    it is excluded and counted. A **demerger** Suppression does NOT mark the day un-provable
+    (Q-10 ADDENDUM 2: the 1-minute feed is not demerger-adjusted --
+    :func:`unprovable_suppression_dates`).
 
     Args:
         bars: the fetched (adjusted) bars, any span; may cross several trade dates.
@@ -231,12 +265,15 @@ def unadjust_bars(
             records it so a future top-up un-adjusts with a refreshed CA table).
         symbol: the ticker (factors are filtered to it).
         tick_paise: the symbol's tick in paise (from the instrument master); enables tick-snap.
-        suppressions: demerger + Q-6 tier-2 rights ex-dates (unknown factor -> un-provable).
+        suppressions: the symbol's suppression list (demergers + Q-6 tier-2 rights). Only the
+            tier-2 rights mark a day un-provable; demergers are filtered out
+            (:func:`unprovable_suppression_dates`, Q-10 ADDENDUM 2). The full list is still
+            consumed unchanged by the daily bias engine's separate CONTEXT 3.2 suppression.
         pending_ex_dates: rights ex-dates whose issue price is still pending (Q-6) -- also
             unknown-factor, also un-provable.
     """
     sym = symbol.strip().upper()
-    supp_dates = sorted({s.ex_date for s in suppressions})
+    supp_dates = unprovable_suppression_dates(suppressions)
     pend_dates = sorted(set(pending_ex_dates))
 
     by_day: dict[date, list[OneMinuteBar]] = {}
@@ -296,10 +333,14 @@ def unadjust_bars(
 def _unknown_factor_between(
     day: date, fetch_date: date, supp_dates: Sequence[date], pend_dates: Sequence[date]
 ) -> str | None:
-    """A one-line reason if an unknown-factor event lies in ``(D, F]``, else ``None``. PURE."""
+    """A one-line reason if an unknown-factor event lies in ``(D, F]``, else ``None``. PURE.
+
+    ``supp_dates`` must already have demergers filtered out (:func:`unprovable_suppression_dates`,
+    Q-10 ADDENDUM 2), so the only suppression reaching here is a Q-6 tier-2 unrecoverable rights.
+    """
     hits = [d for d in supp_dates if day < d <= fetch_date]
     if hits:
-        return f"suppression (demerger / tier-2 rights) ex {hits[0]} in (D, F]"
+        return f"suppression (tier-2 unrecoverable rights) ex {hits[0]} in (D, F]"
     hits = [d for d in pend_dates if day < d <= fetch_date]
     if hits:
         return f"Q-6-pending rights ex {hits[0]} in (D, F] (issue price unknown)"

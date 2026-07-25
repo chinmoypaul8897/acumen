@@ -875,3 +875,110 @@ FIX-2's two-item scope). The architect should rule how the minute layer treats a
 settled "minutes are not demerger-adjusted" finding -- likely: a demerger no longer marks a MINUTE
 day un-provable, while the demerger's bias-pair suppression in the daily/bias engine (CONTEXT 3.2)
 is a separate concern and stays. Chunk 5B is the first consumer that hits this.
+
+### Q-10 ADDENDUM 2 (chunk 5A FIX-3, 2026-07-25) -- demerger scope for MINUTES resolved
+
+The follow-up FIX-2 flagged (immediately above) is now ruled on and executed this session.
+
+**ARCHITECT'S RULING (demerger scope for MINUTES), verbatim:**
+
+> "ARCHITECT'S RULING (demerger scope for MINUTES): FIX-2's live probe proved the
+> vendor's 1-MINUTE feed is NOT demerger-adjusted (median ratio ~1.000 vs ~0.908
+> expected if adjusted), unlike its ONE_DAY feed. Therefore demerger events are
+> EXCLUDED from the minute un-adjustment chains (k_price and k_shares) and must NOT
+> mark minute spans un-provable. Un-adjustment across a demerger uses the other events
+> only; gate-1 remains the per-day proof. The bias engine's demerger pair-suppression
+> (CONTEXT 3.2, daily layer) is a SEPARATE rule and stays exactly as is."
+
+**EXECUTED by the chunk-5A FIX-3 session (2026-07-25).** A demerger is a
+`Suppression(kind=KIND_DEMERGER)` and was NEVER a `Factor`, so it never entered `k_price` or
+`k_shares` numerically -- the "excluded from both k chains" clause was already true by
+construction (a demerger has no CONTEXT 4.2 factor; `factor_for` raises for it and
+`build_factor_table` emits a suppression, not a factor). The one behaviour that changed is the
+un-provability marking: a new PURE helper `minute_unadjust.unprovable_suppression_dates()`
+returns only the ex-dates of suppressions whose `kind != KIND_DEMERGER` (i.e. Q-6 tier-2
+unrecoverable rights), so a demerger ex-date in `(D, F]` no longer marks a minute day
+un-provable. `unadjust_bars` and `minute_backfill.rebuild_symbol_raw` both route their
+suppression dates through this one helper. Tier-2 rights and Q-6-pending rights STILL mark a
+minute day un-provable (the 1-minute feed IS rights-adjusted -- FIX-2 2b -- but we cannot
+compute the factor there), so the fix does not over-reach. Pre-demerger spans of a demerger
+symbol therefore become provable-by-gate-1 like any other span, un-adjusted by the symbol's
+other events (bonus/split/rights) only. The bias engine's demerger pair-suppression path
+(`bias_engine._bias_for`, consuming `suppression_dates()` which unions demergers + tier-2
+rights) is UNTOUCHED and still suppresses the bias pair and trading across a demerger ex-date
+(CONTEXT 3.2). A single test pins both halves of the separation (a demerger + bonus symbol:
+its pre-demerger MINUTE day is provable and un-adjusted by the bonus only, while its daily
+BIAS pair spanning the ex-date is still suppressed).
+
+**IMPORTANT -- the live RELIANCE re-run this session CONTRADICTED the ruling's factual premise; a
+new STOP (Q-11 below) is raised.** The code change is done and gate-1-safe, but the empirical basis
+for "the 1-minute feed is NOT demerger-adjusted" (FIX-2's 2016-only probe) does NOT generalise. A
+credentialed live pull of RECENT pre-demerger windows shows the 1-minute feed IS demerger-adjusted for
+that era: un-adjusted price ratio ~0.908 (= the Jio demerger factor) with gate-1 volume -10.1% on
+2022-07 AND 2023-06, while a window just AFTER the ex-date (2023-09) un-adjusts to EXACTLY 1.00000
+(gate-1 +0.00%), and the 2016 window stays ~0.997 (not demerger-adjusted). So the vendor's demerger
+adjustment is INCONSISTENT across its own history. gate-1 excludes the affected days (the ruling's
+safety net holds -- nothing is silently traded), and no RELIANCE minute data is actually rescued by
+the demerger-exclusion (every day it makes "provable" fails gate-1 anyway -- the demerger residual on
+2020-2023, the rights residual on 2016-2019). Full numbers in the CHUNK 5A FIX-3 REPORT, the evidence
+pack (FIX-3 section), and **Q-11**.
+
+---
+
+## Q-11 · chunk 5A FIX-3 · class A · **OPEN -- STOP** · BLOCKS RELIANCE minute treatment (chunk 5B)
+
+**Question.** The Q-10 ADDENDUM 2 ruling excluded demergers from the minute un-adjustment on the
+premise that "the vendor's 1-MINUTE feed is NOT demerger-adjusted" (FIX-2's live probe, measured only
+on a 2016 window). The FIX-3 live re-run proves that premise does NOT hold across the vendor's history:
+the 1-minute feed IS demerger-adjusted for 2020-2023 pre-demerger data but NOT for 2016 data. How
+should the minute layer un-adjust a symbol whose vendor demerger adjustment is applied INCONSISTENTLY
+across its own historical range?
+
+**Why it is a hole.** The ruling assumed one uniform vendor behaviour (no demerger in the minutes).
+The live evidence (credentialed SmartAPI, 2026-07-25, raw-to-raw vs the RAW daily store) shows two:
+
+| window (RELIANCE) | in (D, F] | our k_price | un-adj/raw price | gate-1 volume | demerger baked in? |
+|---|---|---|---|---|---|
+| 2016-10 | 2017 bonus, 2020 rights, [demerger], 2024 bonus | 0.24765 | ~0.99666 | FAIL ~ -1.24% (k_shares) / -0.29% (k_price) | **NO** (only rights residual) |
+| 2019-07 | 2020 rights, [demerger], 2024 bonus | 0.49530 | ~0.99666 | FAIL ~ -1.24% (k_shares) / -0.29% (k_price) | **NO** (only rights residual) |
+| 2022-07 | [demerger], 2024 bonus | 0.50000 | **~0.90787** | **FAIL ~ -10.14%** | **YES** (~0.908 residual) |
+| 2023-06 (pre-ex) | [demerger], 2024 bonus | 0.50000 | **~0.90786** | **FAIL ~ -10.14%** | **YES** (~0.908 residual) |
+| 2023-09 (post-ex) | 2024 bonus only | 0.50000 | **1.00000** | **PASS +0.00%** | n/a (demerger behind it -- clean) |
+
+The transition is somewhere between 2016 and 2022. A window straddling the 2023-07-20 ex-date settles
+it beyond doubt: 2023-06 (just before) carries the 0.908 demerger residual; 2023-09 (just after) is
+exact. So the vendor DOES bake the demerger into pre-demerger minute bars for the recent era, and
+un-adjusting those by the other events only (as the ruling requires) leaves a ~9% price error.
+
+**Why it matters.** The FIX-3 change is gate-1-SAFE -- every affected RELIANCE day fails gate-1 volume
+(the demerger residual moves volume ~10%, or the rights residual ~1.2%) and is excluded + counted
+(CONTEXT 7-E3), so no wrong price reaches the backtest. But (1) the ruling's premise is factually
+wrong for RELIANCE 2020-2023, (2) the demerger-exclusion rescues NO RELIANCE minute data (its whole
+purpose), and (3) the correct un-adjustment for the 2020-2023 span would actually INCLUDE the demerger
+factor -- the opposite of the ruling -- while the 2016 span must EXCLUDE it. No single demerger-scope
+rule un-adjusts RELIANCE correctly. Secondary finding: even the pre-2020 rights residual (~0.29% via
+k_price) is just past gate-1's -0.1% floor, so those days fail too (reinforces decision B81 -- rights
+convention -- and raises whether the gate-1 band should widen slightly).
+
+**What this session did meanwhile (STOP, no silent decision).** Executed the ruling exactly as written
+(demergers excluded from minute un-provability; the code change + tests are in this commit) because the
+architect owns the ruling and it is gate-1-safe. Did NOT change the k chains, the gate band, or the
+demerger scope beyond the ruling. Recorded the full live evidence here, in PROGRESS.md, and in the
+evidence pack, and raised this STOP. The bias-engine demerger suppression (CONTEXT 3.2) is untouched
+and correct regardless.
+
+**Options for the architect (not decided here):**
+(a) **Era-aware demerger scope for minutes:** include the demerger factor in k_price/k_shares for days
+on/after a per-symbol "vendor-demerger-adjusted floor" (empirically ~post-2016/2017 for RELIANCE),
+exclude it before -- requires detecting the floor per symbol (gate-1 by year already reveals it).
+(b) **Surgical clamp (the original Q-10 fallback), demerger-aware again:** treat a demerger as
+un-provable for the era where the vendor bakes it in, and move the minute clamp to post-demerger --
+disclosed survivorship-style restriction (loses the pre-demerger span, which is un-provable anyway).
+(c) **Keep FIX-3 as is and rely on gate-1:** accept that demerger-symbol pre-demerger minute days are
+excluded by gate-1 (safe, no rescue) and disclose the coverage loss in the chunk-9 report.
+(d) **Switch source** (Kite) for demerger symbols' minute history if it serves a consistently-adjusted
+or raw feed.
+
+Chunk 5B (full-universe backfill) is the first consumer that hits this on every demerger symbol; it is
+**BLOCKED on RELIANCE-like demerger symbols** until this is answered (5B on non-demerger symbols is not
+blocked). CONTEXT ownership and any §7-E11/§9 note stay with the architect.

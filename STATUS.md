@@ -11,7 +11,7 @@ chunk 1: reviewed-PASS
 chunk 2: reviewed-PASS
 chunk 3: reviewed-PASS
 chunk 4: reviewed-PASS
-chunk 5A: built  # + chunk5A-fix (Q-10 un-adjust) + chunk5A-fix2 (k_shares volume split; RELIANCE demerger probe), unreviewed -- joins the 5A review
+chunk 5A: built  # + chunk5A-fix (Q-10 un-adjust) + fix2 (k_shares split) + fix3 (demergers out of minute un-provability; live re-run raised Q-11 STOP), unreviewed -- joins the 5A review
 chunk 5B: todo
 chunk 6: todo
 chunk 7: todo

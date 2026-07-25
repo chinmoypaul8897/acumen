@@ -537,7 +537,9 @@ def rebuild_symbol_raw(
     the (now un-adjusting) ingest path. The candles are gitignored and reproducible either way.
     """
     sym = symbol.strip().upper()
-    supp_dates = sorted({s.ex_date for s in symbol_factors.suppressions})
+    # Q-10 ADDENDUM 2: demergers are filtered out here (the 1-minute feed is not
+    # demerger-adjusted); only tier-2 unrecoverable rights mark a minute day un-provable.
+    supp_dates = unadj.unprovable_suppression_dates(symbol_factors.suppressions)
     pend_dates = sorted(symbol_factors.pending_ex_dates)
     result = RebuildResult(symbol=sym, days_rewritten=0, identity_days=0, unadjusted_days=0)
     for day in store.stored_days(sym):
@@ -866,9 +868,15 @@ def _print_symbol_factors(sf: SymbolFactors) -> None:
             # k_shares; every other kind (special dividend, rights) enters k_price only.
             domain = "price+volume" if f.kind in ca.SHARE_COUNT_KINDS else "price only"
             print(f"      {f.ex_date}  {f.kind:9s} k={f.k}  [{domain}]  ({f.basis})")
-    print(f"  suppressions (no factor -> un-provable spans): {len(sf.suppressions)}")
+    # Q-10 ADDENDUM 2: a demerger no longer marks a MINUTE span un-provable (the 1-minute feed
+    # is not demerger-adjusted); only a tier-2 unrecoverable rights does. The demerger's DAILY
+    # bias-pair suppression (CONTEXT 3.2) is separate and consumes the full list.
+    print(f"  suppressions: {len(sf.suppressions)} "
+          f"(demerger -> bias-layer only; tier-2 rights -> un-provable minute span)")
     for s in sf.suppressions:
-        print(f"      {s.ex_date}  {s.kind}: {s.reason}")
+        minute_effect = ("un-provable minute span" if s.kind != ca.KIND_DEMERGER
+                         else "NOT un-provable for minutes (bias-layer suppression only)")
+        print(f"      {s.ex_date}  {s.kind}: {s.reason}  [{minute_effect}]")
     if sf.pending_ex_dates:
         print(f"  Q-6-pending rights ex-dates: {list(sf.pending_ex_dates)}")
 
