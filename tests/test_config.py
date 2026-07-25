@@ -1,8 +1,12 @@
-"""Config-loader tests -- above all: while OPEN-1 is unanswered, sizing must be BLOCKED.
+"""Config-loader tests -- the sizing guard, before and after OPEN-1.
 
-CONTEXT 9 OPEN-1 says "code takes risk_per_trade as required config; no default". The
-single most valuable assertion in this chunk is that the loader refuses to hand a number to
-a simulation path while the trader has not given one.
+CONTEXT 9 OPEN-1 said "code takes risk_per_trade as required config; no default". The trader
+answered it in Round 3 (25-Jul-2026): risk per trade = 1000 rupees (QUESTIONS.md ROUND-3
+RECEIPTS). The committed config now carries that amount, so the repo config RESOLVES to 1000
+instead of blocking. The guard that protected real money while OPEN-1 was open is not deleted,
+only re-pointed: a NULL value still raises, proved here on a synthetic config
+(``test_a_null_risk_per_trade_still_blocks``), so a future config that loses the amount fails
+loudly rather than sizing on a guess.
 
 Every test that reads the repository's own config.yaml passes ``include_env=False``: a test
 suite has no reason to pull the operator's live credentials into ``os.environ``
@@ -52,9 +56,14 @@ def test_repo_config_loads() -> None:
     assert config.source == DEFAULT_CONFIG_PATH
 
 
-def test_repo_config_keeps_risk_per_trade_required_empty() -> None:
-    """OPEN-1 is open: the committed config must carry no amount at all."""
-    assert load_config(include_env=False).risk_per_trade is None
+def test_repo_config_resolves_risk_per_trade_to_the_trader_amount() -> None:
+    """OPEN-1 RESOLVED (Round 3): the committed config carries the trader's 1000-rupee risk."""
+    assert load_config(include_env=False).risk_per_trade == 1000
+
+
+def test_repo_config_require_risk_per_trade_returns_the_trader_amount() -> None:
+    """The sizing path now gets a real number, not a ConfigError (OPEN-1 resolved)."""
+    assert load_config(include_env=False).require_risk_per_trade() == 1000
 
 
 def test_repo_config_carries_the_context_row_size() -> None:
@@ -72,11 +81,15 @@ def test_repo_config_paths_resolve_absolute_under_the_repo() -> None:
         assert resolved.parent == REPO_ROOT, name
 
 
-# --- OPEN-1: simulation blocked --------------------------------------------------------
+# --- OPEN-1: a null amount still blocks (regression kept after the resolution) ----------
 
 
-def test_simulation_is_blocked_while_risk_per_trade_is_null() -> None:
-    config = load_config(include_env=False)
+def test_a_null_risk_per_trade_still_blocks(tmp_path: Path) -> None:
+    """OPEN-1 is resolved in the repo config, but the GUARD must survive: a null amount
+    (a future config that loses the value) still refuses to size, naming OPEN-1."""
+    path = _write_config(tmp_path, "risk_per_trade: null\nrow_size: 24\npaths:\n  data_dir: data\n")
+    config = load_config(path, include_env=False)
+    assert config.risk_per_trade is None
     with pytest.raises(ConfigError) as excinfo:
         config.require_risk_per_trade()
     message = str(excinfo.value)

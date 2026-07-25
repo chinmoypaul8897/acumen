@@ -563,3 +563,109 @@ the paisa (raw close 2220.00 = SmartAPI 2220.00), which is why it was the adjust
 of the cross-check. The quirk-corrected 2020-07-13 bhavcopy was verified genuine three ways
 (TCS = SmartAPI exactly; both symbols' closes continuous with the raw store neighbours
 2020-07-10 / 2020-07-14; the file's own PREVCLOSE column chains to 2020-07-10) and ingested.
+
+---
+
+## ROUND-3 RECEIPTS (25-Jul-2026) · recorded by the chunk-5A prep session
+
+The trader's Round-3 answers (relayed by Paul) landed while chunk 5A was being built. Each is
+recorded here VERBATIM as a receipt, with what it resolves and what it newly blocks. CONTEXT.md
+edits and its §9/§10 version bumps are the ARCHITECT's; this session records the receipts and
+executes the code/config changes each authorises (the same discipline used for Q-4..Q-7).
+
+### R3-a · Q29 received -> OPEN-1 RESOLVED (risk per trade = 1000)
+
+> "Q29 (Round 3): risk per trade = 1,000 rupees."
+
+OPEN-1 ("the trader's INR risk-per-trade amount", CONTEXT §9) is **RESOLVED**. Executed this
+session: `config.yaml` now carries `risk_per_trade: 1000` with the comment
+"trader answer, Round 3, 25-Jul-2026". The simulation block in the config loader
+(`Config.require_risk_per_trade`) lifts by the value simply existing: it now returns 1000
+instead of raising `ConfigError`. The loader test suite was updated to match --
+`test_repo_config_resolves_risk_per_trade_to_the_trader_amount` asserts the repo config returns
+1000, and a NEW test (`test_a_null_risk_per_trade_still_blocks`) proves a `null` value still
+raises the OPEN-1 `ConfigError`, so the guard that protected real money while OPEN-1 was open
+is kept as a regression, not deleted. Chunk 8 (simulator) is no longer OPEN-1-blocked; it still
+depends on chunk 7 (plan.md §3). CONTEXT §9 registry + §10 version bump are the architect's.
+
+### R3-b · Q32 received -> FRVP settings CONFIRMED (Row Size = 24)
+
+> "Q32 (Round 3, screenshot): Rows Layout = 'Number of Rows'; Row Size = 24; Volume shows
+> Up/Down split on the chart."
+
+The trader's Fixed Range Volume Profile screenshot **confirms** the provisional setting: Rows
+Layout is "Number of Rows" and Row Size = 24 -- the value CONTEXT §3.3 and `config.yaml` already
+carry. Executed this session: the `config.yaml` `row_size` comment now reads "confirmed by
+trader screenshot, Round 3, 25-Jul-2026" (value unchanged at 24). The screenshot's "Volume
+Up/Down" is a **display-only** chart option (it colours each row's up- vs down-volume); the POC
+math uses each bar's TOTAL volume, which CONTEXT §3.3 already specifies -- so §3.3 is UNCHANGED
+and no F-fixture moves. OPEN-2's remaining half (reproducing 3 chart POCs against his readings)
+stays chunk 6's TRADER GATE. CONTEXT §9 OPEN-2 narrowing is the architect's.
+
+### R3-c · NEW Q-8 (class A, OPEN) -> POC window length: 8-candle vs 9-candle
+
+**Question.** The trader's Round-3 FRVP screenshot shows Coordinates #1 = 150 and #2 = 158.
+Read as an inclusive bar count that is a **9-candle** box (158 - 150 + 1 = 9), which conflicts
+with the spec's **8-candle** 15-min window -- CONTEXT §3.3 / R1-Q11: candles time-stamped
+09:15 through 11:14 inclusive = the eight 15-min bars closing 09:30, 09:45, ... 11:15 (the
+09:15-stamp bar through the 11:00-stamp bar).
+
+**Why it matters.** A ninth 15-min bar (the 11:15-stamp bar, covering 11:15-11:30) would extend
+the profile window past 11:15 and change the POC on some days -- and the POC is load-bearing for
+every trade's reference and trigger (CONTEXT §3.4). A one-bar window error silently moves the
+POC and therefore the trade.
+
+**Blocks.** Chunk-6 **gate closure** (the POC calibration must be reproduced against the
+trader's chart), NOT chunk-6 build (the spec's 8-candle window is unambiguous to build against).
+
+**Asked as Round-3 Q42.** INTERIM (unchanged from spec): the spec's **8-candle window** (09:15
+stamps through the 11:00 stamp; the 15-min bar closing at 11:15 is the last one IN) stands and
+chunk 6 builds it. So the gate has evidence either way, **chunk 6 must compute BOTH windows on
+the calibration days** (8-candle and 9-candle POC) and print them side by side, so whichever the
+trader confirms can be checked without a re-run. No code in chunk 5A depends on this (5A ingests
+and aggregates minutes; it does not slice the POC window).
+
+### R3-d · NEW Q-9 (class A, OPEN) -> reference == POC, the ABOVE branch
+
+**Question.** The trader's Q34(b) answer arrived: "if the 11:15 reference equals the POC, there
+is NO side yet -- wait; the very first candle that closes distinctly above or below the POC
+decides." This resolves the *direction* selection but leaves one sub-case open on a BULLISH day.
+
+- **Below-branch (unambiguous, will be built in chunk 7):** on a bullish day, reference == POC
+  -> wait; the first 15-min candle that closes **distinctly below** POC -> ARMED (this is exactly
+  CONTEXT §3.4's WAIT-then-arm shape, now with the == POC start resolved). Implement in chunk 7.
+- **Above-branch (still open):** on a bullish day, does that first distinct close **above** POC
+  ENTER the trade directly, or only SET the side (bullish) and then require the normal ARMED
+  trigger? CONTEXT §3.4 does not say, because the == POC start was previously OPEN-3.
+
+**Why it matters.** "Enter directly" vs "set side then wait for the trigger" is the difference
+between a fill and no fill on exactly the days the reference sits on the POC.
+
+**Blocks.** ONE branch of chunk 7 (the signal engine's == POC start on the above side). Does NOT
+block chunk-7 build of the mainline (reference clearly above/below POC).
+
+**Asked as Round-3 Q41.** INTERIM for the above-branch: **log + no-trade + count occurrences**
+(the same conservative posture OPEN-3 used for == POC). The below-branch is built as stated.
+This SUPERSEDES the interim for OPEN-3's == POC case on the below side (now answered), but OPEN-3
+stays open for the above side until Q41 returns; CONTEXT §9 OPEN-3 update is the architect's.
+
+### R3-e · OPEN-4 record extended (Q31-WHY received; green/doji still assumed)
+
+> "Q31-WHY (Round 3): on the outside-bar tie, when the deciding 1-minute candle closes red near
+> its bottom, the low was swept last, so the real break was the high -> BULLISH."
+
+The trader's REASONING for his Q31 red-tie answer now matches the implemented predicate exactly:
+the tie 1-minute candle's `close < open` (red) means the low was swept later, so the high broke
+first -> BULLISH if `C.close >= bodyMin` (CONTEXT §3.2 Rule 3, tie case; chunk-4 `bias.py`). The
+two SYMMETRY-filled cases remain **assumptions** pending trader confirmation and were formally
+asked as Round-3 questions:
+
+- **Q38 (green mirror):** tie 1-minute candle closes green (`close > open`) -> BEARISH (mirror).
+- **Q39 (doji):** tie 1-minute candle closes exactly at open (`close == open`) -> no new decision,
+  carry the previous bias, log the day.
+
+Both are already coded as CONTEXT §3.2 states (chunk 4, decision B59) and surfaced by the `open4`
+flag in the evidence pack. Assumptions UNCHANGED pending Q38/Q39; OPEN-4 stays open and is
+confirmed at the chunk-4 TRADER GATE. This receipt only records that the red-case WHY is now
+explicitly the trader's own words, closing the gap between "we inferred his rule" and "he stated
+his rule" for the red case.

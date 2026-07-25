@@ -6,14 +6,17 @@
 # ASCII-only on purpose (the operator's console is cp1252) -- see src/acumen/config.py.
 
 # INR risk per trade. Sizing is qty = floor(risk_per_trade / (entry - SL)) -- CONTEXT 3.5.
-# REQUIRED-EMPTY: OPEN-1 (CONTEXT 9) is still pending from the trader, and CONTEXT 9 states
-# "code takes risk_per_trade as required config; no default". While this is null, every
-# simulation / position-sizing path raises ConfigError via Config.require_risk_per_trade().
-risk_per_trade: null
+# OPEN-1 RESOLVED: the trader answered Q29 in Round 3 -- risk per trade = 1000 rupees. The
+# CONTEXT 9 registry edit + version bump are the architect's (see QUESTIONS.md ROUND-3
+# RECEIPTS); this session records the receipt and executes the config value. Position sizing
+# is now UNBLOCKED: Config.require_risk_per_trade() returns 1000 instead of raising.
+risk_per_trade: 1000  # trader answer, Round 3, 25-Jul-2026
 
-# Volume-profile Row Size N -- CONTEXT 3.3. 24 is PROVISIONAL (it matched the 22-Jul-2026
-# calibration); the trader's own setting is OPEN-2 (CONTEXT 9).
-row_size: 24
+# Volume-profile Row Size N -- CONTEXT 3.3. Row Size = Number of Rows = 24, confirmed by
+# trader screenshot (Q32, Round 3): his Fixed Range Volume Profile Rows Layout = "Number of
+# Rows", Row Size = 24 (Volume Up/Down is display-only; POC uses total volume, CONTEXT 3.3
+# unchanged). OPEN-2's chart-POC reproduction remains chunk 6's gate.
+row_size: 24  # confirmed by trader screenshot, Round 3, 25-Jul-2026
 
 # Filesystem placeholders. Relative values are resolved against this file's directory by
 # the loader. All three are gitignored (CLAUDE.md: never commit data/, cache/, artifacts).
