@@ -37,6 +37,7 @@ Backtester + live screener for one frozen trading strategy. Real money depends o
 - Build commits end `(unreviewed)`; the review closes with `chunk<N>: reviewed PASS` and tag `chunk<N>-pass`.
 - **No AI attribution anywhere** — no "Generated with", no Co-Authored-By lines, nothing. Clean human-standard history.
 - Never commit: `.env`, `data/`, `cache/`, generated artifacts. Never force-push. Single branch `main`.
+- Remote: origin = the private GitHub mirror. EVERY session's final end-of-session duty is: `git push origin main --tags`, and the session's final report block must state the pushed SHA. The remote is a backup mirror ONLY: never commit, edit, or merge via the GitHub web UI; never force-push; if local and remote ever diverge, STOP and ask the architect. If a session dies before pushing, the operator pushes manually before starting the next session. The repo stays private, zero collaborators.
 
 ## Code standards
 
