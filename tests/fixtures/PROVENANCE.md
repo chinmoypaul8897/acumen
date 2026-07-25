@@ -206,3 +206,24 @@ bhavcopy is raw; RELIANCE's raw close was instead verified against the raw store
 2020-07-10 (1878.05) and 2020-07-14 (1917.00), and the file's own PREVCLOSE column chains to
 2020-07-10. This is recorded as OPEN-8 evidence in QUESTIONS.md. NOTE: the SmartAPI files carry
 market prices only, no credential of any kind.
+
+### The F9 bias goldens and the synthetic Rule-3 fixtures (chunk 4, 2026-07-25)
+
+- **`f9_tcs_daily.csv`** (DERIVED) -- 46 REAL TCS daily candles, a CONTIGUOUS window
+  2025-06-25 .. 2025-08-29, lifted from the settled daily store (integer-paise closes shown
+  in rupees). Contiguous so that every selected day's CONTEXT 3.2 pair (D-1, D-2) resolves
+  inside the frozen set; the store this was cut from is the operator's `data/daily_store`
+  (gitignored). The window is adjustment-free: TCS had no split/bonus/special-dividend in it
+  (max day-over-day close gap 7.0%, a genuine market move, not a corporate action), so the
+  bias engine runs on raw == adjusted prices and the trader sees the same numbers on his chart.
+- **`f9_tcs_expected.csv`** (DERIVED/hand-computed) -- the 15 selected days with their
+  expected bias, the rule that fires, and the hand reasoning (both candles' O/H/L/C, bodyMin/
+  bodyMax, and the deciding inequality). Every selected day clears a comfortable margin (no
+  boundary-equal case -- those live in `test_bias.py` as synthetic candles). Covers: a seed
+  day, Rule 1 both sides, Rule 2 both sides, 3 inside-bar carries, and a spread of flip/carry
+  days. The engine's bias must match every row (`test_bias_engine.py`).
+- **`minute/SYNTH_2099-01-05_1min.csv`** and **`minute/SYNTH_2099-01-06_1min.csv`**
+  (SYNTHETIC) -- 1-minute data for the Rule-3 first-break and the same-minute tie (F5). Clearly
+  not real: a far-future date (2099) and a `SYNTH` symbol. Real-day Rule-3 verification needs
+  real 1-minute data and lands in chunk 12 (per plan.md chunk-4 card); these drive the engine's
+  Rule-3 and tie branches offline until then.

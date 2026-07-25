@@ -112,6 +112,23 @@ FROZEN_FIXTURES_SHA256: dict[str, str] = {
     "smartapi_oneday_RELIANCE_2020-07-13.json": (
         "6598c12d1e97dfc8f098a4015e778ba7e2b6d725d1b43ead2f3773c28401ebdb"
     ),
+    # chunk 4 (2026-07-25): the F9 bias goldens and the synthetic Rule-3 1-minute fixtures.
+    # f9_tcs_daily.csv is a DERIVED cut of REAL TCS daily candles from the settled store (a
+    # contiguous window so every pair resolves); f9_tcs_expected.csv is the hand-computed bias
+    # per selected day WITH its candle numbers and rule reasoning. The SYNTH_2099-* minute CSVs
+    # are SYNTHETIC (far-future date, SYNTH symbol) -- real-day Rule-3 verification is chunk 12.
+    "f9_tcs_daily.csv": (
+        "1b5e31d4b065899ce2f0204f9fe6082044fd818bf3e8f5e7f6cec03cac0b5dd8"
+    ),
+    "f9_tcs_expected.csv": (
+        "b87672490579fad04410c26fa95825686be579a9f07629291c6c423a40da827d"
+    ),
+    "minute/SYNTH_2099-01-05_1min.csv": (
+        "d5cf134f13c9aa2721f40f54d5a1dbbd05164dfbeb606bf5820ed16453711d02"
+    ),
+    "minute/SYNTH_2099-01-06_1min.csv": (
+        "d234acb10a959473e7c11671a57172263973c681945b683715a803d8c078ccc9"
+    ),
 }
 
 #: CONTEXT 4.2's own test ORACLE, frozen at docs/ (not under tests/fixtures/, because it is a
