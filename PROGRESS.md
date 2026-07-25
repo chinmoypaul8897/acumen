@@ -20,6 +20,19 @@ state-for-next-session: <exact current situation + the single next action>
 
 ---
 
+## [2026-07-25 13:38] ops · github · done
+scope: connected the repo to its private GitHub mirror (origin = github.com/chinmoypaul8897/acumen), pushed the COMPLETE history + all five pass-tags, added a machinery-only README, and codified remote push discipline in CLAUDE.md. Not a chunk — no strategy/code/test changes.
+files: created README.md; edited CLAUDE.md (Git rules: one appended bullet — remote push discipline) and PROGRESS.md (this entry). STATUS.md UNTOUCHED (ops, not a chunk). No file under src/, tests/, poc/, fixtures touched; CONTEXT.md/plan.md untouched.
+tests: NOT rerun — zero code/test/fixture changes this session. Suite last verified green 748/0 at chunk4-pass (656bfbc), unchanged. Fixtures touched: NONE.
+decisions:
+  - OPS1 The architect-authorized CLAUDE.md text was appended as a SINGLE unwrapped bullet to match the existing Git-rules formatting (every other rule in that section is one line); the wording is verbatim — only the prompt's cosmetic line-wrapping was normalized, no word added/removed/changed. Flagged so a future reader comparing the prompt's multi-line quote to the one-line bullet does not read the whitespace as a deviation.
+questions: none. No CONTEXT.md gap hit — this was a pure operations task with the remote URL, README shape, and CLAUDE.md text all fixed by the architect.
+gate: n/a
+status-ledger: STATUS.md UNTOUCHED — ops session, not a chunk. All chunk states unchanged (chunk 4 stays reviewed-PASS; chunk4-pass tag intact on the mirror).
+state-for-next-session: Remote is LIVE and mirrored — pre-flight passed (clean tree, main, identity chinmoy-paul <chinmoypaul8897@gmail.com>; no secret/data/cache/logs path ever in history; .env ignored; five pass-tags all on "reviewed PASS" commits; repo 1.22 MiB). origin was verified EMPTY before the first push; after pushing, remote main == local main and every tag matches (side-by-side SHAs in this session's GITHUB OPS REPORT). PUSH RULE NOW IN FORCE (CLAUDE.md Git rules): EVERY session's final duty is `git push origin main --tags` and its final report must state the pushed SHA; the mirror is backup-only (no web-UI commits/edits/merges, no force-push; STOP and ask the architect on divergence; operator pushes manually if a session dies before pushing). NEXT ACTION unchanged from the chunk-4 review: building may proceed on chunks 5A/6 (depend only on chunk 2, reviewed-PASS) or chunk 7 (depends on 4+6); the chunk-4 TRADER GATE is still pending and must close before chunk 9's run. Whichever session runs next MUST push at end.
+
+---
+
 ## [2026-07-25 11:30] chunk 4 · review · done
 scope: fresh QC review of chunk 4 (quant_reviewer + code_reviewer, plan.md review type QC) covering FOUR commits d2ea387..a0b595a -- reran the suite from clean and offline, executed all 11 architect-directed checks, reimplemented CONTEXT 3.2 from scratch to grade F9 (15/15, 0 mismatches), built the 20-mutant operator-by-operator boundary matrix on bias.py (10 caught / 4 equivalent / 6 genuine coverage gaps), brute-forced the precedence-guard/RULE_CARRY unreachability over 261,282 candles, re-derived the Q-6/Q-7 redistribution (rights 5/1/1, denominator 296), formally reviewed the incident commit (fsync-before-replace both writers, --rebuild-ledger on a synthetic broken store, quarantine-never-deletes, corrupt-ledger names the command), AST-proved bias.py purity, judged B53-B62, wrote docs/reviews/REVIEW_4.md. VERDICT PASS.
 files: created docs/reviews/REVIEW_4.md, tests/test_review4_probes.py; edited STATUS.md, PROGRESS.md. NO file under review was modified; no fixture was touched; CONTEXT.md/plan.md untouched.
