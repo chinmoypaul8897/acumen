@@ -229,3 +229,112 @@ change to E11. The window ledger gained a `fetch_date` column (k_cum is fetch-da
 rows fall back to `attempted_at` and new pulls record it explicitly. (One Windows `os.replace`
 hiccup during the rebuild stopped it on an identity month, a no-op; the fix skips identity days
 so the migration only rewrites the days that actually change.)
+
+---
+
+# FIX-2 (2026-07-25) — volume factor split (k_price / k_shares) + the LIVE 4b RELIANCE probe
+
+Two refinements from the architect's reading of the FIX report. The Q-10 ruling addendum, the
+ruling text, and the QUESTIONS.md cross-reference are in **QUESTIONS.md Q-10 ADDENDUM**.
+
+## 1 — Volume factor split (k_price all-factors; k_shares share-count only)
+
+Architect's ruling (verbatim): *"Volume un-adjustment uses k_shares — the product of SHARE-COUNT
+event factors only (bonus, split, consolidation) — because vendors scale volume for share-count
+changes but not for cash-dividend price adjustments. Price continues to use k_price = all factors.
+price_raw = fetched / k_price ; volume_raw = fetched × k_shares."*
+
+- `raw_price  = fetched / k_price ` where `k_price ` = product of ALL factors in `(D, F]`.
+- `raw_volume = fetched × k_shares` where `k_shares` = product of `corp_actions.SHARE_COUNT_KINDS`
+  factors (bonus, split; a consolidation is a reverse split → `KIND_SPLIT`) in `(D, F]`.
+
+A special dividend back-adjusts the PRICE (so it is in `k_price`) but the vendor never rescales
+volume for it (so it is NOT in `k_shares`). Before FIX-2 the single `k_cum` was used for both, so a
+special dividend in the window over-corrected volume by its `k`. Now it does not.
+
+| in-window events | k_price (price ÷) | k_shares (volume ×) | changed vs pre-FIX-2? |
+|---|---|---|---|
+| bonus only (e.g. TCS) | k_bonus | k_bonus | **no** (identical) |
+| split only | k_split | k_split | **no** |
+| special dividend only | 1−D/P | **1** | yes — volume no longer touched |
+| bonus + special dividend | k_bonus·(1−D/P) | **k_bonus** | yes — volume by bonus only |
+
+TCS (bonus-only) and every F10 2026 day (post-CA identity) are therefore **unchanged** — the
+acceptance table above (0%/0%/56.5% → 100%/100%/97.2%) and F10 still hold. New tests pin the
+special-dividend case (volume by the bonus only, 1000 not the wrong 900; price by both) at the unit
+and gate-1 levels; the full suite is **883 / 0** offline. (A rights issue is a share-count change
+but the ruling's verbatim list is bonus/split/consolidation and a rights `k` is a TERP blend, so
+rights stays OUT of `k_shares` as written — flagged for the architect, decision B81.)
+
+## 2 — 4b RELIANCE probe, executed LIVE (credentialed, polite pacing)
+
+Ran against SmartAPI on 2026-07-25 (fetch date F). Credentials from `.env`, never printed. One
+1-minute fetch per window; all comparisons are RAW-to-RAW (a pre-ex 1-min day vs that same day's
+raw daily row). RELIANCE factor table built live: **2017-09-07 bonus k=0.5, 2020-05-13 rights
+k=0.99061, 2024-10-28 bonus k=0.5; suppression 2023-07-20 Jio demerger; no pending rights.**
+
+### 2a — 2024-10 window (bonus-only, provable) → un-adjusts to raw at 1.000×, gate-1 passes
+
+Pre-ex day **2024-10-25** (only the 2024-10-28 bonus is in `(D, F]`; the demerger and 2020 rights
+are *before* it, so `k_price = k_shares = 0.5`):
+
+| | High | Low | Close | Volume |
+|---|---|---|---|---|
+| raw daily store | 268870 | 264400 | 265570 | 9,298,748 |
+| 1-min **as fetched** (÷ raw) | 134435 (0.50000) | 132200 (0.50000) | 132815 | — |
+| 1-min **un-adjusted** (÷ raw) | **268870 (1.00000)** | **264400 (1.00000)** | 265630 | 9,247,981 |
+
+`|dH| = |dL| = 0` paise (**within 2**); close 60 paise (0.02%) off — the intraday-vs-official-close
+noise. **Gate-1 (volume, via k_shares): gap 0.546% ∈ [−0.1%, +5.0%] → PASS.**
+
+### 2b — 2016 window (the demerger probe) → 1-minute feed is NOT demerger-adjusted
+
+Un-adjusting 2016 days by our table (`k_price = 0.5 × 0.5 × 0.99061 = 0.24765` — both bonuses + the
+rights; the demerger is a suppression, not a factor) vs the RAW daily store:
+
+| day | raw H | 1-min fetched H | 1-min un-adj H | R_fetched | R_unadj |
+|---|---|---|---|---|---|
+| 2016-10-03 | 110795 | 27347 | 110425 | 0.24683 | 0.99666 |
+| 2016-10-04 | 110830 | 27356 | 110460 | 0.24683 | 0.99666 |
+| 2016-10-05 | 110650 | 27311 | 110280 | 0.24682 | 0.99666 |
+| 2016-10-06 | 112625 | 27799 | 112250 | 0.24683 | 0.99667 |
+| 2016-10-07 | 112305 | 27720 | 111930 | 0.24683 | 0.99666 |
+| 2016-10-10 | 112200 | 27694 | 111826 | 0.24683 | 0.99667 |
+
+median **R_fetched = 0.24683**, median **R_unadj = 0.99666**.
+
+**VERDICT = the SmartAPI 1-MINUTE feed is NOT demerger-adjusted.** A demerger-adjusted feed would
+give `R_unadj ≈ 0.908` (the Jio residual); 0.99666 is ~1.000. The vendor's 2016 minute price
+(₹273.5) = raw ₹1108 × ¼ (two 1:1 bonuses) × ~0.987 (a rights-ish factor) — **no ×0.908 demerger
+term**. So **full RELIANCE minute history is PROVABLE by our bonus/rights table; the surgical clamp
+fallback is NOT triggered.**
+
+> **Corollary (important, new):** SmartAPI's ONE_MINUTE and ONE_DAY feeds adjust for DIFFERENT
+> event sets. Chunk 4 proved the DAILY feed IS demerger-adjusted (RELIANCE daily 2020-07-13 ratio
+> 0.4539 = bonus × demerger). The 1-MINUTE feed carries the bonuses (and a rights) but NOT the
+> demerger. A cross-feed assumption ("if the daily is demerger-adjusted the minute is too") would
+> have been wrong — hence the probe.
+
+Minor caveat: a **~0.33% price residual** on pre-2020-rights days (`R_unadj 0.99666`, not exactly
+1). The vendor's implied rights-equivalent (~0.9873) differs slightly from our CONTEXT 4.2 TERP
+factor (0.99061) — a rights-convention or cum-close difference, two orders of magnitude below the
+~9% demerger signal. It is within gate-1's volume band; on the ₹0.10 tick grid it tick-flags (a
+cosmetic diagnostic, B75), it does not exclude.
+
+### 2c — identity-skip rebuild guard (real data)
+
+A fresh "pre-Q10" temp store was seeded with the as-fetched (adjusted) bars of a pre-bonus day
+(2024-10-25, `k_price=0.5`) and a post-bonus day (2024-11-04, `k_price=k_shares=1`), then rebuilt:
+`days_rewritten=1`, `identity_days=1`, and the post-bonus day is **byte-for-byte unchanged** — the
+identity guard skips it, no unnecessary rewrite. The operator's real `data/minute_store` (TCS only)
+was NOT touched; the probe used a throwaway scratchpad store.
+
+### Architect follow-up flagged (before chunk 5B)
+
+The Q-10 ruling conditioned the un-provable/clamp fallback on "pre-demerger spans **if the vendor
+demerger-adjusts**". 2b settles that = NO. But the code still treats the demerger *suppression* as
+an unknown-factor event that marks a 2016–2023 RELIANCE minute day UN-PROVABLE (gate-1 excludes;
+the clamp could move to post-2023), which would now falsely drop ~7 years of provable data. Not
+changed this session (Class-A, out of FIX-2 scope) — see QUESTIONS.md Q-10 ADDENDUM for the exact
+ask. The demerger's bias-pair suppression in the daily/bias engine (CONTEXT 3.2) is separate and
+stays.

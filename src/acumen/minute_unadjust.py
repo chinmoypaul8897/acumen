@@ -1,33 +1,44 @@
 """Un-adjust SmartAPI 1-minute candles back to RAW on ingest (QUESTIONS.md Q-10). PURE.
 
 OPEN-8 resolved ADJUSTED: SmartAPI's historical 1-minute feed is corporate-action
-back-adjusted, so a candle on day ``D`` fetched on date ``F`` comes back at
-``raw x k_cum``, where ``k_cum`` is the product of the CONTEXT 4.2 factors of every event
-with ex-date in ``(D, F]``. CONTEXT 7-E11 wants the intraday engines to run on RAW same-day
-prices; the architect's Q-10 ruling (option a, with a surgical fallback) is therefore to
-**un-adjust on ingest** and keep the minute store RAW ONLY -- E11 stands unchanged.
+back-adjusted, so a candle on day ``D`` fetched on date ``F`` comes back at ``raw x k`` for
+price, where the factors are the CONTEXT 4.2 factors of every event with ex-date in ``(D, F]``.
+CONTEXT 7-E11 wants the intraday engines to run on RAW same-day prices; the architect's Q-10
+ruling (option a, with a surgical fallback) is therefore to **un-adjust on ingest** and keep the
+minute store RAW ONLY -- E11 stands unchanged.
 
-The ruling's arithmetic, verbatim, is what this module computes (Decimal, one half-even
-rounding to paise at the end):
+The ruling's arithmetic, with the FIX-2 volume refinement, is what this module computes
+(Decimal, one half-even rounding to paise/shares at the end):
 
-    k_cum      = product of factors of events with ex-date in (D, F]
-    raw_price  = fetched_price / k_cum
-    raw_volume = fetched_volume x k_cum
+    k_price    = product of ALL factors with ex-date in (D, F]            (bonus/split/rights/special-div)
+    k_shares   = product of SHARE-COUNT factors with ex-date in (D, F]    (bonus/split/consolidation only)
+    raw_price  = fetched_price  / k_price
+    raw_volume = fetched_volume x k_shares
 
-``k_cum`` is exactly :func:`acumen.corp_actions.factors_between` (its window is the same
-half-open ``(previous, current]``), so the chunk-3 factor table -- the one the bias engine
-already adjusts *with* -- is the same one this un-adjusts *against*. A recent day (after the
-symbol's last CA) has an empty factor window, so ``k_cum == 1`` and un-adjustment is the exact
-identity (the F10 2026 days, and every post-last-CA backtest window, are untouched).
+The two differ because a vendor rescales reported VOLUME only when the SHARE COUNT changes (a
+bonus, a split, a consolidation), NOT for a cash-dividend PRICE adjustment: a special dividend
+back-adjusts the pre-ex price (so it is in ``k_price``) but leaves the traded share count and
+hence the volume untouched (so it is NOT in ``k_shares`` --
+:data:`acumen.corp_actions.SHARE_COUNT_KINDS`). PRICE still uses every factor. For a symbol
+whose only in-window factor is a bonus/split (e.g. TCS), ``k_price == k_shares`` and the volume
+result is unchanged from the pre-FIX-2 behaviour -- the refinement only stops a special dividend
+from spuriously over-correcting volume.
+
+Each factor product is exactly a :func:`acumen.corp_actions.factors_between` window (the same
+half-open ``(previous, current]`` the bias engine adjusts *with*), so the chunk-3 factor table
+is the same one this un-adjusts *against* -- no new factor logic, only a kind filter for
+``k_shares``. A recent day (after the symbol's last CA) has an empty factor window, so both
+``k_price == 1`` and ``k_shares == 1`` and un-adjustment is the exact identity (the F10 2026
+days, and every post-last-CA backtest window, are untouched).
 
 Two guards ride along, both per the ruling:
 
 * **Tick-snap.** A RAW price is a whole multiple of the symbol's tick; the vendor's rounding
-  of ``raw x k`` to paise leaves the recovered ``raw = adjusted / k_cum`` up to ~1 paise off
+  of ``raw x k`` to paise leaves the recovered ``raw = adjusted / k_price`` up to ~1 paise off
   that grid. So an un-adjusted price within :data:`DEFAULT_TICK_SNAP_TOLERANCE_PAISE` of the
   nearest tick is SNAPPED onto it (E11: "tick grid preserved"); one further off is left as the
   divided value and the day is FLAGGED and counted (vendor rounding beyond tolerance). The snap
-  runs only when un-adjustment actually happened (``k_cum != 1``): an identity day is stored
+  runs only when the price was actually divided (``k_price != 1``): an identity day is stored
   byte-for-byte as fetched, never re-gridded against a possibly-coarser *current* tick.
 * **Provability.** Where an event in ``(D, F]`` has NO factor -- a demerger (a Suppression) or a
   Q-6-pending rights -- the vendor adjusted by a factor we do not hold, so day ``D`` cannot be
@@ -54,10 +65,10 @@ from datetime import date
 from decimal import ROUND_HALF_EVEN, Decimal
 from typing import Iterable, Sequence
 
-from .corp_actions import Factor, Suppression, factors_between
+from .corp_actions import Factor, SHARE_COUNT_KINDS, Suppression, factors_between
 from .smartapi_client import OneMinuteBar
 
-#: The vendor rounds ``raw x k`` to paise, so the recovered ``raw = adjusted / k_cum`` can sit
+#: The vendor rounds ``raw x k`` to paise, so the recovered ``raw = adjusted / k_price`` can sit
 #: a hair off the tick grid. Within this many paise of the nearest tick -> snap onto it; further
 #: -> leave it and flag the day. Two paise covers the worst case (a 0.5-paise vendor rounding
 #: divided by the smallest real k ~ 0.5 => ~1 paise) with margin.
@@ -72,8 +83,9 @@ class DayUnadjust:
 
     day: date
     fetch_date: date
-    k_cum: Decimal
-    identity: bool  # k_cum == 1 -> stored exactly as fetched (a post-last-CA / recent day)
+    k_price: Decimal  # product of ALL factors in (D, F]; divides the price
+    k_shares: Decimal  # product of SHARE-COUNT factors in (D, F]; multiplies the volume (FIX-2)
+    identity: bool  # k_price == k_shares == 1 -> stored exactly as fetched (a recent day)
     provable: bool  # no unknown-factor event (demerger / pending rights) in (D, F]
     snapped: int  # prices snapped onto the tick grid (within tolerance)
     tick_flagged: int  # prices left off-grid (> tolerance): vendor rounding beyond tolerance
@@ -98,15 +110,26 @@ class UnadjustResult:
 
 
 def cumulative_factor(
-    factors: Iterable[Factor], day: date, fetch_date: date, *, symbol: str | None = None
+    factors: Iterable[Factor],
+    day: date,
+    fetch_date: date,
+    *,
+    symbol: str | None = None,
+    kinds: frozenset[str] | None = None,
 ) -> Decimal:
-    """``k_cum(D, F)`` = product of ``factor.k`` for events with ex-date in ``(D, F]``. PURE.
+    """Product of ``factor.k`` for events with ex-date in ``(D, F]``. PURE.
 
     Exactly the window of :func:`acumen.corp_actions.factors_between` (half-open on the left),
     so a candle on ``day`` is un-adjusted against precisely the events the vendor back-adjusted
     it *by*. An empty window returns :data:`Decimal(1)` -- the identity, correct for a recent
     (post-last-CA) day where fetched already equals raw. ``ordinary`` dividends and buybacks
     carry ``k = 1`` in the factor table, so they drop out of the product harmlessly.
+
+    ``kinds`` (FIX-2): when given, only factors whose ``.kind`` is in the set are multiplied.
+    ``None`` (the default) multiplies EVERY factor -> ``k_price`` (used to divide the price).
+    Passing :data:`acumen.corp_actions.SHARE_COUNT_KINDS` gives ``k_shares`` (bonus/split/
+    consolidation only), which multiplies the volume: the vendor scales volume only for a
+    share-count change, never for a cash-dividend price adjustment.
     """
     if fetch_date < day:
         raise ValueError(
@@ -115,34 +138,37 @@ def cumulative_factor(
         )
     k = _ONE
     for factor in factors_between(factors, day, fetch_date, symbol=symbol):
-        k *= factor.k
+        if kinds is None or factor.kind in kinds:
+            k *= factor.k
     return k
 
 
 def unadjust_price_paise(
     adjusted_paise: int,
-    k_cum: Decimal,
+    k_price: Decimal,
     *,
     tick_paise: int | None = None,
     tol_paise: int = DEFAULT_TICK_SNAP_TOLERANCE_PAISE,
 ) -> tuple[int, bool, int]:
-    """One price: ``raw = adjusted / k_cum`` (Decimal, one half-even round), then tick-snap. PURE.
+    """One price: ``raw = adjusted / k_price`` (Decimal, one half-even round), tick-snap. PURE.
 
-    Returns ``(raw_paise, snapped, off_paise)``:
+    ``k_price`` is the product of ALL factors in ``(D, F]`` (bonus/split/rights/special-div):
+    the price is back-adjusted by every corporate action, so recovering it divides by all of
+    them. Returns ``(raw_paise, snapped, off_paise)``:
 
-    * ``k_cum == 1`` -> the exact identity: ``adjusted`` returned unchanged, NOT re-gridded
+    * ``k_price == 1`` -> the exact identity: ``adjusted`` returned unchanged, NOT re-gridded
       (a recent day is already raw and on the real tick grid; snapping it against a possibly
       coarser *current* tick could only corrupt it).
-    * otherwise ``raw = round_half_even(adjusted / k_cum)``. If a ``tick_paise`` grid is given
+    * otherwise ``raw = round_half_even(adjusted / k_price)``. If a ``tick_paise`` grid is given
       and ``raw`` is within ``tol_paise`` of the nearest tick multiple -> snap onto it
       (``snapped = True``); if it is further off -> leave ``raw`` as computed and report the
       distance (the caller flags and counts the day). ``off_paise`` is the pre-snap distance.
     """
-    if k_cum <= 0:
-        raise ValueError(f"k_cum must be positive, got {k_cum}")
-    if k_cum == _ONE:
+    if k_price <= 0:
+        raise ValueError(f"k_price must be positive, got {k_price}")
+    if k_price == _ONE:
         return adjusted_paise, False, 0
-    raw = int((Decimal(adjusted_paise) / k_cum).quantize(_ONE, rounding=ROUND_HALF_EVEN))
+    raw = int((Decimal(adjusted_paise) / k_price).quantize(_ONE, rounding=ROUND_HALF_EVEN))
     if not tick_paise or tick_paise <= 0:
         return raw, False, 0
     nearest = _nearest_tick(raw, tick_paise)
@@ -152,19 +178,22 @@ def unadjust_price_paise(
     return raw, False, off
 
 
-def unadjust_volume(adjusted_volume: int, k_cum: Decimal) -> int:
-    """One volume: ``raw = adjusted x k_cum`` (Decimal, one half-even round to shares). PURE.
+def unadjust_volume(adjusted_volume: int, k_shares: Decimal) -> int:
+    """One volume: ``raw = adjusted x k_shares`` (Decimal, one half-even round to shares). PURE.
 
-    The ruling's direction, exactly: a bonus/split back-adjustment scales volume by ``1/k`` (a
-    1:1 bonus doubles a pre-ex volume), so recovering the raw share count multiplies BACK by
-    ``k_cum``. ``k_cum == 1`` (recent day, or a window of only ordinary dividends/buybacks)
-    returns the volume unchanged.
+    ``k_shares`` (FIX-2) is the product of only the SHARE-COUNT factors in ``(D, F]`` --
+    bonus/split/consolidation (:data:`acumen.corp_actions.SHARE_COUNT_KINDS`). The vendor
+    rescales reported volume by ``1/k`` when the share count changes (a 1:1 bonus doubles a
+    pre-ex volume), so recovering the raw share count multiplies BACK by ``k_shares``. A cash
+    dividend (special or ordinary) is NOT a share-count change, so it never enters ``k_shares``
+    -- that is the whole point of the split from ``k_price``. ``k_shares == 1`` (recent day, or
+    a window whose only factors are dividends/buybacks) returns the volume unchanged.
     """
-    if k_cum <= 0:
-        raise ValueError(f"k_cum must be positive, got {k_cum}")
-    if k_cum == _ONE:
+    if k_shares <= 0:
+        raise ValueError(f"k_shares must be positive, got {k_shares}")
+    if k_shares == _ONE:
         return adjusted_volume
-    return int((Decimal(adjusted_volume) * k_cum).quantize(_ONE, rounding=ROUND_HALF_EVEN))
+    return int((Decimal(adjusted_volume) * k_shares).quantize(_ONE, rounding=ROUND_HALF_EVEN))
 
 
 def _nearest_tick(paise: int, tick_paise: int) -> int:
@@ -186,11 +215,12 @@ def unadjust_bars(
 ) -> UnadjustResult:
     """Un-adjust a fetched window of bars to RAW, per the Q-10 ruling. PURE.
 
-    Groups the bars by trade date, computes one ``k_cum(D, F)`` per day (all of a day's bars
-    share it), and rebuilds each :class:`~acumen.smartapi_client.OneMinuteBar` with raw prices
-    (``/ k_cum``, tick-snapped) and raw volume (``x k_cum``). A day whose ``(D, F]`` window
-    contains an event with NO factor -- a demerger Suppression or a Q-6-pending rights -- is
-    marked UN-PROVABLE (``provable=False``): the partial un-adjustment is still applied so the
+    Groups the bars by trade date, computes ``k_price(D, F)`` and ``k_shares(D, F)`` per day
+    (all of a day's bars share them), and rebuilds each
+    :class:`~acumen.smartapi_client.OneMinuteBar` with raw prices (``/ k_price``, tick-snapped)
+    and raw volume (``x k_shares`` -- FIX-2: share-count factors only). A day whose ``(D, F]``
+    window contains an event with NO factor -- a demerger Suppression or a Q-6-pending rights --
+    is marked UN-PROVABLE (``provable=False``): the partial un-adjustment is still applied so the
     day is stored and visible, but gate 1 will fail it and it is excluded and counted.
 
     Args:
@@ -216,7 +246,10 @@ def unadjust_bars(
     raw_bars: list[OneMinuteBar] = []
     day_reports: list[DayUnadjust] = []
     for day in sorted(by_day):
-        k_cum = cumulative_factor(factors, day, fetch_date, symbol=sym)
+        k_price = cumulative_factor(factors, day, fetch_date, symbol=sym)
+        k_shares = cumulative_factor(
+            factors, day, fetch_date, symbol=sym, kinds=SHARE_COUNT_KINDS
+        )
         unknown = _unknown_factor_between(day, fetch_date, supp_dates, pend_dates)
         snapped = 0
         flagged = 0
@@ -225,7 +258,7 @@ def unadjust_bars(
             new_prices = []
             for value in (bar.open_paise, bar.high_paise, bar.low_paise, bar.close_paise):
                 raw, did_snap, off = unadjust_price_paise(
-                    value, k_cum, tick_paise=tick_paise, tol_paise=tol_paise
+                    value, k_price, tick_paise=tick_paise, tol_paise=tol_paise
                 )
                 new_prices.append(raw)
                 if did_snap:
@@ -240,20 +273,21 @@ def unadjust_bars(
                     high_paise=new_prices[1],
                     low_paise=new_prices[2],
                     close_paise=new_prices[3],
-                    volume=unadjust_volume(bar.volume, k_cum),
+                    volume=unadjust_volume(bar.volume, k_shares),
                 )
             )
         day_reports.append(
             DayUnadjust(
                 day=day,
                 fetch_date=fetch_date,
-                k_cum=k_cum,
-                identity=(k_cum == _ONE),
+                k_price=k_price,
+                k_shares=k_shares,
+                identity=(k_price == _ONE and k_shares == _ONE),
                 provable=(unknown is None),
                 snapped=snapped,
                 tick_flagged=flagged,
                 off_grid_max_paise=off_max,
-                reason=_day_reason(k_cum, unknown, flagged),
+                reason=_day_reason(k_price, k_shares, unknown, flagged),
             )
         )
     return UnadjustResult(raw_bars=tuple(raw_bars), days=tuple(day_reports))
@@ -272,12 +306,12 @@ def _unknown_factor_between(
     return None
 
 
-def _day_reason(k_cum: Decimal, unknown: str | None, flagged: int) -> str:
+def _day_reason(k_price: Decimal, k_shares: Decimal, unknown: str | None, flagged: int) -> str:
     if unknown is not None:
         return f"UN-PROVABLE: {unknown}; gate 1 will exclude and count this day"
-    if k_cum == _ONE:
-        return "identity (k_cum = 1): stored exactly as fetched"
-    note = f"un-adjusted by k_cum = {k_cum}"
+    if k_price == _ONE and k_shares == _ONE:
+        return "identity (k_price = k_shares = 1): stored exactly as fetched"
+    note = f"un-adjusted: price / k_price={k_price}, volume x k_shares={k_shares}"
     if flagged:
         note += f"; {flagged} price(s) > tolerance off the tick grid (flagged)"
     return note

@@ -120,6 +120,17 @@ PRICED_KINDS: frozenset[str] = frozenset(
 )
 ALL_KINDS: frozenset[str] = PRICED_KINDS | {KIND_DEMERGER, KIND_INFORMATIONAL}
 
+#: QUESTIONS.md Q-10 addendum (architect ruling, FIX-2): the VOLUME un-adjustment uses ONLY the
+#: SHARE-COUNT events -- a bonus, a split, and a consolidation (a reverse split, which this
+#: parser classifies as :data:`KIND_SPLIT` with B > A). A vendor rescales the reported 1-minute
+#: VOLUME when the number of shares changes, but NOT for a cash-dividend PRICE adjustment, so a
+#: special dividend is in ``k_price`` but never in ``k_shares``. PRICE continues to use every
+#: factor (``k_price``). A rights issue is NOT in this set: it is a share-count change, but the
+#: ruling's verbatim enumeration is "bonus, split, consolidation" and a rights factor is a
+#: TERP-based blend rather than a clean share ratio -- flagged for the architect, executed as
+#: written. See :mod:`acumen.minute_unadjust` (``cumulative_factor(kinds=SHARE_COUNT_KINDS)``).
+SHARE_COUNT_KINDS: frozenset[str] = frozenset({KIND_BONUS, KIND_SPLIT})
+
 #: QUESTIONS.md Q-7, the architect's ruling: the OPERATIONAL special-dividend test is
 #: ``D / P_cum >= 2%`` -- a documented, disclosed deviation from CONTEXT 4.2's
 #: pre-announcement-close reference (that price exists in no source this project holds).

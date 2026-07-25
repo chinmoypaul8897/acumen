@@ -545,14 +545,19 @@ def rebuild_symbol_raw(
         stored = store.minutes(sym, day)
         if not stored or fd is None:
             continue
-        k = unadj.cumulative_factor(symbol_factors.factors, day, fd, symbol=sym)
+        k_price = unadj.cumulative_factor(symbol_factors.factors, day, fd, symbol=sym)
+        k_shares = unadj.cumulative_factor(
+            symbol_factors.factors, day, fd, symbol=sym, kinds=ca.SHARE_COUNT_KINDS
+        )
         if unadj._unknown_factor_between(day, fd, supp_dates, pend_dates) is not None:  # noqa: SLF001
             result.unprovable_days.append(day)  # gate-1 excludes it; count regardless of the skip
-        if k == Decimal(1):
+        if k_price == Decimal(1) and k_shares == Decimal(1):
             # A recent (post-last-CA) day is already RAW as fetched -- no rewrite needed. Skipping
             # it keeps the migration to the handful of days that actually change (and avoids
             # rewriting thousands of identical files, which is also what a flaky Windows
             # os.replace trips over). The write path is idempotent, so this is safe to re-run.
+            # BOTH factors must be 1: a special dividend leaves k_shares==1 but k_price<1 (price
+            # still needs dividing), so k_price alone would wrongly skip such a day (FIX-2).
             result.identity_days += 1
             continue
         raw = unadjust_stored_day(store, sym, day, symbol_factors, fetch_date=fd)
@@ -857,7 +862,10 @@ def _print_symbol_factors(sf: SymbolFactors) -> None:
     print(f"  factors (k!=1 affect un-adjust): {len(sf.factors)}")
     for f in sf.factors:
         if f.k != Decimal(1):
-            print(f"      {f.ex_date}  {f.kind:9s} k={f.k}  ({f.basis})")
+            # FIX-2: a share-count factor (bonus/split/consolidation) enters BOTH k_price and
+            # k_shares; every other kind (special dividend, rights) enters k_price only.
+            domain = "price+volume" if f.kind in ca.SHARE_COUNT_KINDS else "price only"
+            print(f"      {f.ex_date}  {f.kind:9s} k={f.k}  [{domain}]  ({f.basis})")
     print(f"  suppressions (no factor -> un-provable spans): {len(sf.suppressions)}")
     for s in sf.suppressions:
         print(f"      {s.ex_date}  {s.kind}: {s.reason}")
@@ -882,8 +890,8 @@ def _print_rebuild(minute_store: MinuteStore, symbol: str, sf: SymbolFactors) ->
     print("\nQ-10 REBUILD -- un-adjusting the stored feed to RAW in place " + "-" * 8)
     result = rebuild_symbol_raw(minute_store, symbol, sf)
     print(f"  days rewritten   : {result.days_rewritten}")
-    print(f"  identity days    : {result.identity_days} (k_cum=1, stored unchanged)")
-    print(f"  un-adjusted days : {result.unadjusted_days} (k_cum!=1, divided back to raw)")
+    print(f"  identity days    : {result.identity_days} (k_price=k_shares=1, stored unchanged)")
+    print(f"  un-adjusted days : {result.unadjusted_days} (k_price!=1, divided back to raw)")
     print(f"  un-provable days : {len(result.unprovable_days)} (gate 1 excludes + counts)")
     print("  store now holds RAW same-day prices (CONTEXT 7-E11).")
 

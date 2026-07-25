@@ -22,16 +22,31 @@ import pytest
 from acumen import minute_backfill as mb
 from acumen import minute_unadjust as u
 from acumen import quality_gates as qg
-from acumen.corp_actions import Factor, Suppression, KIND_BONUS, KIND_SPLIT, KIND_DEMERGER
+from acumen.corp_actions import (
+    Factor,
+    Suppression,
+    SHARE_COUNT_KINDS,
+    KIND_BONUS,
+    KIND_SPLIT,
+    KIND_DIVIDEND,
+    KIND_DEMERGER,
+    DIVIDEND_SPECIAL,
+)
 from acumen.minute_store import MinuteStore, WINDOW_PRESENT, WindowOutcome
 from acumen.smartapi_client import OneMinuteBar, SmartApiError
 
 
-# --- k_cum window semantics -----------------------------------------------------------
+# --- cumulative-factor (k_price / k_shares) window semantics ---------------------------
 
 
 def _bonus(symbol: str, ex: date, k: Decimal) -> Factor:
     return Factor(symbol=symbol, ex_date=ex, kind=KIND_BONUS, k=k, basis="test")
+
+
+def _special_dividend(symbol: str, ex: date, k: Decimal) -> Factor:
+    """A special-dividend factor (k = 1 - D/P_cum < 1): affects PRICE but never share count."""
+    return Factor(symbol=symbol, ex_date=ex, kind=KIND_DIVIDEND, k=k, basis="test special div",
+                  classification=DIVIDEND_SPECIAL)
 
 
 def test_cumulative_factor_is_the_half_open_D_to_F_window() -> None:
@@ -60,6 +75,21 @@ def test_cumulative_factor_rejects_fetch_before_day() -> None:
         u.cumulative_factor([], date(2026, 7, 25), date(2016, 1, 1), symbol="TCS")
 
 
+def test_cumulative_factor_kinds_filter_gives_k_shares_share_count_only() -> None:
+    """FIX-2: k_price multiplies every factor; k_shares multiplies only share-count factors
+    (bonus/split). A special dividend in the window is in k_price but drops out of k_shares."""
+    sym = "ACME"
+    factors = [
+        _bonus(sym, date(2019, 6, 1), Decimal("0.5")),             # share-count -> both
+        _special_dividend(sym, date(2020, 3, 1), Decimal("0.9")),  # price only  -> k_price
+    ]
+    D, F = date(2016, 10, 3), date(2026, 7, 25)
+    k_price = u.cumulative_factor(factors, D, F, symbol=sym)
+    k_shares = u.cumulative_factor(factors, D, F, symbol=sym, kinds=SHARE_COUNT_KINDS)
+    assert k_price == Decimal("0.5") * Decimal("0.9")  # 0.45 -- bonus x special dividend
+    assert k_shares == Decimal("0.5")                  # bonus only
+
+
 # --- price goldens --------------------------------------------------------------------
 
 
@@ -85,16 +115,16 @@ def test_reliance_0p5024_gap_case_hand_computed() -> None:
 
 
 def test_chained_two_events_round_once_not_per_event() -> None:
-    """Two factors in (D, F] chain into ONE k_cum and the price is divided ONCE, rounded ONCE
+    """Two factors in (D, F] chain into ONE k_price and the price is divided ONCE, rounded ONCE
     (CONTEXT 7-E11), matching adjust_pair's discipline in reverse. A=1001 with k1=2/3, k2=0.7 is
     a case where rounding once (2145) differs from rounding after each divide (2146)."""
     sym = "TCS"
     k1 = Decimal(2) / Decimal(3)   # bonus 1:2
     k2 = Decimal(7) / Decimal(10)  # a second event, k=0.7
     factors = [_bonus(sym, date(2019, 1, 1), k1), _bonus(sym, date(2020, 1, 1), k2)]
-    k_cum = u.cumulative_factor(factors, date(2016, 10, 3), date(2026, 7, 25), symbol=sym)
-    assert k_cum == k1 * k2
-    raw, _, _ = u.unadjust_price_paise(1001, k_cum, tick_paise=None)
+    k_price = u.cumulative_factor(factors, date(2016, 10, 3), date(2026, 7, 25), symbol=sym)
+    assert k_price == k1 * k2
+    raw, _, _ = u.unadjust_price_paise(1001, k_price, tick_paise=None)
     assert raw == 2145  # round-once
     # the wrong per-event answer is 2146; prove we are NOT doing that
     from decimal import ROUND_HALF_EVEN
@@ -114,8 +144,8 @@ def test_identity_price_returned_exactly_and_not_regridded() -> None:
 # --- volume direction -----------------------------------------------------------------
 
 
-def test_volume_multiplies_by_k_cum() -> None:
-    """The ruling's direction: raw_volume = fetched_volume x k_cum. A 1:1 bonus doubled the
+def test_volume_multiplies_by_k_shares() -> None:
+    """The ruling's direction: raw_volume = fetched_volume x k_shares. A 1:1 bonus doubled the
     pre-ex volume, so recovering raw halves it (the OPEN-8 evidence: 1-min vol ~2x raw daily)."""
     assert u.unadjust_volume(1818222, Decimal("0.5")) == 909111
     assert u.unadjust_volume(1000, Decimal(1)) == 1000  # identity leaves volume unchanged
@@ -152,17 +182,47 @@ def test_unadjust_bars_un_adjusts_old_day_and_leaves_recent_day() -> None:
     sym = "TCS"
     factors = [_bonus(sym, date(2018, 6, 1), Decimal("0.5"))]
     fetch = date(2026, 7, 25)
-    old = _bars(date(2016, 10, 3), [120000], vol=2000)   # pre-bonus -> k_cum 0.5
+    old = _bars(date(2016, 10, 3), [120000], vol=2000)   # pre-bonus -> k_price = k_shares = 0.5
     recent = _bars(date(2020, 1, 2), [200000], vol=2000)  # post-bonus -> identity
     result = u.unadjust_bars(old + recent, factors=factors, fetch_date=fetch, symbol=sym, tick_paise=5)
     by_day = {d.day: d for d in result.days}
-    assert by_day[date(2016, 10, 3)].k_cum == Decimal("0.5")
+    assert by_day[date(2016, 10, 3)].k_price == Decimal("0.5")
+    assert by_day[date(2016, 10, 3)].k_shares == Decimal("0.5")  # a bonus is a share-count event
     assert by_day[date(2020, 1, 2)].identity is True
     raw = {b.stamp.date(): b for b in result.raw_bars}
     assert raw[date(2016, 10, 3)].open_paise == 240000  # 120000 / 0.5
     assert raw[date(2016, 10, 3)].volume == 1000        # 2000 * 0.5
     assert raw[date(2020, 1, 2)].open_paise == 200000   # identity: unchanged
     assert raw[date(2020, 1, 2)].volume == 2000
+
+
+def test_unadjust_bars_special_dividend_plus_bonus_volume_by_bonus_only() -> None:
+    """FIX-2 headline case (the architect's requested test): a window whose (D, F] holds BOTH a
+    special dividend AND a bonus. The PRICE is divided by both (k_price = k_bonus x k_div); the
+    VOLUME is multiplied by the bonus ONLY (k_shares = k_bonus), because the vendor does not
+    rescale volume for a cash-dividend price adjustment. Using k_price for volume would be the
+    pre-FIX-2 over-correction -- proved wrong here."""
+    sym = "ACME"
+    k_bonus = Decimal("0.5")   # 1:1 bonus (share-count)
+    k_div = Decimal("0.9")     # special dividend, D/P_cum = 10% (price only)
+    factors = [
+        _bonus(sym, date(2019, 6, 1), k_bonus),
+        _special_dividend(sym, date(2020, 3, 1), k_div),
+    ]
+    fetch = date(2026, 7, 25)
+    # A pre-both day: fetched = raw x k_price for price (100000 x 0.45 = 45000), and the vendor
+    # scaled volume only by the bonus (raw 1000 x 1/0.5 = 2000 fetched).
+    old = _bars(date(2016, 10, 3), [45000], vol=2000)
+    result = u.unadjust_bars(old, factors=factors, fetch_date=fetch, symbol=sym, tick_paise=None)
+    day = {d.day: d for d in result.days}[date(2016, 10, 3)]
+    assert day.k_price == k_bonus * k_div      # 0.45 -- price divided by both
+    assert day.k_shares == k_bonus             # 0.5  -- volume by the bonus only
+    assert day.identity is False and day.provable is True
+    raw = result.raw_bars[0]
+    assert raw.open_paise == 100000            # 45000 / 0.45  (price un-adjusted by BOTH)
+    assert raw.volume == 1000                  # 2000 * 0.5 (k_shares); NOT 2000 * 0.45 = 900
+    # pin the over-correction we are avoiding
+    assert u.unadjust_volume(2000, day.k_price) == 900 != raw.volume
 
 
 def test_unadjust_bars_marks_a_demerger_span_unprovable() -> None:
@@ -182,14 +242,22 @@ def test_unadjust_bars_marks_a_demerger_span_unprovable() -> None:
     assert result.unprovable_days == (date(2016, 11, 1),)
 
 
+def _day_report(day: date, *, k_price: Decimal, k_shares: Decimal, provable: bool) -> u.DayUnadjust:
+    return u.DayUnadjust(
+        day=day, fetch_date=date(2026, 7, 25), k_price=k_price, k_shares=k_shares,
+        identity=(k_price == Decimal(1) and k_shares == Decimal(1)), provable=provable,
+        snapped=0, tick_flagged=0, off_grid_max_paise=0, reason="",
+    )
+
+
 def test_systematic_unprovable_floor_moves_the_clamp() -> None:
     days = [
-        u.DayUnadjust(date(2016, 10, 3), date(2026, 7, 25), Decimal("0.5"), False, False, 0, 0, 0, ""),
-        u.DayUnadjust(date(2016, 10, 4), date(2026, 7, 25), Decimal("0.5"), False, False, 0, 0, 0, ""),
-        u.DayUnadjust(date(2016, 10, 5), date(2026, 7, 25), Decimal("0.5"), False, False, 0, 0, 0, ""),
-        u.DayUnadjust(date(2016, 10, 6), date(2026, 7, 25), Decimal("0.5"), False, False, 0, 0, 0, ""),
-        u.DayUnadjust(date(2016, 10, 7), date(2026, 7, 25), Decimal("0.5"), False, False, 0, 0, 0, ""),
-        u.DayUnadjust(date(2023, 8, 1), date(2026, 7, 25), Decimal("1"), True, True, 0, 0, 0, ""),
+        _day_report(date(2016, 10, 3), k_price=Decimal("0.5"), k_shares=Decimal("0.5"), provable=False),
+        _day_report(date(2016, 10, 4), k_price=Decimal("0.5"), k_shares=Decimal("0.5"), provable=False),
+        _day_report(date(2016, 10, 5), k_price=Decimal("0.5"), k_shares=Decimal("0.5"), provable=False),
+        _day_report(date(2016, 10, 6), k_price=Decimal("0.5"), k_shares=Decimal("0.5"), provable=False),
+        _day_report(date(2016, 10, 7), k_price=Decimal("0.5"), k_shares=Decimal("0.5"), provable=False),
+        _day_report(date(2023, 8, 1), k_price=Decimal("1"), k_shares=Decimal("1"), provable=True),
     ]
     assert u.systematic_unprovable_floor(days, min_run=5) == date(2023, 8, 1)
     # a lone un-provable day is not systematic -> no clamp move
@@ -285,18 +353,46 @@ def test_backfill_unadjusts_on_ingest_and_records_fetch_date(tmp_path: Path) -> 
                                 now=lambda: datetime(2026, 7, 25, 12, 0))
     stored = store.minutes("TCS", day)
     assert stored[0].open_paise == 240000   # 120000 / 0.5  (RAW recovered)
-    assert stored[0].volume == 1000         # raw_volume = fetched x k_cum = 2000 * 0.5
+    assert stored[0].volume == 1000         # raw_volume = fetched x k_shares = 2000 * 0.5
     # the window ledger recorded the fetch date
     outcome = store.window_outcomes("TCS")[date(2016, 10, 1)]
     assert outcome.fetch_date == date(2026, 7, 25)
     assert result.unprovable_days == []
 
 
+def test_gate1_reconciles_with_k_shares_when_a_special_dividend_is_in_window(tmp_path: Path) -> None:
+    """FIX-2 at the gate: a stored pre-bonus day whose (D, F] also holds a later special dividend.
+    The vendor scaled its 1-minute volume by the BONUS only (x2), so un-adjusting by k_shares
+    (x0.5) recovers the raw daily volume and gate 1 PASSES; the old all-factor k_price (0.45) would
+    over-correct the volume to 900 and gate 1 would FAIL (a 10% gap)."""
+    store = MinuteStore.at(tmp_path / "m")
+    day = date(2016, 10, 3)
+    raw_daily_vol = 1000
+    # vendor's adjusted 1-min volume = raw x (1/k_shares) = 1000 x 2 (the dividend does NOT scale it)
+    store.write_bars("TCS", [OneMinuteBar(datetime.combine(day, time(9, 15)), 45000, 45100, 44900, 45050, 2 * raw_daily_vol)])
+    store.record_window(WindowOutcome(
+        symbol="TCS", window_start=date(2016, 10, 1), window_end=date(2016, 10, 28),
+        outcome=WINDOW_PRESENT, candle_count=1, attempted_at=datetime(2026, 7, 25, 12, 0),
+        fetch_date=date(2026, 7, 25),
+    ))
+    daily = FakeDailyStore({"TCS": [{"trade_date": day, "open_paise": 100000, "high_paise": 100200,
+                                     "low_paise": 99800, "close_paise": 100100, "volume": raw_daily_vol}]})
+    sf = mb.SymbolFactors("TCS", factors=(
+        _bonus("TCS", date(2018, 6, 1), Decimal("0.5")),
+        _special_dividend("TCS", date(2019, 5, 1), Decimal("0.9")),  # price only -- not in k_shares
+    ), tick_paise=None)
+    after = {y.year: y for y in mb.gate1_by_year(daily, store, "TCS", symbol_factors=sf)}
+    assert after[2016].passed == 1 and after[2016].total == 1  # k_shares un-adjust reconciles
+    # the over-correction the split avoids: k_price would give 900 -> a 10% gap -> FAIL
+    k_price = Decimal("0.5") * Decimal("0.9")
+    assert not qg.volume_gate(raw_daily_vol, u.unadjust_volume(2 * raw_daily_vol, k_price)).passed
+
+
 def test_rebuild_symbol_raw_in_place(tmp_path: Path) -> None:
     """An already-fetched (adjusted) store is un-adjusted to RAW in place using the recorded
     fetch date. A post-bonus (identity) day is counted but SKIPPED -- no needless rewrite."""
     store = MinuteStore.at(tmp_path / "m")
-    old = date(2016, 10, 3)      # pre-bonus -> k_cum 0.5 -> rewritten
+    old = date(2016, 10, 3)      # pre-bonus -> k_price = k_shares = 0.5 -> rewritten
     recent = date(2020, 1, 2)    # post-bonus -> identity -> skipped, left unchanged
     store.write_bars("TCS", [OneMinuteBar(datetime.combine(old, time(9, 15)), 120000, 120100, 119900, 120050, 2000)])
     store.write_bars("TCS", [OneMinuteBar(datetime.combine(recent, time(9, 15)), 200000, 200100, 199900, 200050, 3000)])
