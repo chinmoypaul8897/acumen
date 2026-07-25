@@ -11,7 +11,7 @@ chunk 1: reviewed-PASS
 chunk 2: reviewed-PASS
 chunk 3: reviewed-PASS
 chunk 4: reviewed-PASS
-chunk 5A: built  # + chunk5A-fix (Q-10 un-adjust) + fix2 (k_shares split) + fix3 (demergers out of minute un-provability; Q-11 STOP) + fix4 (Q-11 EXECUTED: vendor_adjustment per-event measured reconstruction; RELIANCE map + TCS regression), unreviewed -- joins the 5A review
+chunk 5A: reviewed-PASS  # QC (both personas) over 2d55919..9f06b6d: prep+build+fix(Q-10)+fix2(k_shares)+fix3(demerger-scope/Q-11 STOP)+fix4(Q-11 measured reconstruction). 911/0 offline; RELIANCE era-flip hand-verified; 9-mutant matrix (8 caught/1 equivalent); no secrets/AI-attribution/test-weakening. 2 LOW findings (map not yet wired to ingest CLI; factor-table fallback price-blind for special dividends) are chunk-5B-forward + gate-1-safe. tag chunk5A-pass
 chunk 5B: todo
 chunk 6: todo
 chunk 7: todo
