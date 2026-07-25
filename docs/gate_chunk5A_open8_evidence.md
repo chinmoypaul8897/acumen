@@ -404,3 +404,124 @@ residual on 2016–2019). The correct un-adjustment for 2020–2023 RELIANCE min
 demerger factor (opposite of the ruling), while 2016 must EXCLUDE it. The architect must decide the
 demerger-symbol minute treatment (Q-11) before chunk 5B backfills RELIANCE-like symbols. The
 demerger's daily bias-pair suppression (CONTEXT 3.2) is unaffected and stays.
+
+---
+
+# FIX-4 (2026-07-25) — Q-11 EXECUTED: per-event vendor-adjustment RECONSTRUCTION (measurement)
+
+Q-11 is **RESOLVED and EXECUTED**. FIX-2 and FIX-3 were stepping stones that GUESSED a single
+policy for the vendor's demerger scope; the live re-runs proved every guess wrong because the
+vendor's adjustment stack is **era-inconsistent**. FIX-4 replaces rule-guessing with per-event
+MEASUREMENT arbitrated by the raw-daily oracle, per the architect's Q-11 ruling (verbatim in
+QUESTIONS.md Q-11). **The FIX-2/FIX-3 measurements all still stand; only their premises are
+superseded** — see "How FIX-2/FIX-3 fold in", below.
+
+New code: `src/acumen/vendor_adjustment.py` (PURE map builder + un-adjust consumption + thin live
+I/O), `src/acumen/build_adjustment_map.py` + `scripts/build_adjustment_map.py` (the operator
+runbook), `tests/test_vendor_adjustment.py` (16 offline tests). The ingest path
+(`minute_backfill.backfill_symbol`) consumes the map; `rebuild_symbol_raw_with_map` migrates a
+store with a gate-1 identity guard.
+
+## The mechanism (per the ruling)
+
+For a fetched day `D` (fetch date `F`), `R(D) = fetched_price(D) / raw_daily(D)` is exactly the
+product of the vendor's actually-applied factors for events with ex-date in `(D, F]` — a direct
+observable (fold the fetched 1-min day to a daily OHLC; ratio its HIGH/LOW — the exact multiples —
+against the RAW daily store). Days sharing an in-window event set form an ERA; `k̂` per (event,era)
+is the MEDIAN over that era's pre-ex probe days. Working BACKWARDS from `F`, each event's factor is
+chosen from `{ours, measured k̂, not-applied}` for price and (independently) volume, arbitrated by:
+**price containment ≤ 2 paise vs the raw daily high/low** AND **gate-1's volume band `[-0.1%,
++5.0%]` (NOT widened)**. Min-cost prefers `ours` > `not-applied` > `measured`; a source is decided
+at an event's newest appearance and carried older; only a no-`ours` event (a demerger) may FLIP
+between its measured value and not-applied — the era-inconsistency. At most one freshly-solved
+unknown per era: measurement, never fitting. The chosen chain per era is committed as an auditable
+`AdjustmentMap` under `data/adjustment_maps/<SYMBOL>.json` (gitignored store artifact).
+
+## RELIANCE adjustment map (LIVE, credentialed, F = 2026-07-25) — the acceptance
+
+Command (reproducible): `acumen-build-adjustment-map --symbol RELIANCE --allow-network
+--fetch-date 2026-07-25 --window 2016-10:2016-10-03:2016-10-07 --window 2019-07:2019-07-01:2019-07-05
+--window 2022-07:2022-07-01:2022-07-06 --window 2023-06:2023-06-15:2023-06-20
+--window 2023-09:2023-09-01:2023-09-06 --window 2024-11:2024-11-04:2024-11-08`
+
+RELIANCE price-moving events: bonus 2017-09-07 (ours 0.5), rights 2020-05-13 (our TERP 0.99061),
+demerger 2023-07-20 (no factor), bonus 2024-10-28 (ours 0.5). Ordinary dividends (k=1) drop out.
+
+| era (in-window events) | k_price | demerger | rights | bonuses | price contain | gate-1 median |
+|---|---|---|---|---|---|---|
+| **2024-11** `{}` | 1 (identity) | — | — | — | ≤10p¹ | +0.822% |
+| **2023-09** `{2024 bonus}` | 0.5 | (behind) | (behind) | 2024: **ours 0.5** | ≤1p | +0.017% |
+| **2022-07 + 2023-06** `{demerger, 2024 bonus}` | 0.453931 | **measured 0.907863** | (behind) | 2024: ours 0.5 | ≤1p | +0.000% |
+| **2019-07** `{rights, demerger, 2024 bonus}` | 0.493652 | **absent** | **measured 0.987305** | 2024: ours 0.5 | ≤1p | −0.002% |
+| **2016-10** `{2017 bonus, rights, demerger, 2024 bonus}` | 0.246826 | **absent** | **measured 0.987305** | 2017 & 2024: **ours 0.5** | ≤2p | +0.002% |
+
+¹ The 2024-11 identity era's 10-paise max is a single microstructure day (2024-11-07: the bhavcopy
+high 132400 exceeds every 1-min high 132390 — an odd-lot/block trade the daily counts but the
+continuous series does not, the same reason gate-1's band skews positive). It is NOT an adjustment
+error; provability uses the MEDIAN residual (0 paise), so the day is provable and gate-1 passes.
+
+VOLUME is measured independently and confirms the ruling's "rights scaled in volume with a vendor
+factor": the **rights volume factor is measured 0.987707** (≠ its price 0.987305, and ≠ our TERP
+0.99061); the **demerger volume factor is measured 0.907921** where present. Both bonuses' volume =
+ours 0.5. This is exactly why FIX-3's `k_shares` (share-count-only) failed gate-1 at −1.24% (rights
+era) and −10.14% (demerger era): the vendor DID scale volume for the rights and (in its recent era)
+the demerger.
+
+**The map matches the ruling's required shape exactly**: demerger ABSENT for 2016/2019, PRESENT
+(measured ~0.9079) for 2022→2023-07; rights 2020 with a measured vendor price factor AND a
+vendor-scaled volume factor; both bonuses 0.5 (ours == vendor).
+
+### Per-window consumption acceptance (un-adjust each probe day THROUGH the map)
+
+All **27 probe days across all 6 windows** come out **provable = True, gate-1 PASS, price
+containment 0–1 paise** on the CA-adjusted days (the lone 10p is 2024-11-07, note ¹; gate-1 still
++0.822%). Representative rows (un-adjusted vs raw daily):
+
+| window | day | provable | gate-1 gap | price \|dH/dL\| |
+|---|---|---|---|---|
+| 2016-10 | 2016-10-03 | yes | +0.002% | ≤1p |
+| 2019-07 | 2019-07-01 | yes | +0.017% | ≤1p |
+| 2022-07 | 2022-07-01 | yes | −0.000% | 0p |
+| 2023-06 | 2023-06-15 | yes | +0.004% | 0p |
+| 2023-09 | 2023-09-01 | yes | +0.010% | ≤1p |
+| 2024-11 | 2024-11-04 | yes | +3.569%² | 0p |
+
+² 2024-11's gate-1 gaps (+0.28% .. +4.35%) are the pre-open call-auction volume the daily total
+counts but continuous 1-min candles do not — all within `[-0.1%, +5.0%]`. This is a raw-day
+property, not an adjustment.
+
+## TCS regression (LIVE) — identity preserved
+
+`acumen-build-adjustment-map --symbol TCS --allow-network --fetch-date 2026-07-25 --window
+pre-bonus:2016-10-03:2016-10-07 --window post-bonus:2019-07-01:2019-07-05` resolves to **exactly
+{2018-05-31 bonus, ours, price 0.5, volume 0.5}** with a post-bonus **identity** era — no rights, no
+demerger, nothing measured. All probe days provable + gate-1 PASS, containment ≤1p.
+
+- **Store rebuild is a NO-OP (identity guard).** `rebuild_symbol_raw_with_map` skips any stored day
+  whose volume already reconciles to the raw daily (gate 1 passes → already RAW). The operator's
+  TCS minute store (already un-adjusted under Q-10) has every sampled day passing gate-1, so the
+  guard skips them all — `days_rewritten = 0`. An adjusted day (volume ~2× raw → gate-1 ~−100%)
+  would instead be un-adjusted; both halves are unit-tested.
+- **Gate-1 by year unchanged.** Over the persisted (unchanged) TCS store: 2016 **100.0%**, 2017
+  **100.0%**, 2018 **97.2%**, 2019+ 98–100% — byte-identical to the Q-10 remedy "after" column.
+  FIX-4 added a module and a consumption path; it did not touch the stored candles.
+
+## How FIX-2/FIX-3 fold in (the measurements stand; the premises are superseded)
+
+- **FIX-2** measured the RELIANCE **2016** window and found no demerger residual (ratio ~0.99666)
+  → concluded "the 1-minute feed is NOT demerger-adjusted." The MEASUREMENT is correct and FIX-4
+  reproduces it (2016 era: demerger **absent**). The PREMISE (a single uniform vendor behaviour)
+  was the error.
+- **FIX-3** measured RELIANCE **2022-07 / 2023-06 / 2023-09** and found the demerger IS baked into
+  2022–2023 pre-ex bars (ratio ~0.908) but not 2016 → raised Q-11. Those MEASUREMENTS are correct
+  and FIX-4 reproduces them (demerger **measured 0.9079** in the 2022→2023-07 era). FIX-3's code
+  (demergers excluded from un-provability) was gate-1-safe but rescued no data.
+- **B81** (rights excluded from `k_shares`; the ~0.29% / ~1.24% residual just past the −0.1% floor)
+  is now RESOLVED by measurement: the rights' vendor price (0.987305) and volume (0.987707) factors
+  are measured directly, so the residual vanishes and gate-1 passes (−0.002%). The −0.1% floor is
+  NOT widened — the ruling's requirement.
+
+FIX-4 supersedes the FIX-2/FIX-3 factor-table minute un-adjustment (`minute_unadjust.unadjust_bars`)
+for era-inconsistent symbols; that path stays for clean bonus/split-only symbols (TCS) and as the
+fallback. The bias engine's demerger pair-suppression (CONTEXT 3.2, daily layer) is a SEPARATE rule
+and is untouched.

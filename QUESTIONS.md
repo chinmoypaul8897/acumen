@@ -982,3 +982,58 @@ or raw feed.
 Chunk 5B (full-universe backfill) is the first consumer that hits this on every demerger symbol; it is
 **BLOCKED on RELIANCE-like demerger symbols** until this is answered (5B on non-demerger symbols is not
 blocked). CONTEXT ownership and any §7-E11/§9 note stay with the architect.
+
+**ARCHITECT'S RULING (relayed to the chunk-5A FIX-4 session, 2026-07-25), verbatim:**
+
+> "ARCHITECT'S RULING: the vendor's historical adjustment stack is era-inconsistent
+> (proven: demerger absent in 2016/2019 windows, present in 2022/2023-06, gone at
+> 2023-09; rights scaled in volume with a vendor factor ~0.9873 vs our TERP 0.99061).
+> Therefore un-adjustment is RECONSTRUCTED per symbol per event by MEASUREMENT, not
+> policy: for each CA event, candidate factors are exactly {our factor, the measured
+> vendor factor k̂, not-applied}, for price and (independently) for volume. k̂ is
+> measured as the median ratio over pre-ex-date probe days between fetched prices and
+> the raw daily store (single scalar per event, windows and residuals recorded -- this
+> is measurement of an observable, never free fitting). Selection is arbitrated by the
+> raw daily oracle: price containment within 2 paise (scaled) AND gate-1 volume band.
+> The chosen chain per symbol-era is committed as an auditable adjustment map with
+> provenance. No candidate fits -> span un-provable -> excluded + counted (surgical
+> clamp). Gate-1 remains the per-day proof; the -0.1% floor is NOT widened."
+
+**RESOLVED -- executed by the chunk-5A FIX-4 session (2026-07-25).** Every clause is code with a
+test behind it, in `src/acumen/vendor_adjustment.py` (PURE map builder + un-adjust consumption;
+the live measurement + persistence are thin I/O wrappers). The FIX-2/FIX-3 rule-guessing (a single
+policy for the vendor's demerger scope) is SUPERSEDED by per-event measurement.
+
+- **The observable.** For a fetched day D (fetch date F), `R(D) = fetched_price(D) / raw_daily(D)`
+  is exactly the product of the vendor's actually-applied factors for events with ex-date in
+  `(D, F]`. This is directly measured (fold the fetched 1-min day to daily OHLC; ratio its HIGH and
+  LOW -- the exact multiples, not the intraday-noisy close -- against the RAW daily store). Volume:
+  `Rv(D) = fetched_vol(D) / raw_daily_vol(D)`. Days sharing the same in-window event set form an
+  ERA; `k̂` per (event, era) is the median over that era's pre-ex probe days (residuals recorded).
+- **The candidate set + arbitration.** Working BACKWARDS from today, one era at a time, each era
+  adds exactly one older event. Each in-era event's factor is chosen from
+  `{ours, measured k̂, not-applied=1}` for price and (independently) for volume. A no-`ours` event
+  (demerger) may FLIP between its measured value and not-applied across eras (the era-inconsistency),
+  chosen by the oracle: PRICE containment within 2 paise of the raw daily high/low AND VOLUME within
+  gate-1's band `[-0.1%, +5.0%]`. Min-cost prefers `ours` (an exact known factor) > `not-applied`
+  (vendor omitted it) > `measured` (the vendor used a factor we had to observe); an event's source is
+  decided at its newest appearance and carried older (only a no-`ours` event flips). At most ONE
+  freshly-solved unknown per era -> measurement, never free fitting.
+- **The map (`AdjustmentMap`).** Per symbol, one entry per (event, era): `{kind, ex_date, era,
+  price_factor_used, volume_factor_used, price_source/volume_source: ours|measured|absent, probe
+  windows, residuals}`. Persisted under `data/adjustment_maps/<SYMBOL>.json` (gitignored store
+  artifact) AND printed into the evidence pack. Deterministic: same fetched inputs -> same map.
+- **Consumption.** `unadjust_with_map(bars, map, ...)` replaces the FIX-3 factor-table path: for a
+  day D it looks up the map entry whose (event set, era) covers D, forms `k_price`/`k_vol` from the
+  chosen per-event factors, and divides/scales (the same `minute_unadjust` Decimal + one-half-even +
+  tick-snap primitives). A day whose era is NOT in the map (unprobed) or whose events have no fitting
+  candidate is UN-PROVABLE -> excluded + counted (CONTEXT 7-E3); gate-1 stays the per-day proof and
+  the -0.1% floor is unchanged.
+- **RELIANCE acceptance (live, credentialed, 2026-07-25).** All six windows come out PROVABLE with
+  gate-1 PASS and price containment. The map shows: demerger ABSENT for 2016/2019, PRESENT (measured
+  ~0.9079) for 2022->2023-07; rights 2020 measured (price ~0.9873 AND vendor-scaled volume ~0.9877,
+  both differing from our TERP 0.99061); both bonuses 0.5 (ours == vendor). Full map + per-window
+  numbers in `docs/gate_chunk5A_open8_evidence.md` (FIX-4 section) and the CHUNK 5A FIX-4 REPORT.
+  **TCS regression:** map resolves to exactly {2018 bonus, ours, 0.5}; the already-raw store's rebuild
+  is a no-op (gate-1-already-passes identity guard) and its gate-1-by-year table is unchanged
+  (2016-18 ~97-100%). CONTEXT ownership and any §7-E11/§9 note stay with the architect.

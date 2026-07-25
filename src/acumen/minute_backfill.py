@@ -41,6 +41,7 @@ from . import corp_actions as ca
 from . import minute_unadjust as unadj
 from . import quality_gates as gates
 from . import smartapi_client as sac
+from . import vendor_adjustment as va
 from .aggregate import aggregate_15min
 from .bias import Candle
 from .bias_engine import MinuteLoader
@@ -239,6 +240,7 @@ def backfill_symbol(
     end: date,
     *,
     symbol_factors: SymbolFactors | None = None,
+    adjustment_map: "va.AdjustmentMap | None" = None,
     retry_errors: bool = True,
     now: Callable[[], datetime] = datetime.now,
     on_progress: Callable[[BackfillProgress, date, date, str], None] | None = None,
@@ -246,11 +248,16 @@ def backfill_symbol(
     """Download ``symbol``'s 1-minute candles over ``[requested_start, end]``, resumably.
 
     Walks the clamped 30-day windows, skips windows already settled in the ledger, fetches the
-    rest, UN-ADJUSTS each window back to RAW (Q-10; using ``symbol_factors`` and the fetch date
-    ``now().date()``), stores the raw candles and records each window's outcome incl. its fetch
-    date. Safe to interrupt and re-run: a settled window is never refetched, an ``error`` window
-    is retried next time. ``symbol_factors`` defaults to the identity table (no CA -> fetched ==
-    raw), so a symbol with no split/bonus/rights stores unchanged.
+    rest, UN-ADJUSTS each window back to RAW, stores the raw candles and records each window's
+    outcome incl. its fetch date. Safe to interrupt and re-run: a settled window is never
+    refetched, an ``error`` window is retried next time.
+
+    Un-adjustment path: when an ``adjustment_map`` is given (the Q-11 per-event MEASURED
+    reconstruction, :mod:`acumen.vendor_adjustment`), each window is un-adjusted THROUGH the map
+    -- the correct path for a symbol whose vendor adjustment is era-inconsistent (a demerger baked
+    into some eras but not others). Without one it falls back to the Q-10 factor-table un-adjust
+    (``symbol_factors``), which is exact for a symbol with only clean bonus/split factors (e.g.
+    TCS). ``symbol_factors`` still supplies the tick for both paths.
     """
     token = master.token(symbol)
     factors = symbol_factors or SymbolFactors.identity(symbol)
@@ -264,7 +271,7 @@ def backfill_symbol(
 
     for window_start, window_end in pending:
         outcome, diag = _fetch_and_store_window(
-            client, store, symbol, token, window_start, window_end, factors, now
+            client, store, symbol, token, window_start, window_end, factors, now, adjustment_map
         )
         store.record_window(outcome)
         progress.windows_done += 1
@@ -304,6 +311,7 @@ def _fetch_and_store_window(
     window_end: date,
     symbol_factors: SymbolFactors,
     now: Callable[[], datetime],
+    adjustment_map: "va.AdjustmentMap | None" = None,
 ) -> tuple[WindowOutcome, unadj.UnadjustResult]:
     sym = symbol.strip().upper()
     when = now()
@@ -340,16 +348,22 @@ def _fetch_and_store_window(
             ),
             empty,
         )
-    # Q-10: un-adjust the fetched (CA-back-adjusted) window back to RAW before it is stored.
-    result = unadj.unadjust_bars(
-        bars,
-        factors=symbol_factors.factors,
-        fetch_date=fetch_date,
-        symbol=sym,
-        tick_paise=symbol_factors.tick_paise,
-        suppressions=symbol_factors.suppressions,
-        pending_ex_dates=symbol_factors.pending_ex_dates,
-    )
+    # Un-adjust the fetched (CA-back-adjusted) window back to RAW before it is stored. Q-11 map
+    # path when available (per-event MEASURED, era-inconsistency-aware); else the Q-10 factor-table.
+    if adjustment_map is not None:
+        result = va.unadjust_with_map(
+            bars, adjustment_map, symbol=sym, tick_paise=symbol_factors.tick_paise
+        )
+    else:
+        result = unadj.unadjust_bars(
+            bars,
+            factors=symbol_factors.factors,
+            fetch_date=fetch_date,
+            symbol=sym,
+            tick_paise=symbol_factors.tick_paise,
+            suppressions=symbol_factors.suppressions,
+            pending_ex_dates=symbol_factors.pending_ex_dates,
+        )
     store.write_bars(sym, result.raw_bars)
     dates = sorted({b.stamp.date() for b in result.raw_bars})
     reason = _window_reason(len(bars), result)
@@ -564,6 +578,89 @@ def rebuild_symbol_raw(
             continue
         raw = unadjust_stored_day(store, sym, day, symbol_factors, fetch_date=fd)
         store.write_bars(sym, raw)
+        result.days_rewritten += 1
+        result.unadjusted_days += 1
+    return result
+
+
+#: A stored day counts as "already raw" only if its fold high/low sit within this fraction of the
+#: raw daily (0.1% -- absorbs market microstructure, well below the smallest adjustment factor).
+_RAW_PRICE_REL_TOL: Decimal = Decimal("0.001")
+
+
+def _stored_day_is_raw(stored: Sequence[StoredBar], daily_row) -> bool:
+    """Is a stored symbol-day ALREADY raw? Checks BOTH price and volume. PURE-ish (no I/O).
+
+    Volume must reconcile to the raw daily (gate 1), AND the stored fold high/low must match the raw
+    daily high/low within :data:`_RAW_PRICE_REL_TOL` (0.1%). An ADJUSTED day is off by its factor on
+    price (a special dividend leaves volume reconciled but price ~2% low; a bonus is 50% low on
+    both), so it fails and gets un-adjusted; a genuinely raw day passes both and is skipped.
+    """
+    daily_volume = int(daily_row["volume"])
+    minute_volume = sum(int(b.volume) for b in stored)
+    if not gates.volume_gate(daily_volume, minute_volume).passed:
+        return False
+    fold_high = max(b.high_paise for b in stored)
+    fold_low = min(b.low_paise for b in stored)
+    for fold, raw in ((fold_high, int(daily_row["high_paise"])), (fold_low, int(daily_row["low_paise"]))):
+        if raw <= 0:
+            return False
+        if abs(Decimal(fold - raw)) > max(Decimal(2), Decimal(raw) * _RAW_PRICE_REL_TOL):
+            return False
+    return True
+
+
+def rebuild_symbol_raw_with_map(
+    store: MinuteStore,
+    daily_store: DailyStore,
+    symbol: str,
+    adjustment_map: "va.AdjustmentMap",
+    *,
+    tick_paise: int | None = None,
+) -> RebuildResult:
+    """Un-adjust an already-fetched store to RAW IN PLACE via the Q-11 map, with an IDENTITY GUARD.
+
+    Unlike :func:`rebuild_symbol_raw` (Q-10 factor-table, NOT idempotent), this is safe to re-run.
+    The identity guard (:func:`_stored_day_is_raw`) skips any day that is ALREADY raw -- checked on
+    BOTH price (the stored fold high/low match the raw daily within a microstructure tolerance) AND
+    volume (gate 1 passes). Both are required because Q-11 un-adjusts price and volume INDEPENDENTLY:
+    a price-only corporate action (a special dividend: k_price<1, k_volume=1) leaves volume already
+    reconciled, so a volume-only guard would skip the day with its PRICE still adjusted -- a wrong
+    price silently reaching the backtest. An adjusted day is off on price and/or volume by its
+    factor, fails the guard, and is un-adjusted through the map. Rebuilding an already-RAW store
+    (e.g. a TCS store migrated under Q-10) is therefore a NO-OP -- the Q-11 regression. A day with no
+    raw daily row cannot be verified either way, so it is left as-is (gate 1 excludes it downstream);
+    a day whose era the map cannot resolve is counted un-provable and left as-is.
+    """
+    sym = symbol.strip().upper()
+    result = RebuildResult(symbol=sym, days_rewritten=0, identity_days=0, unadjusted_days=0)
+    for day in store.stored_days(sym):
+        stored = store.minutes(sym, day)
+        if not stored:
+            continue
+        frame = daily_store.daily(sym, day, day)
+        if frame.empty:
+            result.identity_days += 1  # no raw daily row to verify against -> leave as-is (safe)
+            continue
+        if _stored_day_is_raw(stored, frame.iloc[0]):
+            result.identity_days += 1  # already RAW on price AND volume -> identity guard, skip
+            continue
+        factors = adjustment_map.factors_for_day(day)
+        if factors is None:
+            result.unprovable_days.append(day)  # unprobed / un-provable era -> gate 1 excludes it
+            continue
+        as_fetched = [
+            sac.OneMinuteBar(b.stamp, b.open_paise, b.high_paise, b.low_paise, b.close_paise, b.volume)
+            for b in stored
+        ]
+        res = va.unadjust_with_map(as_fetched, adjustment_map, symbol=sym, tick_paise=tick_paise)
+        store.write_bars(
+            sym,
+            [
+                StoredBar(sym, rb.stamp, rb.open_paise, rb.high_paise, rb.low_paise, rb.close_paise, rb.volume)
+                for rb in res.raw_bars
+            ],
+        )
         result.days_rewritten += 1
         result.unadjusted_days += 1
     return result
