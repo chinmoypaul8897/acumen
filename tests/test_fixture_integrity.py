@@ -98,6 +98,20 @@ FROZEN_FIXTURES_SHA256: dict[str, str] = {
     "ca/yahoo_splits_RELIANCE_2024-10.json": (
         "f3d3a78111bd0f004ea88aacede81778610a0db8e017f0ae07a8d97984fafc9a"
     ),
+    # chunk 4 prep (2026-07-25): three DERIVED fixtures for the 2020-07-13 data-quirk
+    # round-trip. The archive cut is TCS + RELIANCE rows lifted byte-for-byte out of NSE's
+    # real (malformed, '13-Jul-20') archive bhavcopy; the two SmartAPI files are verbatim
+    # ONE_DAY getCandleData responses, frozen once during the chunk-4 prep evidence step.
+    # Provenance (source, verification, the raw:adjusted ratio) in tests/fixtures/PROVENANCE.md.
+    "quirk_2020-07-13_archive_cut.csv": (
+        "a363b028dd0b4f03c53f4c08db458719636c20461bcf13b054476b6a22e35f90"
+    ),
+    "smartapi_oneday_TCS_2020-07-13.json": (
+        "aee8f2042f66fb2342ca9ccc3a9eccf75eeca5ba6e5fd014e63eac93d32d6a7a"
+    ),
+    "smartapi_oneday_RELIANCE_2020-07-13.json": (
+        "6598c12d1e97dfc8f098a4015e778ba7e2b6d725d1b43ead2f3773c28401ebdb"
+    ),
 }
 
 #: CONTEXT 4.2's own test ORACLE, frozen at docs/ (not under tests/fixtures/, because it is a

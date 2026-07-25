@@ -484,7 +484,6 @@ def download_bhavcopy(
         try:
             text = extract_csv(payload)
             rows = parse_bhavcopy(text, source_format)
-            _require_single_date(rows, day, source_format)
         except BhavcopyError as exc:
             return Download(
                 DateOutcome(
@@ -498,6 +497,30 @@ def download_bhavcopy(
                 )
             )
 
+        # Normal validation runs first; the curated quirk table is consulted ONLY when it
+        # fails, and corrects ONLY a file malformed in exactly the documented way (see
+        # acumen.data_quirks). Anything else stays an error.
+        quirk_reason: str | None = None
+        try:
+            _require_single_date(rows, day, source_format)
+        except BhavcopyError as exc:
+            from . import data_quirks  # local import: data_quirks imports from this module
+
+            corrected = data_quirks.correct_rows(day, source_format, rows)
+            if corrected is None:
+                return Download(
+                    DateOutcome(
+                        trade_date=day,
+                        outcome=OUTCOME_ERROR,
+                        source_format=source_format,
+                        url=url,
+                        http_status=200,
+                        reason=str(exc),
+                        attempted_at=stamped,
+                    )
+                )
+            rows, quirk_reason = corrected
+
         return Download(
             DateOutcome(
                 trade_date=day,
@@ -505,6 +528,7 @@ def download_bhavcopy(
                 source_format=source_format,
                 url=url,
                 http_status=200,
+                reason=quirk_reason,
                 row_count=len(rows),
                 attempted_at=stamped,
             ),

@@ -541,3 +541,25 @@ reference; CONTEXT gains it at its next version bump (the architect owns that ed
 session records the ruling here and executes it, and does not touch CONTEXT.md). The 289
 frozen-window dividends redistribute (once P_cum is supplied from the daily store) into
 ordinary / near-threshold / special / still-pending — full counts in the CHUNK 4 REPORT.
+
+---
+
+## OPEN-8 evidence · chunk 4 prep · recorded 2026-07-25 (CONTEXT §9 registry item; architect owns the CONTEXT edit)
+
+OPEN-8 ("SmartAPI 1-min historical: raw or pre-adjusted?") lives in CONTEXT §9, which this
+session may not edit. Recording the evidence here at the architect's direction (chunk-4 prep
+addendum, the 2020-07-13 SmartAPI cross-check), verbatim:
+
+> "EVIDENCE (2026-07-25): SmartAPI ONE_DAY candles are CA-back-adjusted — proven by RELIANCE
+> 2020-07-13 raw 1935 vs SmartAPI 878.36, ratio consistent with the 2024 bonus x 2023
+> demerger. NOTE: this answers dailies only; the 1-min adjustment status is a separate
+> question — chunk 5A gate-3 still runs in full."
+
+Supporting detail from this session: the raw:adjusted ratio is 878.36 / 1935 = **0.4539**,
+which matches a 1:1 bonus (k = 0.5, ex 2024-10-28 — in our own factor data) times the
+RELIANCE -> Jio Financial Services demerger (ex 2023-07-20 — in our own demerger table),
+≈ 0.5 x 0.908. TCS, which had NO intervening corporate action, matched SmartAPI ONE_DAY to
+the paisa (raw close 2220.00 = SmartAPI 2220.00), which is why it was the adjustment-free leg
+of the cross-check. The quirk-corrected 2020-07-13 bhavcopy was verified genuine three ways
+(TCS = SmartAPI exactly; both symbols' closes continuous with the raw store neighbours
+2020-07-10 / 2020-07-14; the file's own PREVCLOSE column chains to 2020-07-10) and ingested.

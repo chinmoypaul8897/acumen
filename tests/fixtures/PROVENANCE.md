@@ -180,3 +180,29 @@ CONTEXT §4.2 gives the URL only as `nsearchives.nseindia.com/.../` — four can
 tried and this is the one that answered 200; the other three answered 404. Its three sheets
 (BONUS, SPLIT, RIGHTS) are read cell-by-cell by `tests/test_ca_goldens.py`, so the numbers in
 that file cannot drift from the oracle they quote.
+
+### The 2020-07-13 data-quirk round-trip (chunk 4 prep, 2026-07-25)
+
+Three DERIVED fixtures for `tests/test_data_quirks_roundtrip.py`, frozen during the chunk-4
+prep evidence step (a one-off, read-only network fetch). Provenance and verification:
+
+- **`quirk_2020-07-13_archive_cut.csv`** — the `TCS-EQ` and `RELIANCE-EQ` rows lifted
+  byte-for-byte (header + 2 data rows) out of NSE's real archive bhavcopy for 2020-07-13
+  (`nsearchives.nseindia.com/content/historical/EQUITIES/2020/JUL/cm13JUL2020bhav.csv.zip`,
+  HTTP 200). That file is malformed: its `TIMESTAMP` column reads the two-digit `13-Jul-20`
+  instead of `13-Jul-2020`, so every row parses to the year 0020 and the store validator
+  correctly refused it (the operator's 25-year backfill left it as the ledger's only `error`).
+  The cut PRESERVES the malformation verbatim — it is the input the quirk mechanism corrects.
+- **`smartapi_oneday_TCS_2020-07-13.json`** / **`smartapi_oneday_RELIANCE_2020-07-13.json`** —
+  verbatim SmartAPI `getCandleData` ONE_DAY responses (exchange NSE, tokens 11536 / 2885,
+  `2020-07-13 00:00`..`15:30`), fetched once with the operator's read-only `.env` credentials.
+
+Verification (why the quirk was trusted before the date was ingested): the corrected **TCS**
+close 2220.00 equals the SmartAPI ONE_DAY close **to the paisa** (TCS had no intervening
+corporate action, so raw == adjusted). The corrected **RELIANCE** close 1935.00 differs from
+its SmartAPI ONE_DAY close 878.36 — ratio 0.454 — because SmartAPI ONE_DAY is corporate-action
+BACK-ADJUSTED (1:1 bonus ex 2024-10-28 x RELIANCE->Jio demerger ex 2023-07-20), while the
+bhavcopy is raw; RELIANCE's raw close was instead verified against the raw store neighbours
+2020-07-10 (1878.05) and 2020-07-14 (1917.00), and the file's own PREVCLOSE column chains to
+2020-07-10. This is recorded as OPEN-8 evidence in QUESTIONS.md. NOTE: the SmartAPI files carry
+market prices only, no credential of any kind.
