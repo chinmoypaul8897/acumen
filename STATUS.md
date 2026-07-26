@@ -12,7 +12,7 @@ chunk 2: reviewed-PASS
 chunk 3: reviewed-PASS
 chunk 4: reviewed-PASS
 chunk 5A: reviewed-PASS  # QC (both personas) over 2d55919..9f06b6d: prep+build+fix(Q-10)+fix2(k_shares)+fix3(demerger-scope/Q-11 STOP)+fix4(Q-11 measured reconstruction). 911/0 offline; RELIANCE era-flip hand-verified; 9-mutant matrix (8 caught/1 equivalent); no secrets/AI-attribution/test-weakening. 2 LOW findings (map not yet wired to ingest CLI; factor-table fallback price-blind for special dividends) are chunk-5B-forward + gate-1-safe. tag chunk5A-pass
-chunk 5B: todo
+chunk 5B: built (run in progress)  # prep(F1/F2/F7/F3)+runner+fix(routing upper bound). 984/0 offline. Daily store VERIFIED clean (319 months, 6606/6606 file-present dates carry rows, 10.53M rows, 0 anomalies). Routes: 127 table-path / 83 map-required. Live universe run LAUNCHED 2026-07-26 (~4.6h, resumable at window granularity, same command resumes). Raises Q-12 (class A, STOP, non-blocking: the ruled MEDIAN volume estimator is biased by the auction shortfall, so provable eras are marked un-provable -- costs COVERAGE, not correctness).
 chunk 6: todo
 chunk 7: todo
 chunk 8: todo

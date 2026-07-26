@@ -1,6 +1,6 @@
 # Minute backfill report -- chunk 5B (full-universe 1-minute run)
 
-Generated 2026-07-26T13:28:56 from `C:\Users\chinm\acumen\data\universe_backfill\ledger.json` and the stores. Re-runnable at any time; makes no network call.
+Generated 2026-07-26T14:08:26 from `C:\Users\chinm\acumen\data\universe_backfill\ledger.json` and the stores. Re-runnable at any time; makes no network call.
 
 Scope: CONTEXT 3.1's F&O stock underlyings (CONTEXT 7-E5 -- TODAY's list, with the survivorship disclosure the report owes), 1-minute candles from `2016-10-01` (CONTEXT 4.3 depth floor) or the symbol's listing, whichever is later, to `2026-07-26`.
 
@@ -9,59 +9,84 @@ Scope: CONTEXT 3.1's F&O stock underlyings (CONTEXT 7-E5 -- TODAY's list, with t
 | Measure | Value |
 |---|---|
 | Universe symbols | 210 |
-| Processed | 2 |
-| Settled | 1 |
-| Quarantined (gate-1 pass rate < 80%) | 1 |
-| Not yet processed | 208 |
-| Symbol-days gated (settled symbols) | 867 |
-| Gate-1 PASS | 858 (99.0%) |
-| Gate-2 exclusions | 158 |
+| Processed | 16 |
+| Settled | 13 |
+| Quarantined (gate-1 pass rate < 80%) | 3 |
+| Not yet processed | 194 |
+| Symbol-days gated (settled symbols) | 26,065 |
+| Gate-1 PASS | 25,888 (99.3%) |
+| Gate-2 exclusions | 2,385 |
 | Un-provable days (no map era / unknown factor) | 0 |
-| **TOTAL coverage** (gate-1-passing days of every symbol-day seen) | **26.0%** |
-| Usable symbol-days (gate 1 AND gate 2) | ~700 |
+| **TOTAL coverage** (gate-1-passing days of every symbol-day seen) | **77.6%** |
+| Usable symbol-days (gate 1 AND gate 2) | ~23,503 |
 
-**Definition of done (plan.md chunk 5B): >= 95% of symbol-days pass gates.** Measured: **26.0%** of all symbol-days seen pass gate 1, with every failure categorized in section 4.
+**Definition of done (plan.md chunk 5B): >= 95% of symbol-days pass gates.** Measured: **77.6%** of all symbol-days seen pass gate 1, with every failure categorized in section 4.
 
 ## 2. Route classification (QUESTIONS.md Q-11 addendum)
 
 | Route | Symbols | Meaning |
 |---|---|---|
-| `table-path` | 1 | bonus/split-only: our CONTEXT 4.2 factors ARE the vendor's, and gate-1 volume proves the price division |
-| `map-required` | 1 | carries a non-share-count event (rights / special dividend / demerger) or something unparsed: ingested only through a measured map with per-day price containment |
+| `table-path` | 12 | bonus/split-only: our CONTEXT 4.2 factors ARE the vendor's, and gate-1 volume proves the price division |
+| `map-required` | 4 | carries a non-share-count event (rights / special dividend / demerger) or something unparsed: ingested only through a measured map with per-day price containment |
 
 ### Map inventory
 
 | Symbol | Eras probed | Provable | Unprobed | Events (kind @ ex-date: price/volume source) |
 |---|---|---|---|---|
 | ABB | 1 | 0 | 0 | - |
+| ADANIENT | 3 | 0 | 0 | - |
+| AMBUJACEM | 2 | 2 | 0 | dividend@2020-11-05: absent/ours; dividend@2022-03-30: absent/ours |
+| ASHOKLEY | 3 | 3 | 0 | bonus@2025-07-16: ours/ours; dividend@2019-07-23: absent/ours; dividend@2024-04-03: absent/ours |
 
-Per-event factor sources across every committed map -- **ours 0**, **measured 0**, **absent 0** (price side). `ours` = our exact CONTEXT 4.2 factor matched the vendor; `measured` = the vendor used a factor we had to observe; `absent` = the vendor did not apply the event in that era.
+Per-event factor sources across every committed map -- **ours 1**, **measured 0**, **absent 4** (price side). `ours` = our exact CONTEXT 4.2 factor matched the vendor; `measured` = the vendor used a factor we had to observe; `absent` = the vendor did not apply the event in that era.
 
 ## 3. Depth found, per symbol
 
-| Symbol | Route | Clamp | First 1-min day | Days | Windows p/e/x | Gate-1 | Gate-2 excl | Status |
-|---|---|---|---|---|---|---|---|---|
-| 360ONE | table-path | 2023-01-23 | 2023-01-23 | 867 | 46/0/0 | 858/867 (99.0%) | 158 | settled |
-| ABB | map-required | 2016-10-01 | 2016-10-03 | 2429 | 128/1/0 | 1632/2429 (67.2%) | 828 | quarantined |
+| Symbol | Route | Clamp | First 1-min day | Days | Windows p/e/x | Gate-1 | Gate-2 excl | Avg min/day | Status |
+|---|---|---|---|---|---|---|---|---|---|
+| 360ONE | table-path | 2023-01-23 | 2023-01-23 | 867 | 46/0/0 | 858/867 (99.0%) | 158 | 363.6 | settled |
+| ABB | map-required | 2016-10-01 | 2016-10-03 | 2429 | 128/1/0 | 1632/2429 (67.2%) | 828 | 351.0 | quarantined |
+| ABCAPITAL | table-path | 2017-09-01 | 2017-09-01 | 2202 | 117/0/0 | 2187/2202 (99.3%) | 23 | 372.7 | settled |
+| ADANIENSOL | table-path | 2023-08-24 | 2023-08-24 | 723 | 39/0/0 | 721/723 (99.7%) | 5 | 372.9 | settled |
+| ADANIENT | map-required | 2016-10-01 | 2016-10-03 | 2429 | 128/1/0 | 197/2429 (8.1%) | 41 | 372.7 | quarantined |
+| ADANIGREEN | table-path | 2018-06-18 | 2018-06-18 | 2005 | 106/0/0 | 1990/2005 (99.3%) | 316 | 362.8 | settled |
+| ADANIPORTS | table-path | 2016-10-01 | 2016-10-03 | 2429 | 128/1/0 | 2410/2429 (99.2%) | 16 | 373.2 | settled |
+| ADANIPOWER | table-path | 2016-10-01 | 2016-10-03 | 2429 | 128/1/0 | 2401/2429 (98.8%) | 39 | 372.4 | settled |
+| ALKEM | table-path | 2016-10-01 | 2016-10-03 | 2429 | 128/1/0 | 2415/2429 (99.4%) | 852 | 343.9 | settled |
+| AMBER | table-path | 2018-01-30 | 2018-01-30 | 2099 | 111/0/0 | 2082/2099 (99.2%) | 836 | 327.3 | settled |
+| AMBUJACEM | map-required | 2016-10-01 | 2016-10-03 | 2428 | 128/1/0 | 2413/2428 (99.4%) | 18 | 373.1 | settled |
+| ANGELONE | table-path | 2021-11-11 | 2021-11-11 | 1166 | 62/0/0 | 1163/1166 (99.7%) | 6 | 373.1 | settled |
+| APLAPOLLO | table-path | 2016-10-01 | 2016-10-03 | 2431 | 128/1/0 | 1892/2431 (77.8%) | 989 | 314.0 | quarantined |
+| APOLLOHOSP | table-path | 2016-10-01 | 2016-10-03 | 2429 | 128/1/0 | 2415/2429 (99.4%) | 84 | 371.9 | settled |
+| ASHOKLEY | map-required | 2016-10-01 | 2016-10-03 | 2429 | 128/1/0 | 2416/2429 (99.5%) | 16 | 373.3 | settled |
+| ASIANPAINT | table-path | 2016-10-01 | 2016-10-03 | 2430 | 128/1/0 | 2417/2430 (99.5%) | 16 | 373.2 | settled |
 
 ## 4. Exclusions by reason
 
 | Reason | Symbol-days | Note |
 |---|---|---|
-| gate-1 (volume reconciliation outside [-0.1%, +5.0%]) | 9 | CONTEXT 4.5 gate 1; excluded + counted per CONTEXT 7-E3 |
-| gate-2 (candle integrity) | 158 | missing > 15 minutes, duplicate stamps, or OHLC violations |
+| gate-1 (volume reconciliation outside [-0.1%, +5.0%]) | 177 | CONTEXT 4.5 gate 1; excluded + counted per CONTEXT 7-E3 |
+| gate-2 (candle integrity) | 2,385 | missing > 15 minutes, duplicate stamps, or OHLC violations |
 | un-provable (no map era / unknown factor in (D, F]) | 0 | the Q-11 surgical clamp -- stored so the day is visible, failed by gate 1 |
-| quarantined symbols (whole history) | 2,429 | 1 symbol(s) below the 80% gate-1 floor |
+| quarantined symbols (whole history) | 7,289 | 3 symbol(s) below the 80% gate-1 floor |
+
+### Gate 2 and liquidity -- read this before reading the coverage number
+
+CONTEXT 4.5 gate 2 excludes a day missing more than 15 of the 375 session minutes, and the vendor OMITS minutes in which nothing traded. For a liquid symbol in a recent year that is 375/375 and gate 2 never fires (the CONTEXT 4.3 PoC measured exactly that on 25 symbol-days). For a less liquid F&O underlying in an older year the true traded-minute count is well under 375, so gate 2 excludes the day -- correctly, per the spec as written, but for a LIQUIDITY reason rather than a data-quality one.
+
+**6 symbol(s) lose more than 10% of their stored days to gate 2.** Their average traded minutes per day is in the table above; the lower it is, the more of the symbol's old history gate 2 removes.
 
 ### Quarantined symbols
 
 | Symbol | Route | Gate-1 | Why |
 |---|---|---|---|
 | ABB | map-required | 1632/2429 (67.2%) | gate-1 pass rate 67.2% is below 80%; skipped, listed, run continues |
+| ADANIENT | map-required | 197/2429 (8.1%) | gate-1 pass rate 8.1% is below 80%; skipped, listed, run continues |
+| APLAPOLLO | table-path | 1892/2431 (77.8%) | gate-1 pass rate 77.8% is below 80%; skipped, listed, run continues |
 
 ## 5. Gate 3 -- adjustment sanity across every share-count ex-date
 
-CONTEXT 4.5 gate 3: on every split/bonus ex-date in the stored span, the ADJUSTED series must show |day-over-day gap| < 20%. Checked on the stored RAW closes with the event's own CONTEXT 4.2 factor applied at the comparison. **2 ex-date(s) checked, 2 failed.**
+CONTEXT 4.5 gate 3: on every split/bonus ex-date in the stored span, the ADJUSTED series must show |day-over-day gap| < 20%. Checked on the stored RAW closes with the event's own CONTEXT 4.2 factor applied at the comparison. **6 ex-date(s) checked, 0 failed.**
 
 ## 6. Unknown series on F&O-universe symbols (QUESTIONS.md Q-4)
 
