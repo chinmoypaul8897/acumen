@@ -1094,3 +1094,96 @@ its era keys, so if the vendor did adjust for it the era's containment simply fa
 days are un-provable -> excluded + counted. Safe (nothing wrong is stored, gate 1 and containment
 both hold) and disclosed here rather than silently patched.
 
+
+---
+
+## Q-12 · chunk 5B · class A · **OPEN -- STOP (non-blocking; costs COVERAGE, not correctness)**
+
+**Question.** Q-11 rules that a measured factor `k̂` is "the median ratio over pre-ex-date probe
+days", for price and (independently) for volume. On the PRICE side the observable is unbiased --
+`fetched/raw` is the same number every day. On the VOLUME side it is **not**: the observable is
+`raw_daily_vol / fetched_vol`, and the 1-minute sum systematically UNDER-counts the daily total
+(the pre-open call auction the exchange counts and continuous candles do not). That is the exact
+asymmetry gate 1's own band `[-0.1%, +5.0%]` exists for. Taking the MEDIAN of a positively-skewed
+observable puts roughly half the probe days BELOW the true factor, and a day below it produces a
+NEGATIVE gap that the -0.1% floor rejects -- so an era whose true factor reconciles every day is
+marked un-provable. How should the volume `k̂` be estimated?
+
+**Why it is a hole.** Q-11 names one estimator (the median) for both sides. It does not say what
+to do when the volume observable is biased by a known, one-directional artefact that the gate's
+own band already models. Deciding either way is a change to a ruled formula, so this session did
+not.
+
+**Measured, live, 2026-07-26 (ABB, demerger ex 2019-12-20, the run's first map-required symbol).**
+The four pre-ex probe days the runner chose:
+
+| probe day | fetched H/raw H | fetched L/raw L | vol recovery `raw/fetched` |
+|---|---|---|---|
+| 2019-12-16 | 0.897601 | 0.897600 | 0.897998 |
+| 2019-12-17 | 0.897599 | 0.897601 | 0.899205 |
+| 2019-12-18 | 0.897600 | 0.897598 | **0.897601** |
+| 2019-12-19 | 0.897601 | 0.897599 | 0.904588 |
+
+The PRICE factor is a rock-solid **0.8976** on all four days, to six decimals. The VOLUME
+recoveries scatter upward from that same 0.8976 -- 2019-12-18 sits exactly ON it, and the others
+sit 0.04%-0.78% above, which is precisely the auction shortfall. The median is 0.8986, and with it:
+
+| probe day | un-adjusted vol | raw daily vol | gate-1 gap | verdict |
+|---|---|---|---|---|
+| 2019-12-16 | 124,833 | 124,749 | -0.067% | pass |
+| 2019-12-17 | 44,280 | 44,311 | +0.070% | pass |
+| 2019-12-18 | 121,092 | 120,958 | **-0.111%** | **FAIL (floor is -0.1%)** |
+| 2019-12-19 | 89,555 | 90,154 | +0.664% | pass |
+
+One day misses the floor by **0.011 percentage points** and `_volume_reconciled` (which requires
+EVERY probe day to pass, correctly) rejects the chain -- so no candidate fits, the era is
+un-provable, and **~790 ABB symbol-days (2016-10 .. 2019-12) are excluded**. With the price
+factor 0.8976 used for volume instead, every probe day passes: +0.045% / +0.178% / 0.000% /
++0.773%. The right answer was available and the ruled estimator missed it.
+
+**Why it matters.** ABB is the FIRST map-required symbol the run reached, so this is not an
+exotic case -- it is the shape of every demerger/rights symbol whose vendor volume factor has to
+be measured. Each one loses its whole pre-event minute span. Nothing WRONG is stored (the days
+are excluded and counted, CONTEXT 7-E3, and gate 1 remains the per-day proof), so this costs
+COVERAGE, not correctness -- which is why the run proceeds rather than halting.
+
+**What this session did meanwhile (STOP, no silent decision).** Executed Q-11 exactly as ruled:
+`vendor_adjustment._refine_scalars` still takes the median for both passes, `_volume_reconciled`
+still requires every probe day inside the unwidened band, and an era that fails is un-provable ->
+excluded + counted. The run continues and the report prints, per symbol, how many days each
+un-provable era costs -- so the architect rules with numbers rather than with this one example.
+
+**Options for the architect (not decided here):**
+(a) **Estimate the volume `k̂` as the MINIMUM (or a low quantile) of `raw/fetched` over the probe
+days** -- the observable's floor is the unbiased point, because the shortfall is one-directional.
+(b) **Add the measured PRICE factor to the volume candidate set** ({ours, measured-price,
+measured-volume, absent}), letting the containment/band oracle pick it -- the arbitration stays
+exactly as ruled and only the candidate list grows. ABB's evidence says this candidate wins.
+(c) **Keep the median and accept the coverage loss**, disclosed in the chunk-9 report.
+(d) Something else the architect prefers; the map is rebuildable and
+`rebuild_symbol_raw_with_map` is idempotent, so any ruling can be applied to the already-fetched
+store WITHOUT re-downloading a single candle.
+
+Chunk 6 is not blocked (it consumes whatever days survive gate 1). Chunk 9's coverage is what
+this decides.
+
+---
+
+## chunk 5B FINDING (not a spec hole) · gate 2 vs LIQUIDITY · recorded 2026-07-26
+
+Not a question -- CONTEXT 4.5 gate 2 is unambiguous -- but a measured consequence the architect
+should see before chunk 9 reads a coverage number.
+
+Gate 2 excludes a day missing more than 15 of the 375 session minutes. **The vendor omits minutes
+in which nothing traded.** CONTEXT 4.3's PoC measured "375/375 candles per day, zero gaps" -- on 5
+LIQUID symbols in 2026. Measured this session on ABB in 2019: **318, 293, 325 and 338 traded
+minutes** on four consecutive days, i.e. 37-82 missing, so gate 2 excludes every one of them. Over
+ABB's whole stored history that is **828 of 2,429 days (34%)** excluded for a LIQUIDITY reason
+rather than a data-quality one.
+
+The strategy itself only needs 09:15-11:14 (the POC window, guarded separately by CONTEXT 7-E4's
+"missing > 5 of 120") plus the 15-minute candles to 15:15, so a whole-day 375-minute rule is
+stricter than the strategy requires. The backfill report prints average traded minutes per day per
+symbol and flags every symbol losing more than 10% of its days to gate 2, so the size of this is
+visible. **No code deviates**: gate 2 is applied exactly as CONTEXT 4.5 states it.
+

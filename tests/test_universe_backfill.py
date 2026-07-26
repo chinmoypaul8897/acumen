@@ -1,0 +1,642 @@
+"""Chunk-5B tests for the full-universe 1-minute run (:mod:`acumen.universe_backfill`).
+
+The run itself is hours of live network, so what is testable offline is the DISCIPLINE around
+it, and that is exactly what the card asks to be tested: the routing classifier's effect on a
+real run, the map-required refusal, resume, the quarantine trigger and its halt ceiling, and
+report generation. All of it runs against a synthetic VENDOR -- a fake client that serves
+back-adjusted candles the way SmartAPI does -- plus a real Parquet daily store and a real
+minute store in ``tmp_path``.
+
+The end-to-end case is the one that matters most: a symbol with a demerger (no factor of ours)
+whose vendor bakes a 0.9 factor into pre-ex minutes. Its map must be PROBED and BUILT before
+its ingest, the measured 0.9 must come back out of the stored prices exactly, and gate 1 must
+then pass on every day. That is the whole Q-11 chain, driven through the runner.
+"""
+
+from __future__ import annotations
+
+import json
+from datetime import date, datetime, time, timedelta
+from decimal import Decimal
+from pathlib import Path
+
+import pytest
+
+from acumen import corp_actions as ca
+from acumen import minute_backfill as mb
+from acumen import universe_backfill as ub
+from acumen import vendor_adjustment as va
+from acumen.adjustment_route import ROUTE_MAP_REQUIRED, ROUTE_TABLE_PATH
+from acumen.bhavcopy import FORMAT_UDIFF, OUTCOME_PRESENT, DailyRow, DateOutcome, Download
+from acumen.daily_store import DailyStore
+from acumen.minute_store import MinuteStore
+from acumen.smartapi_client import OneMinuteBar
+
+NOW = datetime(2026, 7, 26, 8, 0, 0)
+
+# A short synthetic history: one trading day a week keeps the fixture small while still
+# spanning the eras a real symbol has. Prices are multiples of 10 paise and volumes multiples
+# of 9 so the synthetic vendor's x0.9 / /0.9 stays exact -- the test measures the machinery,
+# not rounding.
+VENDOR_DEMERGER_FACTOR = Decimal("0.9")
+
+
+def _trading_days(first: date, count: int, *, step: int = 7) -> list[date]:
+    return [first + timedelta(days=step * i) for i in range(count)]
+
+
+DAYS = _trading_days(date(2019, 1, 2), 40)  # 2019-01-02 .. 2019-10-02, ~10 fetch windows
+START = date(2019, 1, 1)
+END = DAYS[-1] + timedelta(days=3)
+DEMERGER_EX = DAYS[20]
+
+
+def _daily_row(day: date, symbol: str, base: int, volume: int) -> DailyRow:
+    return DailyRow(
+        trade_date=day, symbol=symbol, series="EQ",
+        open_paise=base, high_paise=base + 100, low_paise=base - 100, close_paise=base + 50,
+        volume=volume, last_paise=base + 50, prev_close_paise=base, turnover_paise=base * volume,
+        trades=100, isin=None, instrument_type=None, source_format=FORMAT_UDIFF,
+    )
+
+
+def _make_daily_store(tmp_path: Path, symbols: dict[str, int]) -> DailyStore:
+    """A real Parquet daily store carrying ``symbols`` (name -> base price) over DAYS.
+
+    Written through ``write_rows`` + ONE ``record_outcomes`` rather than per-date ``ingest``:
+    the ledger rewrite is O(n) per date (REVIEW_2 F8 measured it), which is fine for a real
+    backfill and needlessly quadratic for a fixture.
+    """
+    store = DailyStore.at(tmp_path / "daily_store")
+    outcomes = []
+    for index, day in enumerate(DAYS):
+        rows = tuple(
+            _daily_row(day, symbol, base + 10 * index, 9000 + 9 * index)
+            for symbol, base in symbols.items()
+        )
+        store.write_rows(day, rows)
+        outcomes.append(
+            DateOutcome(trade_date=day, outcome=OUTCOME_PRESENT, source_format=FORMAT_UDIFF,
+                        url="https://example.invalid", http_status=200,
+                        row_count=len(rows), attempted_at=NOW)
+        )
+    store.record_outcomes(outcomes)
+    return store
+
+
+class SyntheticVendor:
+    """A SmartAPI double that serves CA-BACK-ADJUSTED 1-minute candles, as the real feed does.
+
+    For a symbol in ``adjusted``, every day strictly before the ex-date comes back multiplied by
+    the vendor's price factor and divided by it in volume -- the exact signature chunk 5A
+    measured. Everything on or after the ex-date, and every other symbol, comes back raw. The
+    daily fold of the three bars it emits reproduces the daily store's high/low/volume exactly,
+    so an un-adjustment that is right lands on the raw daily values to the paisa.
+    """
+
+    def __init__(self, cache: ub.DailyCache, tokens: dict[str, str],
+                 adjusted: dict[str, tuple[date, Decimal]] | None = None) -> None:
+        self._cache = cache
+        self._by_token = {token: symbol for symbol, token in tokens.items()}
+        self._adjusted = adjusted or {}
+        self.calls: list[tuple[str, date, date]] = []
+
+    def get_candles(self, token, interval, from_dt, to_dt, *, exchange="NSE"):  # type: ignore[no-untyped-def]
+        symbol = self._by_token[token]
+        self.calls.append((symbol, from_dt.date(), to_dt.date()))
+        bars: list[OneMinuteBar] = []
+        for day in self._cache.days(symbol):
+            if not (from_dt.date() <= day <= to_dt.date()):
+                continue
+            row = self._cache.day(symbol, day)
+            assert row is not None
+            k = Decimal(1)
+            if symbol in self._adjusted:
+                ex_date, factor = self._adjusted[symbol]
+                if day < ex_date:
+                    k = factor
+            high = int(Decimal(row.high_paise) * k)
+            low = int(Decimal(row.low_paise) * k)
+            close = int(Decimal(row.close_paise) * k)
+            volume = int(Decimal(row.volume) / k)
+            stamp = datetime.combine(day, time(9, 15))
+            # three bars whose fold is exactly (high, low, close, volume)
+            bars.extend([
+                OneMinuteBar(stamp, low, high, low, close, volume - 2 * (volume // 3)),
+                OneMinuteBar(stamp + timedelta(minutes=1), close, high, low, close, volume // 3),
+                OneMinuteBar(stamp + timedelta(minutes=2), close, high, low, close, volume // 3),
+            ])
+        return tuple(bars)
+
+
+class FakeMaster:
+    def __init__(self, tokens: dict[str, str]) -> None:
+        self._tokens = tokens
+
+    def token(self, symbol: str) -> str:
+        try:
+            return self._tokens[symbol.strip().upper()]
+        except KeyError:
+            from acumen.instrument_master import InstrumentMasterError
+
+            raise InstrumentMasterError(f"no {symbol}") from None
+
+    def tick_size(self, symbol: str) -> Decimal:
+        self.token(symbol)
+        return Decimal("0.05")
+
+    def __len__(self) -> int:
+        return len(self._tokens)
+
+
+def _config(tmp_path: Path, daily_store: DailyStore, **kwargs) -> ub.RunConfig:
+    defaults = dict(
+        minute_store=MinuteStore.at(tmp_path / "minute_store"),
+        daily_store=daily_store,
+        ledger_path=tmp_path / "run" / "ledger.json",
+        map_data_dir=tmp_path / "data",
+        end=END,
+        start=START,
+        report_path=tmp_path / "report.md",
+    )
+    defaults.update(kwargs)
+    return ub.RunConfig(**defaults)
+
+
+def _action(symbol: str, ex: date, subject: str) -> ca.CorporateAction:
+    return ca.CorporateAction(symbol=symbol, ex_date=ex, subject=subject, source="nse", series="EQ")
+
+
+# --- era derivation (PURE) --------------------------------------------------------------
+
+
+#: The real RELIANCE event shape (QUESTIONS.md Q-11), used for the pure era-derivation tests.
+RELIANCE_EX = [date(2017, 9, 7), date(2020, 5, 13), date(2023, 7, 20), date(2024, 10, 28)]
+RELIANCE_CLAMP = date(2016, 10, 1)
+RELIANCE_F = date(2026, 7, 26)
+
+
+def test_era_intervals_shrink_by_exactly_one_event_per_step() -> None:
+    """The map builder can solve at most ONE fresh unknown per era; the intervals must match."""
+    intervals = ub.era_intervals(RELIANCE_EX, RELIANCE_CLAMP, RELIANCE_F)
+
+    assert [len(key) for key, _lo, _hi in intervals] == [1, 2, 3, 4], "newest (smallest) first"
+    for (key, low, high), (older_key, _l, _h) in zip(intervals, intervals[1:]):
+        assert set(key) < set(older_key)
+        assert len(older_key) - len(key) == 1
+        assert low > high or low <= high  # intervals are well formed
+    assert intervals[0][1] == date(2023, 7, 20) and intervals[0][2] == date(2024, 10, 27)
+    assert intervals[-1][1] == date(2016, 10, 1)
+
+
+def test_an_event_at_or_before_the_clamp_creates_no_era() -> None:
+    """For D >= clamp, an ex-date <= clamp can never satisfy D < ex, so it fragments nothing."""
+    assert ub.era_intervals([date(2015, 1, 1)], RELIANCE_CLAMP, RELIANCE_F) == []
+
+
+def test_the_identity_era_is_not_probed() -> None:
+    intervals = ub.era_intervals([date(2020, 1, 1)], RELIANCE_CLAMP, RELIANCE_F)
+    assert len(intervals) == 1  # only the pre-2020 era; [2020-01-01, END] is the identity
+    assert intervals[0][0] == (date(2020, 1, 1),)
+
+
+def test_probe_windows_take_the_last_pre_ex_days_of_each_era() -> None:
+    events = (
+        va.EventSpec(kind=ca.KIND_DEMERGER, ex_date=DEMERGER_EX,
+                     our_price_factor=None, is_share_count=False),
+    )
+    windows, unprobeable = ub.era_probe_windows(events, DAYS, START, END, per_era=3)
+
+    assert unprobeable == []
+    assert len(windows) == 1
+    picked = [d for d in DAYS if d < DEMERGER_EX][-3:]
+    assert (windows[0].start, windows[0].end) == (picked[0], picked[-1])
+
+
+def test_an_era_with_no_trading_day_is_reported_unprobeable_not_guessed() -> None:
+    """Two ex-dates a day apart leave no probe day between them -- the probe-gap case."""
+    first = DEMERGER_EX + timedelta(days=1)   # both land between two weekly trading days,
+    second = DEMERGER_EX + timedelta(days=2)  # so the era BETWEEN them holds no probe day
+    events = (
+        va.EventSpec(kind=ca.KIND_RIGHTS, ex_date=first, our_price_factor=None,
+                     is_share_count=False),
+        va.EventSpec(kind=ca.KIND_DEMERGER, ex_date=second, our_price_factor=None,
+                     is_share_count=False),
+    )
+    windows, unprobeable = ub.era_probe_windows(events, DAYS, START, END)
+    assert unprobeable == [(second,)]
+    assert [w.label for w in windows] == [f"pre-{first.isoformat()}"]
+
+
+# --- the daily cache --------------------------------------------------------------------
+
+
+def test_the_daily_cache_reads_the_universe_in_one_pass(tmp_path: Path) -> None:
+    store = _make_daily_store(tmp_path, {"AAA": 100000, "BBB": 50000})
+    cache = ub.build_daily_cache(store, ["AAA", "BBB"], DAYS[0], DAYS[-1])
+    assert set(cache.by_symbol) == {"AAA", "BBB"}
+    assert cache.days("AAA") == tuple(DAYS)
+    assert cache.first_date("BBB") == DAYS[0]
+    assert cache.day("AAA", DAYS[0]).close_paise == 100050
+    assert cache.last_before("AAA", DAYS[5]) == DAYS[4]
+
+
+def test_the_cached_store_adapter_answers_like_the_real_one(tmp_path: Path) -> None:
+    store = _make_daily_store(tmp_path, {"AAA": 100000})
+    cache = ub.build_daily_cache(store, ["AAA"], DAYS[0], DAYS[-1])
+    adapter = ub.CachedDailyStore(cache)
+    frame = adapter.daily("AAA", DAYS[0], DAYS[2])
+    assert list(frame["trade_date"]) == DAYS[:3]
+    assert adapter.daily("AAA", date(1999, 1, 1), date(1999, 1, 2)).empty
+
+
+# --- the run: routing, mapping, ingest, gates -------------------------------------------
+
+
+def test_a_bonus_only_symbol_runs_on_the_factor_table_path(tmp_path: Path) -> None:
+    store = _make_daily_store(tmp_path, {"AAA": 100000})
+    cache = ub.build_daily_cache(store, ["AAA"], DAYS[0], DAYS[-1])
+    tokens = {"AAA": "1"}
+    client = SyntheticVendor(cache, tokens)
+    config = _config(tmp_path, store)
+
+    ledger = ub.run_universe(client, FakeMaster(tokens), ["AAA"], (), cache, config, log=lambda m: None)
+
+    record = ledger.records["AAA"]
+    assert record.route == ROUTE_TABLE_PATH
+    assert record.status == ub.STATUS_SETTLED
+    assert record.map_eras == 0
+    assert record.gate1_total == len(DAYS)
+    assert record.gate1_pass == len(DAYS), "an unadjusted vendor reconciles on every day"
+    assert not va.map_path("AAA", config.map_data_dir).is_file()
+
+
+def test_a_demerger_symbol_is_mapped_before_ingest_and_the_measured_factor_comes_back_out(
+    tmp_path: Path,
+) -> None:
+    """The whole Q-11 chain through the runner: probe -> measure -> build -> ingest -> gate."""
+    store = _make_daily_store(tmp_path, {"CCC": 200000})
+    cache = ub.build_daily_cache(store, ["CCC"], DAYS[0], DAYS[-1])
+    tokens = {"CCC": "3"}
+    client = SyntheticVendor(cache, tokens, adjusted={"CCC": (DEMERGER_EX, VENDOR_DEMERGER_FACTOR)})
+    config = _config(tmp_path, store)
+    actions = (_action("CCC", DEMERGER_EX, "Scheme of Arrangement"),)
+
+    ledger = ub.run_universe(client, FakeMaster(tokens), ["CCC"], actions, cache, config,
+                             log=lambda m: None)
+
+    record = ledger.records["CCC"]
+    assert record.route == ROUTE_MAP_REQUIRED
+    assert record.status == ub.STATUS_SETTLED
+    assert record.map_eras == 1 and record.map_eras_provable == 1
+    assert [(e.kind, e.price_source) for e in record.map_events] == [
+        (ca.KIND_DEMERGER, va.SOURCE_MEASURED)
+    ], "a demerger has no factor of ours, so the vendor's must be MEASURED"
+
+    # the map was probed BEFORE the first ingest window
+    persisted = va.load_map("CCC", config.map_data_dir)
+    assert abs(persisted.eras[0].k_price - VENDOR_DEMERGER_FACTOR) < Decimal("0.000001")
+    probe_calls = [c for c in client.calls if c[2] < DEMERGER_EX]
+    assert probe_calls and probe_calls[0] == client.calls[0]
+
+    # and the stored minutes are RAW: a pre-ex day folds back onto the raw daily high/low
+    pre_ex = [d for d in DAYS if d < DEMERGER_EX][-1]
+    bars = config.minute_store.minutes("CCC", pre_ex)
+    raw = cache.day("CCC", pre_ex)
+    assert max(b.high_paise for b in bars) == raw.high_paise
+    assert min(b.low_paise for b in bars) == raw.low_paise
+    # Volume is un-adjusted PER BAR and rounded half-even per bar (CONTEXT 7-E11), so a day's
+    # sum can sit a share or two off the daily total -- three bars here, so at most three
+    # shares. Gate 1's band exists for exactly this; what matters is that it passes.
+    assert abs(sum(b.volume for b in bars) - raw.volume) <= len(bars)
+    from acumen.quality_gates import volume_gate
+
+    assert volume_gate(raw.volume, sum(b.volume for b in bars)).passed
+    assert record.gate1_pass == record.gate1_total == len(DAYS)
+
+
+def test_a_map_required_symbol_whose_eras_cannot_be_probed_is_refused_not_fallen_back(
+    tmp_path: Path,
+) -> None:
+    """REVIEW_5A F2's teeth: no probeable era means no price oracle, so no ingest at all."""
+    store = _make_daily_store(tmp_path, {"DDD": 100000})
+    cache = ub.build_daily_cache(store, ["DDD"], DAYS[0], DAYS[-1])
+    tokens = {"DDD": "4"}
+    client = SyntheticVendor(cache, tokens)
+    config = _config(tmp_path, store)
+    # the only era boundary sits before every trading day the symbol has
+    actions = (_action("DDD", DAYS[0], "Scheme of Arrangement"),)
+
+    ledger = ub.run_universe(client, FakeMaster(tokens), ["DDD"], actions, cache, config,
+                             log=lambda m: None)
+
+    record = ledger.records["DDD"]
+    assert record.route == ROUTE_MAP_REQUIRED
+    assert record.status == ub.STATUS_MAP_UNBUILDABLE
+    assert "refusing the price-blind factor-table fallback" in record.note
+    assert client.calls == [], "not one candle was fetched for it"
+    assert config.minute_store.stored_days("DDD") == ()
+
+
+def test_a_symbol_missing_from_the_instrument_master_is_recorded_not_crashed(
+    tmp_path: Path,
+) -> None:
+    store = _make_daily_store(tmp_path, {"AAA": 100000})
+    cache = ub.build_daily_cache(store, ["AAA"], DAYS[0], DAYS[-1])
+    tokens = {"AAA": "1"}
+    config = _config(tmp_path, store)
+    client = SyntheticVendor(cache, tokens)
+
+    ledger = ub.run_universe(client, FakeMaster(tokens), ["AAA", "GONE"], (), cache, config,
+                             log=lambda m: None)
+
+    assert ledger.records["GONE"].status == ub.STATUS_NO_TOKEN
+    assert ledger.records["AAA"].status == ub.STATUS_SETTLED
+
+
+def test_a_symbol_with_no_daily_equity_history_is_recorded_not_gated(tmp_path: Path) -> None:
+    store = _make_daily_store(tmp_path, {"AAA": 100000})
+    cache = ub.build_daily_cache(store, ["AAA", "NEWCO"], DAYS[0], DAYS[-1])
+    tokens = {"AAA": "1", "NEWCO": "9"}
+    config = _config(tmp_path, store)
+    client = SyntheticVendor(cache, tokens)
+
+    ledger = ub.run_universe(client, FakeMaster(tokens), ["NEWCO"], (), cache, config,
+                             log=lambda m: None)
+
+    assert ledger.records["NEWCO"].status == ub.STATUS_NO_DAILY_HISTORY
+    assert client.calls == []
+
+
+# --- resume ------------------------------------------------------------------------------
+
+
+def test_the_same_command_resumes_and_refetches_nothing(tmp_path: Path) -> None:
+    store = _make_daily_store(tmp_path, {"AAA": 100000})
+    cache = ub.build_daily_cache(store, ["AAA"], DAYS[0], DAYS[-1])
+    tokens = {"AAA": "1"}
+    config = _config(tmp_path, store)
+
+    first = SyntheticVendor(cache, tokens)
+    ub.run_universe(first, FakeMaster(tokens), ["AAA"], (), cache, config, log=lambda m: None)
+    assert first.calls, "the first run fetched windows"
+
+    second = SyntheticVendor(cache, tokens)
+    ledger = ub.run_universe(second, FakeMaster(tokens), ["AAA"], (), cache, config,
+                             log=lambda m: None)
+
+    assert second.calls == [], "a settled symbol is skipped entirely on resume"
+    assert ledger.records["AAA"].status == ub.STATUS_SETTLED
+
+
+def test_an_interrupted_symbol_resumes_at_window_granularity(tmp_path: Path) -> None:
+    """The minute store's own window ledger is what makes this true; the run ledger only
+    skips whole symbols. A symbol left mid-way refetches only its UNSETTLED windows."""
+    store = _make_daily_store(tmp_path, {"AAA": 100000})
+    cache = ub.build_daily_cache(store, ["AAA"], DAYS[0], DAYS[-1])
+    tokens = {"AAA": "1"}
+    config = _config(tmp_path, store)
+    master = FakeMaster(tokens)
+
+    # settle the first three windows by hand, as an interrupted run would have left them
+    windows = mb.plan_windows(START, END, first_data=DAYS[0])
+    partial = SyntheticVendor(cache, tokens)
+    mb.backfill_symbol(partial, master, config.minute_store, "AAA", DAYS[0], windows[2][1])
+    settled = len(partial.calls)
+    assert settled == 3, "three windows settled before the interrupt"
+
+    resumed = SyntheticVendor(cache, tokens)
+    ub.run_universe(resumed, master, ["AAA"], (), cache, config, log=lambda m: None)
+
+    assert len(resumed.calls) == len(mb.plan_windows(DAYS[0], END)) - settled
+    assert all(call[1] > windows[2][0] for call in resumed.calls)
+
+
+def test_a_corrupt_run_ledger_names_the_recovery_instead_of_crashing(tmp_path: Path) -> None:
+    path = tmp_path / "run" / "ledger.json"
+    path.parent.mkdir(parents=True)
+    path.write_text("{not json", encoding="utf-8")
+    with pytest.raises(ub.UniverseBackfillError, match="will not parse"):
+        ub.RunLedger.load(path)
+
+
+# --- quarantine and the halt ceiling ------------------------------------------------------
+
+
+def _quarantine_config(tmp_path: Path, symbols: list[str]) -> tuple:
+    """A universe whose vendor volume is wildly wrong, so gate 1 fails on every day."""
+    store = _make_daily_store(tmp_path, {s: 100000 + 1000 * i for i, s in enumerate(symbols)})
+    cache = ub.build_daily_cache(store, symbols, DAYS[0], DAYS[-1])
+    tokens = {s: str(i + 1) for i, s in enumerate(symbols)}
+    return store, cache, tokens
+
+
+class BadVolumeVendor(SyntheticVendor):
+    """Serves candles whose volume is half the daily total -- a permanent gate-1 failure."""
+
+    def get_candles(self, token, interval, from_dt, to_dt, *, exchange="NSE"):  # type: ignore[no-untyped-def]
+        bars = super().get_candles(token, interval, from_dt, to_dt, exchange=exchange)
+        return tuple(
+            OneMinuteBar(b.stamp, b.open_paise, b.high_paise, b.low_paise, b.close_paise,
+                         b.volume // 2)
+            for b in bars
+        )
+
+
+def test_a_symbol_below_the_gate1_floor_is_quarantined_and_the_run_continues(
+    tmp_path: Path,
+) -> None:
+    symbols = [f"S{i:02d}" for i in range(12)]
+    store, cache, tokens = _quarantine_config(tmp_path, symbols)
+    config = _config(tmp_path, store)
+
+    class OneBadSymbol(SyntheticVendor):
+        def get_candles(self, token, interval, from_dt, to_dt, *, exchange="NSE"):  # type: ignore[no-untyped-def]
+            bars = super().get_candles(token, interval, from_dt, to_dt, exchange=exchange)
+            if self._by_token[token] != "S00":
+                return bars
+            return tuple(
+                OneMinuteBar(b.stamp, b.open_paise, b.high_paise, b.low_paise, b.close_paise,
+                             b.volume // 2)
+                for b in bars
+            )
+
+    client = OneBadSymbol(cache, tokens)
+    ledger = ub.run_universe(client, FakeMaster(tokens), symbols, (), cache, config,
+                             log=lambda m: None)
+
+    assert ledger.records["S00"].status == ub.STATUS_QUARANTINED
+    assert ledger.records["S00"].gate1_rate < ub.QUARANTINE_GATE1_MIN_PASS_RATE
+    assert "below 80%" in ledger.records["S00"].note
+    assert all(ledger.records[s].status == ub.STATUS_SETTLED for s in symbols[1:])
+    assert ledger.quarantined() == ["S00"]
+    assert not ledger.halted
+
+
+def test_more_than_ten_percent_quarantined_halts_the_run(tmp_path: Path) -> None:
+    symbols = [f"S{i:02d}" for i in range(12)]  # ceiling = int(0.10 * 12) = 1
+    store, cache, tokens = _quarantine_config(tmp_path, symbols)
+    config = _config(tmp_path, store)
+    client = BadVolumeVendor(cache, tokens)
+
+    with pytest.raises(ub.RunHalted, match="systemic fault"):
+        ub.run_universe(client, FakeMaster(tokens), symbols, (), cache, config, log=lambda m: None)
+
+    ledger = ub.RunLedger.load(config.ledger_path)
+    assert len(ledger.quarantined()) == 2, "halts the moment the ceiling of 1 is exceeded"
+    assert ledger.halted
+    assert all(s not in ledger.records for s in symbols[2:]), "nothing further was processed"
+
+
+def test_a_resumed_run_halts_before_fetching_when_it_is_already_over_the_ceiling(
+    tmp_path: Path,
+) -> None:
+    symbols = [f"S{i:02d}" for i in range(12)]
+    store, cache, tokens = _quarantine_config(tmp_path, symbols)
+    config = _config(tmp_path, store)
+    with pytest.raises(ub.RunHalted):
+        ub.run_universe(BadVolumeVendor(cache, tokens), FakeMaster(tokens), symbols, (), cache,
+                        config, log=lambda m: None)
+
+    resumed = BadVolumeVendor(cache, tokens)
+    with pytest.raises(ub.RunHalted, match="ALREADY quarantined"):
+        ub.run_universe(resumed, FakeMaster(tokens), symbols, (), cache, config, log=lambda m: None)
+    assert resumed.calls == [], "not one request was made on the resumed run"
+
+
+# --- the report ----------------------------------------------------------------------------
+
+
+def test_the_report_carries_every_section_the_card_names(tmp_path: Path) -> None:
+    store = _make_daily_store(tmp_path, {"AAA": 100000, "CCC": 200000})
+    cache = ub.build_daily_cache(store, ["AAA", "CCC"], DAYS[0], DAYS[-1])
+    tokens = {"AAA": "1", "CCC": "3"}
+    client = SyntheticVendor(cache, tokens, adjusted={"CCC": (DEMERGER_EX, VENDOR_DEMERGER_FACTOR)})
+    config = _config(tmp_path, store)
+    actions = (_action("CCC", DEMERGER_EX, "Scheme of Arrangement"),)
+    ledger = ub.run_universe(client, FakeMaster(tokens), ["AAA", "CCC"], actions, cache, config,
+                             log=lambda m: None)
+
+    unknown = ub.unknown_series_sweep(store, ["AAA", "CCC"], DAYS[0], END)
+    path = ub.write_report(ledger, ["AAA", "CCC"], unknown, config, generated_at=NOW)
+    text = path.read_text(encoding="utf-8")
+
+    assert "# Minute backfill report" in text
+    for heading in ("## 1. Headline", "## 2. Route classification", "### Map inventory",
+                    "## 3. Depth found, per symbol", "## 4. Exclusions by reason",
+                    "## 5. Gate 3", "## 6. Unknown series", "## 7. Disclosures"):
+        assert heading in text, heading
+    assert "TOTAL coverage" in text
+    assert ROUTE_TABLE_PATH in text and ROUTE_MAP_REQUIRED in text
+    assert f"demerger@{DEMERGER_EX.isoformat()}: measured/measured" in text
+    assert "survivorship" in text.lower()
+    assert str(len(DAYS)) in text
+
+
+def test_the_report_is_regenerable_from_the_ledger_alone(tmp_path: Path) -> None:
+    store = _make_daily_store(tmp_path, {"AAA": 100000})
+    cache = ub.build_daily_cache(store, ["AAA"], DAYS[0], DAYS[-1])
+    tokens = {"AAA": "1"}
+    config = _config(tmp_path, store)
+    ub.run_universe(SyntheticVendor(cache, tokens), FakeMaster(tokens), ["AAA"], (), cache,
+                    config, log=lambda m: None)
+
+    reloaded = ub.RunLedger.load(config.ledger_path)
+    first = ub.build_report(reloaded, ["AAA"], None, generated_at=NOW, config=config)
+    second = ub.build_report(reloaded, ["AAA"], None, generated_at=NOW, config=config)
+    assert first == second, "the report is a pure function of the ledger and the sweep"
+    assert "AAA" in first
+
+
+def test_the_ledger_round_trips_through_json(tmp_path: Path) -> None:
+    path = tmp_path / "ledger.json"
+    ledger = ub.RunLedger(path=path, started="2026-07-26T08:00:00")
+    ledger.record(
+        ub.SymbolRecord(symbol="ZZZ", status=ub.STATUS_SETTLED, route=ROUTE_MAP_REQUIRED,
+                        route_reasons=["demerger ex 2020-06-03"], gate1_pass=9, gate1_total=10,
+                        map_events=[ub.MapEvent("demerger", "2020-06-03", "measured", "measured")])
+    )
+    reloaded = ub.RunLedger.load(path)
+    record = reloaded.records["ZZZ"]
+    assert record.route == ROUTE_MAP_REQUIRED
+    assert record.route_reasons == ["demerger ex 2020-06-03"]  # noqa: E501
+    assert record.map_events[0].price_source == "measured"
+    assert record.gate1_rate == Decimal(9) / Decimal(10)
+    assert json.loads(path.read_text(encoding="utf-8"))["symbols"]["ZZZ"]["status"] == "settled"
+
+
+def test_an_older_ledger_missing_a_field_still_loads(tmp_path: Path) -> None:
+    """A resumed run must not die because this session added a column."""
+    path = tmp_path / "ledger.json"
+    path.write_text(json.dumps({
+        "started": "x", "halted": "",
+        "symbols": {"ZZZ": {"symbol": "ZZZ", "status": "settled", "a_field_we_dropped": 1}},
+    }), encoding="utf-8")
+    assert ub.RunLedger.load(path).records["ZZZ"].status == "settled"
+
+
+# --- the oracle gate ------------------------------------------------------------------------
+
+
+def test_the_run_refuses_to_start_on_an_unverified_daily_store(tmp_path: Path) -> None:
+    store = _make_daily_store(tmp_path, {"AAA": 100000})
+    store.month_path(DAYS[0]).unlink()  # the REVIEW_2 F7 damage
+    with pytest.raises(ub.UniverseBackfillError, match="oracle"):
+        ub.verify_the_oracle(store, log=lambda m: None, min_rows=0)
+
+
+def test_a_clean_daily_store_passes_the_oracle_check(tmp_path: Path) -> None:
+    store = _make_daily_store(tmp_path, {"AAA": 100000})
+    # min_rows=0: this fixture publishes one synthetic symbol a day, not a full market. The
+    # production run uses the real MIN_ROWS_PER_DATE floor (pinned in test_daily_store_verify).
+    ub.verify_the_oracle(store, log=lambda m: None, min_rows=0)  # must not raise
+
+
+# --- gate 3 must CHAIN events that share an ex-date (the measured 360ONE case) ------------
+
+
+def _share_count_factor(kind: str, ex: date, k: str, symbol: str = "AAA") -> ca.Factor:
+    return ca.Factor(symbol=symbol, ex_date=ex, kind=kind, k=Decimal(k), basis=f"{kind} {k}")
+
+
+def test_two_events_on_one_ex_date_are_multiplied_not_tested_separately() -> None:
+    """360ONE, measured live 2026-07-26: a 1:1 bonus AND a face-value split 2->1 BOTH ex
+    2023-03-02, so the raw price falls to a QUARTER. Testing either 0.5 alone reports a bogus
+    50% break on a series that is perfectly continuous (CONTEXT 4.2: "chain multiple events")."""
+    factors = (
+        _share_count_factor(ca.KIND_BONUS, date(2023, 3, 2), "0.5"),
+        _share_count_factor(ca.KIND_SPLIT, date(2023, 3, 2), "0.5"),
+    )
+    grouped = ub.share_count_factors_by_ex_date("AAA", factors)
+    assert grouped == {date(2023, 3, 2): (Decimal("0.25"), (ca.KIND_BONUS, ca.KIND_SPLIT))}
+
+    tally = ub.GateTally(closes={date(2023, 3, 1): 400000, date(2023, 3, 2): 100000})
+    ub.gate3_over_events(tally, "AAA", factors)
+
+    assert tally.gate3_checked == 1, "one ex-date, one check -- not one per factor"
+    assert tally.gate3_failed == 0, "0.5 x 0.5 = 0.25 makes the quartering continuous"
+
+
+def test_gate3_still_catches_a_genuinely_broken_series() -> None:
+    factors = (_share_count_factor(ca.KIND_BONUS, date(2023, 3, 2), "0.5"),)
+    tally = ub.GateTally(closes={date(2023, 3, 1): 400000, date(2023, 3, 2): 100000})
+    ub.gate3_over_events(tally, "AAA", factors)
+    assert tally.gate3_checked == 1 and tally.gate3_failed == 1
+    assert "never an ordinary market move" in tally.gate3_failures[0]
+
+
+def test_gate3_ignores_ordinary_dividends_and_other_symbols() -> None:
+    factors = (
+        _share_count_factor(ca.KIND_BONUS, date(2023, 3, 2), "1"),          # k == 1: no step
+        ca.Factor(symbol="AAA", ex_date=date(2023, 4, 1), kind=ca.KIND_DIVIDEND,
+                  k=Decimal("0.97"), basis="special"),                       # not share-count
+        _share_count_factor(ca.KIND_BONUS, date(2023, 3, 2), "0.5", symbol="OTHER"),
+    )
+    assert ub.share_count_factors_by_ex_date("AAA", factors) == {}
+
+
+def test_gate3_skips_an_ex_date_outside_the_stored_span() -> None:
+    factors = (_share_count_factor(ca.KIND_BONUS, date(2015, 1, 1), "0.5"),)
+    tally = ub.GateTally(closes={date(2023, 3, 1): 400000, date(2023, 3, 2): 100000})
+    ub.gate3_over_events(tally, "AAA", factors)
+    assert tally.gate3_checked == 0

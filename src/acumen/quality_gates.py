@@ -262,6 +262,91 @@ def adjustment_gate(
     )
 
 
+# --- Gate 3, continuity form: "the adjusted series shows no fake gap" -------------------
+
+#: CONTEXT 4.5 gate 3, literally: "on every split/bonus ex-date in history, adjusted series
+#: must show |day-over-day gap| < 20% (unadjusted 1:10 split = -90% fake gap must disappear)".
+ADJUSTMENT_CONTINUITY_MAX_GAP: Decimal = Decimal("0.20")
+
+
+@dataclass(frozen=True)
+class ContinuityGateResult:
+    """Gate-3 (continuity form) outcome for one corporate-action ex-date on one symbol."""
+
+    ex_date: date
+    pre_ex_day: date
+    ex_day: date
+    adjusted_pre_close_paise: int
+    ex_close_paise: int
+    gap: Decimal
+    passed: bool
+    reason: str
+
+
+def adjustment_continuity_gate(
+    ex_date: date,
+    pre_ex_day: date,
+    ex_day: date,
+    pre_ex_close_paise: int,
+    ex_close_paise: int,
+    k: Decimal,
+    *,
+    max_gap: Decimal = ADJUSTMENT_CONTINUITY_MAX_GAP,
+) -> ContinuityGateResult:
+    """CONTEXT 4.5 gate 3 across ONE ex-date, on the stored RAW series. PURE.
+
+    The spec's wording is about the ADJUSTED series: a 1:10 split leaves a -90% fake gap in
+    unadjusted prices, and applying the CONTEXT 4.2 factor must make it disappear. Our minute
+    store deliberately holds RAW same-day prices (CONTEXT 7-E11, QUESTIONS.md Q-10), so the
+    adjustment is applied HERE, at the comparison: the pre-ex close is brought into the post-ex
+    scale by the event's own factor ``k`` -- exactly :func:`acumen.corp_actions.adjust_pair` --
+    and the surviving day-over-day move must be an ordinary market move, ``|gap| < 20%``.
+
+    A FAIL means one of three things, all worth stopping on: our ``k`` is wrong, the store is
+    not actually raw across that date, or the event itself was mis-parsed. It never means "the
+    market moved", because no ordinary session moves a liquid F&O underlying 20% overnight --
+    and a mis-scaled series misses by the factor (50% for a 1:1 bonus, 80% for a 5:1 split).
+
+    Args:
+        ex_date: the corporate action's ex-date.
+        pre_ex_day: the last stored trading day strictly before ``ex_date``.
+        ex_day: the first stored trading day on or after ``ex_date``.
+        pre_ex_close_paise: the RAW close on ``pre_ex_day``.
+        ex_close_paise: the RAW close on ``ex_day``.
+        k: the CONTEXT 4.2 pre-ex multiplier for this event.
+        max_gap: the acceptance threshold as a fraction (0.20 = 20%).
+
+    Raises:
+        ValueError: a non-positive price or factor -- there is no ratio to test.
+    """
+    if pre_ex_close_paise <= 0 or ex_close_paise <= 0:
+        raise ValueError("closes must be positive to compare a day-over-day gap")
+    if k <= 0:
+        raise ValueError("the adjustment factor must be positive")
+    adjusted = Decimal(pre_ex_close_paise) * k
+    gap = (Decimal(ex_close_paise) - adjusted) / adjusted
+    passed = abs(gap) < max_gap
+    pct = gap * Decimal(100)
+    if passed:
+        reason = f"adjusted day-over-day gap {pct:.2f}% (< {max_gap * 100}%)"
+    else:
+        reason = (
+            f"adjusted day-over-day gap {pct:.2f}% exceeds {max_gap * 100}% across {ex_date} "
+            f"({pre_ex_day} -> {ex_day}, k={k}): a wrong factor, a non-raw store, or a "
+            "mis-parsed event -- never an ordinary market move"
+        )
+    return ContinuityGateResult(
+        ex_date=ex_date,
+        pre_ex_day=pre_ex_day,
+        ex_day=ex_day,
+        adjusted_pre_close_paise=int(adjusted.to_integral_value()),
+        ex_close_paise=ex_close_paise,
+        gap=gap,
+        passed=passed,
+        reason=reason,
+    )
+
+
 def combine_adjustment_verdicts(verdicts: Iterable[str]) -> str:
     """Reduce per-event gate-3 verdicts to one, requiring consistency (OPEN-8).
 

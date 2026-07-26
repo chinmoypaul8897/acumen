@@ -50,7 +50,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
-from typing import Iterable, Mapping, Sequence
+from typing import Iterable, Iterator, Mapping, Sequence
 
 import pyarrow as pa
 import pyarrow.compute as pc
@@ -253,6 +253,36 @@ class MinuteStore:
             bars.extend(_table_to_bars(table.filter(mask)))
         bars.sort(key=lambda b: b.stamp)
         return tuple(bars)
+
+    def iter_days(
+        self, symbol: str, from_date: date | None = None, to_date: date | None = None
+    ) -> Iterator[tuple[date, tuple[StoredBar, ...]]]:
+        """Yield ``(day, bars)`` for every stored day in range, oldest first, a MONTH at a time.
+
+        The scan the universe run (chunk 5B) gates on. :meth:`minutes` opens (and filters) the
+        month file once PER DAY, which is ~2,400 opens per symbol over the full history, and
+        :meth:`minutes_range` materialises every bar of every day at once (~900k objects for a
+        decade). This walks one month file at a time and groups its rows by date, so the peak
+        cost is one month (~7,500 bars) no matter how long the history is, and a caller that
+        aggregates per day never holds two months at once.
+        """
+        sym = symbol.strip().upper()
+        directory = self.minute_dir / sym
+        if not directory.is_dir():
+            return
+        for path in sorted(directory.glob("*.parquet")):
+            table = pq.read_table(path, schema=MINUTE_SCHEMA)
+            if from_date is not None:
+                table = table.filter(pc.greater_equal(table.column("trade_date"), from_date))
+            if to_date is not None:
+                table = table.filter(pc.less_equal(table.column("trade_date"), to_date))
+            if not table.num_rows:
+                continue
+            by_day: dict[date, list[StoredBar]] = {}
+            for bar in _table_to_bars(table.sort_by([("stamp", "ascending")])):
+                by_day.setdefault(bar.trade_date, []).append(bar)
+            for day in sorted(by_day):
+                yield day, tuple(by_day[day])
 
     def has_day(self, symbol: str, day: date) -> bool:
         return bool(self.minutes(symbol, day))

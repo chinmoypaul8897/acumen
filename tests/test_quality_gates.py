@@ -157,3 +157,59 @@ def test_gate3_combine_requires_consistency() -> None:
     assert qg.combine_adjustment_verdicts([qg.VERDICT_RAW, qg.VERDICT_ADJUSTED]) == qg.VERDICT_INDETERMINATE
     # no decisive event at all
     assert qg.combine_adjustment_verdicts([qg.VERDICT_INDETERMINATE]) == qg.VERDICT_INDETERMINATE
+
+
+# --- chunk-5B: gate 3, continuity form (CONTEXT 4.5 gate 3's literal wording) ----------
+
+
+def test_a_bonus_disappears_from_the_adjusted_series() -> None:
+    """The spec's own example shape: the fake gap must vanish once k is applied."""
+    result = qg.adjustment_continuity_gate(
+        date(2024, 10, 28), date(2024, 10, 25), date(2024, 10, 28),
+        pre_ex_close_paise=265570, ex_close_paise=132800, k=Decimal("0.5"),
+    )
+    assert result.passed
+    assert abs(result.gap) < Decimal("0.01")
+    assert result.adjusted_pre_close_paise == 132785
+
+
+def test_an_unadjusted_split_leaves_the_90_percent_fake_gap_and_fails() -> None:
+    """CONTEXT 4.5: 'unadjusted 1:10 split = -90% fake gap must disappear'. With k applied
+    WRONGLY (k=1, i.e. no adjustment) the gap survives and the gate must fail."""
+    result = qg.adjustment_continuity_gate(
+        date(2020, 1, 1), date(2019, 12, 31), date(2020, 1, 1),
+        pre_ex_close_paise=100000, ex_close_paise=10000, k=Decimal("1"),
+    )
+    assert not result.passed
+    assert result.gap == Decimal("-0.9")
+    assert "never an ordinary market move" in result.reason
+
+
+def test_the_right_factor_rescues_the_same_split() -> None:
+    result = qg.adjustment_continuity_gate(
+        date(2020, 1, 1), date(2019, 12, 31), date(2020, 1, 1),
+        pre_ex_close_paise=100000, ex_close_paise=10000, k=Decimal("0.1"),
+    )
+    assert result.passed and result.gap == Decimal(0)
+
+
+def test_the_threshold_is_strict_at_twenty_percent() -> None:
+    exactly = qg.adjustment_continuity_gate(
+        date(2020, 1, 1), date(2019, 12, 31), date(2020, 1, 1),
+        pre_ex_close_paise=100000, ex_close_paise=120000, k=Decimal("1"),
+    )
+    assert not exactly.passed, "CONTEXT 4.5 says |gap| < 20%, so exactly 20% is a FAIL"
+    inside = qg.adjustment_continuity_gate(
+        date(2020, 1, 1), date(2019, 12, 31), date(2020, 1, 1),
+        pre_ex_close_paise=100000, ex_close_paise=119000, k=Decimal("1"),
+    )
+    assert inside.passed
+
+
+def test_a_non_positive_price_or_factor_raises_rather_than_returning_a_verdict() -> None:
+    with pytest.raises(ValueError):
+        qg.adjustment_continuity_gate(date(2020, 1, 1), date(2019, 12, 31), date(2020, 1, 1),
+                                      0, 100, Decimal("0.5"))
+    with pytest.raises(ValueError):
+        qg.adjustment_continuity_gate(date(2020, 1, 1), date(2019, 12, 31), date(2020, 1, 1),
+                                      100, 100, Decimal("0"))

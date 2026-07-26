@@ -173,3 +173,63 @@ def test_ledger_summary_counts_by_outcome(store: MinuteStore) -> None:
 def test_unknown_outcome_is_rejected() -> None:
     with pytest.raises(MinuteStoreError, match="Unknown window outcome"):
         WindowOutcome("TCS", date(2016, 10, 1), date(2016, 10, 30), "banana")
+
+
+# --- chunk-5B: the month-at-a-time day walk the universe gate scan needs ---------------
+
+
+def test_iter_days_walks_every_stored_day_in_order_across_months(tmp_path: Path) -> None:
+    from acumen.smartapi_client import OneMinuteBar
+
+    store = MinuteStore.at(tmp_path / "m")
+    days = [date(2019, 1, 30), date(2019, 1, 31), date(2019, 2, 1), date(2019, 3, 4)]
+    for day in days:
+        stamp = datetime.combine(day, time(9, 15))
+        store.write_bars("AAA", [
+            OneMinuteBar(stamp, 100, 110, 90, 105, 10),
+            OneMinuteBar(stamp + timedelta(minutes=1), 105, 115, 95, 110, 20),
+        ])
+
+    walked = list(store.iter_days("AAA"))
+
+    assert [day for day, _bars in walked] == days
+    assert all(len(bars) == 2 for _day, bars in walked)
+    assert all(bars[0].stamp < bars[1].stamp for _day, bars in walked)
+    assert walked[0][1][0].trade_date == days[0]
+
+
+def test_iter_days_honors_its_range(tmp_path: Path) -> None:
+    from acumen.smartapi_client import OneMinuteBar
+
+    store = MinuteStore.at(tmp_path / "m")
+    for day in (date(2019, 1, 30), date(2019, 2, 1), date(2019, 3, 4)):
+        store.write_bars("AAA", [
+            OneMinuteBar(datetime.combine(day, time(9, 15)), 100, 110, 90, 105, 10)
+        ])
+
+    assert [d for d, _b in store.iter_days("AAA", date(2019, 2, 1), None)] == [
+        date(2019, 2, 1), date(2019, 3, 4)
+    ]
+    assert [d for d, _b in store.iter_days("AAA", None, date(2019, 2, 1))] == [
+        date(2019, 1, 30), date(2019, 2, 1)
+    ]
+
+
+def test_iter_days_is_empty_for_an_unknown_symbol(tmp_path: Path) -> None:
+    assert list(MinuteStore.at(tmp_path / "m").iter_days("NOPE")) == []
+
+
+def test_iter_days_agrees_with_minutes_day_by_day(tmp_path: Path) -> None:
+    """The fast walk must return exactly what the per-day read returns -- it replaces it."""
+    from acumen.smartapi_client import OneMinuteBar
+
+    store = MinuteStore.at(tmp_path / "m")
+    days = [date(2019, 1, 30), date(2019, 2, 1)]
+    for index, day in enumerate(days):
+        stamp = datetime.combine(day, time(9, 15))
+        store.write_bars("AAA", [
+            OneMinuteBar(stamp + timedelta(minutes=i), 100 + i, 110, 90, 105, 10 + index)
+            for i in range(5)
+        ])
+    for day, bars in store.iter_days("AAA"):
+        assert bars == store.minutes("AAA", day)
