@@ -36,10 +36,37 @@ from __future__ import annotations
 
 import os
 import tempfile
+import time
 from pathlib import Path
 from typing import Callable
 
 __all__ = ["atomic_write_bytes", "atomic_write_text", "atomic_write_with"]
+
+#: How many times to retry a rename that Windows transiently refuses, and the base backoff.
+#: On Windows ``os.replace`` fails with ``PermissionError``/``OSError`` when ANOTHER process holds
+#: an open handle to the TARGET -- an antivirus scanner or the search indexer opening a
+#: just-written parquet is the ordinary cause, and it clears in milliseconds. POSIX renames a
+#: file out from under an open handle happily, so this never fires there. Measured live: the
+#: chunk-5B quarantine-recovery reroute rewrites ~1,500 month files for one symbol in a tight
+#: loop, and one rename in a run of tens of thousands was refused. Retrying is correct because
+#: the temp file is complete and fsynced BEFORE the rename -- a retry re-attempts only the
+#: atomic step, and never re-writes or re-orders data. After the last attempt the error is
+#: raised unchanged: a persistent denial is a real fault (a read-only file, a lost ACL) and
+#: must not be swallowed.
+_RENAME_ATTEMPTS: int = 6
+_RENAME_BACKOFF_SECONDS: float = 0.05
+
+
+def _replace_with_retry(temp_path: Path, target: Path) -> None:
+    """``os.replace(temp_path, target)``, retrying a transient Windows denial. See above."""
+    for attempt in range(_RENAME_ATTEMPTS):
+        try:
+            os.replace(temp_path, target)
+            return
+        except OSError:
+            if attempt == _RENAME_ATTEMPTS - 1:
+                raise
+            time.sleep(_RENAME_BACKOFF_SECONDS * (2**attempt))
 
 
 def _fsync_file(path: Path) -> None:
@@ -94,7 +121,7 @@ def atomic_write_bytes(path: Path, data: bytes) -> Path:
             handle.write(data)
             handle.flush()
             os.fsync(handle.fileno())  # data on disk BEFORE the rename (REVIEW_2 F6)
-        os.replace(temp_path, target)
+        _replace_with_retry(temp_path, target)
     except BaseException:
         # BaseException on purpose: a KeyboardInterrupt mid-write is the exact scenario this
         # module exists for, and it must not leave the temp file behind either.
@@ -126,7 +153,7 @@ def atomic_write_with(path: Path, writer: Callable[[Path], None]) -> Path:
     try:
         writer(temp_path)
         _fsync_file(temp_path)  # flush the writer's bytes to disk BEFORE the rename (F6)
-        os.replace(temp_path, target)
+        _replace_with_retry(temp_path, target)
     except BaseException:
         temp_path.unlink(missing_ok=True)
         raise

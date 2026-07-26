@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pytest
 
+from acumen import atomic_io
 from acumen.atomic_io import atomic_write_bytes, atomic_write_text, atomic_write_with
 
 
@@ -56,6 +57,60 @@ def test_a_failed_rename_leaves_the_previous_file_intact(
     with pytest.raises(OSError, match="no space left"):
         atomic_write_text(target, "the doomed version\n")
 
+    assert target.read_text(encoding="utf-8") == "the good version\n"
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["file.txt"]
+
+
+def test_a_transiently_denied_rename_is_retried_and_succeeds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Windows refuses ``os.replace`` while another process (an antivirus scanner, the search
+    indexer) holds an open handle to the TARGET, and it clears in milliseconds. Measured live: the
+    chunk-5B quarantine-recovery reroute rewrites ~1,500 month parquets for one symbol in a tight
+    loop and one rename in tens of thousands was denied, killing an hours-long run.
+
+    Retrying is safe because the temp file is already complete and fsynced -- only the atomic step
+    repeats. The previous contents survive until it lands.
+    """
+    target = tmp_path / "file.txt"
+    atomic_write_text(target, "the good version\n")
+    real_replace = os.replace
+    calls: list[int] = []
+
+    def _denied_twice(src: object, dst: object) -> None:
+        calls.append(1)
+        if len(calls) <= 2:
+            raise PermissionError(5, "Access is denied")
+        real_replace(src, dst)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(os, "replace", _denied_twice)
+    monkeypatch.setattr(atomic_io, "_RENAME_BACKOFF_SECONDS", 0.0)  # no sleeping in tests
+    atomic_write_text(target, "the new version\n")
+
+    assert len(calls) == 3, "retried twice, then landed"
+    assert target.read_text(encoding="utf-8") == "the new version\n"
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["file.txt"], "no temp debris"
+
+
+def test_a_persistently_denied_rename_still_raises_and_keeps_the_good_copy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The retry is bounded. A denial that never clears is a REAL fault (a read-only file, a lost
+    ACL) and must reach the caller, not be swallowed after a few attempts."""
+    target = tmp_path / "file.txt"
+    atomic_write_text(target, "the good version\n")
+    calls: list[int] = []
+
+    def _always_denied(src: object, dst: object) -> None:
+        calls.append(1)
+        raise PermissionError(5, "Access is denied")
+
+    monkeypatch.setattr(os, "replace", _always_denied)
+    monkeypatch.setattr(atomic_io, "_RENAME_BACKOFF_SECONDS", 0.0)
+    with pytest.raises(PermissionError):
+        atomic_write_text(target, "the doomed version\n")
+
+    assert len(calls) == atomic_io._RENAME_ATTEMPTS
     assert target.read_text(encoding="utf-8") == "the good version\n"
     assert sorted(p.name for p in tmp_path.iterdir()) == ["file.txt"]
 
