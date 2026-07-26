@@ -1097,7 +1097,7 @@ both hold) and disclosed here rather than silently patched.
 
 ---
 
-## Q-12 · chunk 5B · class A · **OPEN -- STOP (non-blocking; costs COVERAGE, not correctness)**
+## Q-12 · chunk 5B · class A · **RESOLVED -- executed chunk 5B FIX-2 (2026-07-26)** · was costing COVERAGE, not correctness
 
 **Question.** Q-11 rules that a measured factor `k̂` is "the median ratio over pre-ex-date probe
 days", for price and (independently) for volume. On the PRICE side the observable is unbiased --
@@ -1167,9 +1167,160 @@ store WITHOUT re-downloading a single candle.
 Chunk 6 is not blocked (it consumes whatever days survive gate 1). Chunk 9's coverage is what
 this decides.
 
+**ARCHITECT'S RULING (relayed to the chunk-5B FIX-2 session, 2026-07-26), verbatim:**
+
+> "ARCHITECT'S RULING (volume estimator + candidates): the per-day volume ratio is
+> one-sidedly contaminated by the pre-open auction (measured = true/(1-auction)), so
+> the median is biased HIGH -- proven by ABB (0.8986 vs price 0.8976) and ADANIENT
+> (0.9729 vs TERP 0.9695 which reconciles volume 4/4). Therefore: (i) the measured
+> VOLUME estimator becomes the MINIMUM over probe days, taken only across days whose
+> PRICE containment passes, minimum 3 such days, else no measured-volume candidate;
+> (ii) the event's CHOSEN PRICE factor joins the volume candidate set. Volume
+> candidate order: ours(share-count) > chosen-price-factor > measured-minimum >
+> absent; per-day gate-1 band arbitration unchanged; the -0.1% floor is NOT widened."
+
+**RESOLVED -- executed by the chunk-5B FIX-2 session (2026-07-26).** Every clause is code with a
+test behind it, in `src/acumen/vendor_adjustment.py`. The arbitration itself is UNCHANGED: the
+oracle is still per-day price containment AND per-day gate-1 with the band `[-0.1%, +5.0%]`
+untouched (`VOLUME_GAP_MIN_PCT` is byte-identical -- pinned by
+`tests/test_vendor_adjustment.py::test_the_gate1_floor_is_not_widened_by_the_q12_ruling`). Only
+the ESTIMATOR and the CANDIDATE LIST changed.
+
+- **(i) the estimator.** `volume_estimator(era, k_price, tol_paise)` replaces the median on the
+  volume side: it keeps only the probe days whose PRICE containment passes under the era's
+  chosen `k_price` (so a day the price oracle rejects can never set the volume floor), requires
+  at least `MIN_VOLUME_ESTIMATOR_DAYS = 3` such days, and returns the **MINIMUM** of
+  `raw_volume / fetched_volume` over them -- the observable's floor, which is the unbiased point
+  because the auction shortfall is one-directional (`measured = true / (1 - auction)` >= true).
+  Fewer than 3 qualifying days -> `None` -> **no measured-volume candidate is offered at all**
+  (the era then stands or falls on `ours` / the chosen price factor / absent). The same estimator
+  is used in BOTH places a volume scalar is formed: the per-era solve (`_resolve_pass`) and the
+  cross-era refinement (`_refine_scalars`, which now takes the MIN over the union of an event's
+  qualifying days instead of the median). The PRICE side keeps the ruled median, unchanged --
+  `fetched/raw` is symmetric and unbiased there.
+- **(ii) the chosen price factor as a volume candidate.** New source
+  `SOURCE_PRICE_FACTOR = "price-factor"`. The price pass runs FIRST (it always did), and each
+  event's resolved price factor is handed to the volume pass as an extra candidate. So a rights
+  or demerger -- which has no `ours` volume factor at all, because the vendor scales volume by a
+  value that is not our TERP -- can now be reconciled by the factor the price oracle already
+  proved to 6 decimals, instead of only by an observed volume ratio.
+- **the candidate ORDER on the volume side is exactly as ruled**: `ours` (0) > `price-factor`
+  (1) > `measured` (2) > `absent` (3). Note `absent` moved from second to LAST *on the volume
+  side only*; the PRICE side keeps `ours` (0) > `absent` (1) > `measured` (2). A share-count
+  event and a cash dividend both carry a cost-0 volume `ours` (the price factor and 1.0
+  respectively), so the reordering can only ever decide an event that has NO volume `ours` --
+  a rights, a demerger, a Q-6-pending rights -- which is precisely the ruling's target.
+- **Applied to the already-fetched store, no candle re-downloaded.** The persisted map now
+  carries its estimator's identity (`"volume_estimator": "min-over-price-passing-days-v2"`); a
+  map written under the median is STALE by that marker and is rebuilt (probe windows only --
+  a handful of minute calls), and the stored days are re-un-adjusted in place by the idempotent
+  `rebuild_symbol_raw_with_map`. Recovery numbers for ABB / ADANIENT / BANKBARODA / BDL /
+  BHARTIARTL are in the CHUNK 5B FIX-2 REPORT and `docs/backfill_minute_report.md`.
+
+### Q-12 ADDENDUM (chunk 5B FIX-2, 2026-07-26) -- quarantine recovery
+
+The chunk-5B build session's own hand-off observation ("routing quarantined table-path symbols
+through the map as a second pass is an option the architect may want", raised off APLAPOLLO's
+77.8%) is now ruled on.
+
+**ARCHITECT'S RULING (quarantine recovery), verbatim:**
+
+> "ARCHITECT'S RULING (quarantine recovery): any TABLE-PATH symbol quarantined on
+> gate-1 is automatically rerouted through the MAP path as a second pass (probes give
+> it the price oracle; measured candidates may recover it -- e.g. unrecorded or
+> vendor-variant events). Symbols still failing after the map pass stay quarantined
+> with a failure-pattern analysis in the report: failures clustered before a CA
+> ex-date (adjustment problem) vs scattered (auction/liquidity shape). The gate-1
+> +5.0% ceiling's behavior on illiquid names (auction share of a tiny day can exceed
+> 5%) is EXPLICITLY DEFERRED to the architect's review of the completed run's report
+> -- flag it there with per-symbol evidence; do not tune the band."
+
+**EXECUTED by the chunk-5B FIX-2 session (2026-07-26).**
+
+- **The second pass** (`universe_backfill.reroute_quarantined_to_map`). A symbol that finishes
+  its table-path ingest below `QUARANTINE_GATE1_MIN_PASS_RATE` is not left quarantined: its eras
+  are probed, a map is built and persisted (so the recovery is auditable), the ALREADY-STORED
+  days are re-un-adjusted through it, and gate 1 is re-run. The reroute is recorded on the
+  symbol's ledger row (`reroute_attempted`, `route` flips to `map-required` with the reason
+  `quarantine-recovery`), so a resumed run never re-probes a symbol it has already rerouted.
+- **No candle is re-downloaded.** The store already holds the symbol's whole history, so the
+  reroute never re-ingests. It does need the probe windows (a handful of minute calls per era --
+  that IS the price oracle the ruling is buying). Applying the map to a table-path store is the
+  one place the arithmetic is not a plain "divide by the map's k": those days were already
+  divided by the factor-table chain at ingest, so the rebuild applies the NET factor
+  `k_map / k_table` in ONE division (`rebuild_symbol_raw_with_map(..., applied_factors=...)`),
+  never a second full division on top of the first -- and a net factor of 1 is the exact
+  identity, so a symbol whose map agrees with its factor table is untouched.
+- **The failure-pattern analysis** (`gate1_failure_profile`, PURE). For every symbol still
+  quarantined the report prints: how many failing days sit ABOVE the +5.0% ceiling vs BELOW the
+  -0.1% floor, the per-era failure rate, the median raw daily volume of the above-ceiling
+  failing days against the symbol's own median, and a verdict of `clustered-before-ex-date
+  (adjustment problem)` / `scattered (auction/liquidity shape)` / `mixed`.
+- **The +5.0% ceiling question is FLAGGED, NOT TUNED.** `VOLUME_GAP_MAX_PCT` is unchanged at
+  `5.0`, and the report carries a dedicated section ("Deferred to the architect: the gate-1
+  +5.0% ceiling on illiquid names") holding exactly the per-symbol evidence the ruling asks for.
+  No band was moved.
+
 ---
 
-## chunk 5B FINDING (not a spec hole) · gate 2 vs LIQUIDITY · recorded 2026-07-26
+## CONTEXT §4.5 / §7-E4 AMENDMENT (architect-owned; CONTEXT v1.3 will carry it, effective now by this record) · recorded chunk 5B FIX-2, 2026-07-26
+
+This is not a question -- it is an architect ruling that AMENDS CONTEXT §4.5 gate 2 and
+CONTEXT §7-E4. It answers the chunk-5B gate-2-vs-LIQUIDITY finding recorded below. CONTEXT.md is
+the architect's file and this session does not touch it; the ruling is recorded here verbatim and
+executed, exactly as Q-4..Q-11 were.
+
+**ARCHITECT'S RULING (completeness = volume reconciliation, not minute counts), verbatim:**
+
+> "ARCHITECT'S RULING (completeness = volume reconciliation, not minute counts): a
+> missing 1-minute stamp on a day whose gate-1 volume reconciliation PASSES is a
+> NO-TRADE minute, not missing data -- the vendor omits tradeless minutes and every
+> traded rupee is accounted for. Gate 2 is redefined: exclusion triggers are
+> duplicates, impossible OHLC, negative values, or missing-minutes ON A DAY WHERE
+> GATE-1 ALSO FAILS (indistinguishable from data loss). Missing minutes alone, with
+> gate-1 passing, are recorded as liquidity statistics, never exclusions. E4 is
+> redefined the same way: the 09:15-11:14 profile window is valid when the DAY passes
+> gate-1 (zero-volume minutes contribute zero to the profile, which remains true);
+> E4's minute-count trigger is retired. NO liquidity filter is invented (the trader
+> specified none; per-symbol traded-minutes statistics are reported for his eyes)."
+
+**EXECUTED by the chunk-5B FIX-2 session (2026-07-26).** In
+`src/acumen/quality_gates.py::integrity_gate`, which now takes the day's gate-1 verdict:
+
+- **Exclusion triggers, exactly the ruling's four.** (1) any duplicate stamp; (2) impossible
+  OHLC (`high < low`, or a close outside `[low, high]` -- CONTEXT 4.5's own two); (3) **negative
+  values** -- a new trigger the ruling adds, tested on every OHLC field AND on volume, because a
+  negative price or share count is impossible rather than merely improbable; (4) missing minutes
+  `> MAX_MISSING_MINUTES` **only on a day where gate 1 ALSO fails**.
+- **Missing minutes alone, gate-1 passing -> INCLUDED and counted as liquidity.** The day passes
+  gate 2 and its `missing` / `present` counts become the liquidity statistics the ruling asks be
+  reported: per symbol the run now records average, median and minimum traded minutes per day
+  and the number of days carrying tradeless minutes, all in
+  `docs/backfill_minute_report.md`. `IntegrityGateResult.liquidity_note` names the case
+  explicitly so nothing reads as a silent pass.
+- **Gate-1 verdict unknown -> the CONSERVATIVE reading.** `volume_reconciled=None` (no raw daily
+  row, so gate 1 could not run) keeps the pre-amendment behaviour: missing minutes exclude. The
+  ruling's licence is "gate-1 PASSES", and an unrun gate 1 has not passed.
+- **E4.** CONTEXT §7-E4's minute-count trigger ("missing > 5 of its 120") was NOT yet
+  implemented anywhere -- chunk 6 owns the POC window -- so retiring it is a spec+docs act, not a
+  code deletion. It is recorded here, in the `quality_gates` module docstring, and in
+  `aggregate.py`'s E4 note, so chunk 6 builds the REDEFINED rule: the 09:15-11:14 profile window
+  is valid when the DAY passes gate 1, and zero-volume minutes contribute zero volume to the
+  profile (which remains arithmetically true -- a prorata row sum over 118 traded minutes and
+  over the same 118 traded minutes plus 2 tradeless ones is the same number).
+  `tests/test_quality_gates.py::test_e4_minute_count_trigger_is_retired_nothing_in_src_implements_it`
+  is an `ast`-level probe that FAILS if any `src/` module reintroduces a 120-minute / 5-missing
+  count trigger, so chunk 6 cannot rebuild the retired rule by accident.
+- **NO liquidity filter was invented.** There is no new threshold anywhere: no minimum traded
+  minutes, no minimum volume, no symbol drop. The statistics are printed for the trader's eyes
+  and nothing consumes them.
+
+**Measured effect of the redefinition** (the same stores, gates re-run with no refetch): counts
+are in the CHUNK 5B FIX-2 REPORT and in `docs/backfill_minute_report.md` §4.
+
+---
+
+## chunk 5B FINDING (not a spec hole) · gate 2 vs LIQUIDITY · recorded 2026-07-26 · **ANSWERED by the CONTEXT §4.5/§7-E4 amendment above (2026-07-26)**
 
 Not a question -- CONTEXT 4.5 gate 2 is unambiguous -- but a measured consequence the architect
 should see before chunk 9 reads a coverage number.
@@ -1186,4 +1337,10 @@ The strategy itself only needs 09:15-11:14 (the POC window, guarded separately b
 stricter than the strategy requires. The backfill report prints average traded minutes per day per
 symbol and flags every symbol losing more than 10% of its days to gate 2, so the size of this is
 visible. **No code deviates**: gate 2 is applied exactly as CONTEXT 4.5 states it.
+
+**ANSWERED (2026-07-26).** The architect's completeness ruling (the CONTEXT §4.5/§7-E4 amendment
+recorded immediately above this finding) resolves it: a missing stamp on a gate-1-PASSING day is a
+no-trade minute, not missing data, so it is no longer an exclusion. The finding's own numbers are
+what the ruling was made on. Executed the same session; the before/after counts are in
+`docs/backfill_minute_report.md`.
 

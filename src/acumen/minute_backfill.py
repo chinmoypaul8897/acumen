@@ -679,6 +679,45 @@ def _stored_day_is_raw(stored: Sequence[StoredBar], daily_row) -> bool:
     return True
 
 
+def net_map_factors(
+    adjustment_map: "va.AdjustmentMap",
+    day: date,
+    applied: SymbolFactors | None,
+    fetch_date: date | None,
+) -> tuple[Decimal, Decimal] | None:
+    """The factors still to apply to a STORED day so it reaches the map's RAW. PURE.
+
+    Returns ``(net_price, net_volume)`` -- divide the stored price by the first, multiply the stored
+    volume by the second -- or ``None`` when the map cannot resolve the day (un-provable).
+
+    With ``applied is None`` the stored bars are the vendor's AS-FETCHED bars, so the net factors are
+    simply the map's own ``(k_price, k_volume)``.
+
+    With ``applied`` given, the store was already un-adjusted once by the Q-10 FACTOR-TABLE chain at
+    ingest -- the quarantine-recovery case (QUESTIONS.md Q-12 addendum: a table-path symbol rerouted
+    through the map). There ``stored = fetched / k_table``, so the raw the map asks for is
+    ``fetched / k_map == stored x k_table / k_map``, i.e. divide the STORED value by the NET factor
+    ``k_map / k_table``. It is applied as ONE division, not a second full division on top of the
+    first: two divisions would round twice and, worse, would divide by ``k_table`` a second time. A
+    net factor of exactly 1 means the map agrees with the factor table -- the exact identity, and the
+    day is left untouched.
+    """
+    factors = adjustment_map.factors_for_day(day)
+    if factors is None:
+        return None
+    k_price, k_volume = factors
+    if applied is None or fetch_date is None:
+        return k_price, k_volume
+    sym = adjustment_map.symbol
+    k_table_price = unadj.cumulative_factor(applied.factors, day, fetch_date, symbol=sym)
+    k_table_volume = unadj.cumulative_factor(
+        applied.factors, day, fetch_date, symbol=sym, kinds=ca.SHARE_COUNT_KINDS
+    )
+    if k_table_price <= 0 or k_table_volume <= 0:
+        return None
+    return k_price / k_table_price, k_volume / k_table_volume
+
+
 def rebuild_symbol_raw_with_map(
     store: MinuteStore,
     daily_store: DailyStore,
@@ -686,8 +725,15 @@ def rebuild_symbol_raw_with_map(
     adjustment_map: "va.AdjustmentMap",
     *,
     tick_paise: int | None = None,
+    applied_factors: SymbolFactors | None = None,
 ) -> RebuildResult:
     """Un-adjust an already-fetched store to RAW IN PLACE via the Q-11 map, with an IDENTITY GUARD.
+
+    ``applied_factors`` names the factor-table chain the store was ALREADY un-adjusted by at ingest
+    (the quarantine-recovery reroute of a table-path symbol -- QUESTIONS.md Q-12 addendum). Given it,
+    each day is corrected by the NET factor ``k_map / k_table`` in one division
+    (:func:`net_map_factors`); omitted, the stored bars are treated as the vendor's as-fetched bars,
+    which is the case for every map-required symbol (its un-provable days were stored unmodified).
 
     Unlike :func:`rebuild_symbol_raw` (Q-10 factor-table, NOT idempotent), this is safe to re-run.
     The identity guard (:func:`_stored_day_is_raw`) skips any day that is ALREADY raw -- checked on
@@ -714,22 +760,52 @@ def rebuild_symbol_raw_with_map(
         if _stored_day_is_raw(stored, frame.iloc[0]):
             result.identity_days += 1  # already RAW on price AND volume -> identity guard, skip
             continue
-        factors = adjustment_map.factors_for_day(day)
-        if factors is None:
+        fd = fetch_date_for_day(store, sym, day) if applied_factors is not None else None
+        net = net_map_factors(adjustment_map, day, applied_factors, fd)
+        if net is None:
             result.unprovable_days.append(day)  # unprobed / un-provable era -> gate 1 excludes it
+            if applied_factors is None or fd is None:
+                continue
+            # A day the map cannot resolve, on a store that was already divided by the FACTOR TABLE
+            # (the quarantine-recovery reroute). Left as it is, this one day would sit at
+            # ``fetched / k_table`` while every other day sits at ``fetched`` or at raw -- three
+            # different baselines in one store, and a later pass could not know which. Restore it to
+            # AS-FETCHED, which is exactly where a map-required symbol's un-provable day already
+            # sits, so the whole store has ONE invariant: raw where provable, as-fetched where not.
+            # It is still excluded and counted by gate 1 either way (CONTEXT 7-E3).
+            k_table_price = unadj.cumulative_factor(applied_factors.factors, day, fd, symbol=sym)
+            k_table_volume = unadj.cumulative_factor(
+                applied_factors.factors, day, fd, symbol=sym, kinds=ca.SHARE_COUNT_KINDS
+            )
+            if k_table_price <= 0 or k_table_volume <= 0:
+                continue
+            if k_table_price == Decimal(1) and k_table_volume == Decimal(1):
+                continue  # nothing was applied to this day; it already IS as-fetched
+            net_price = Decimal(1) / k_table_price
+            net_volume = Decimal(1) / k_table_volume
+        else:
+            net_price, net_volume = net
+        if net_price == Decimal(1) and net_volume == Decimal(1):
+            # The map agrees with whatever was already applied -- the exact identity. Nothing to do,
+            # and nothing rewritten (which is also what makes the reroute cheap and re-runnable).
+            result.identity_days += 1
             continue
-        as_fetched = [
-            sac.OneMinuteBar(b.stamp, b.open_paise, b.high_paise, b.low_paise, b.close_paise, b.volume)
-            for b in stored
-        ]
-        res = va.unadjust_with_map(as_fetched, adjustment_map, symbol=sym, tick_paise=tick_paise)
-        store.write_bars(
-            sym,
-            [
-                StoredBar(sym, rb.stamp, rb.open_paise, rb.high_paise, rb.low_paise, rb.close_paise, rb.volume)
-                for rb in res.raw_bars
-            ],
-        )
+        raw_bars: list[StoredBar] = []
+        tick_flagged = 0
+        for b in stored:
+            prices = []
+            for value in (b.open_paise, b.high_paise, b.low_paise, b.close_paise):
+                raw, _snap, off = unadj.unadjust_price_paise(value, net_price, tick_paise=tick_paise)
+                prices.append(raw)
+                if off > unadj.DEFAULT_TICK_SNAP_TOLERANCE_PAISE:
+                    tick_flagged += 1
+            raw_bars.append(
+                StoredBar(sym, b.stamp, prices[0], prices[1], prices[2], prices[3],
+                          unadj.unadjust_volume(b.volume, net_volume))
+            )
+        store.write_bars(sym, raw_bars)
+        if tick_flagged:
+            result.tick_flagged_days.append(day)
         result.days_rewritten += 1
         result.unadjusted_days += 1
     return result

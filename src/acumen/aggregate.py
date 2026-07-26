@@ -21,6 +21,15 @@ bucket. Completeness (a bucket missing minutes) is NOT this module's job: CONTEX
 and CONTEXT 7-E4 decide whether a day/window is usable; the aggregator faithfully aggregates
 whatever passed those gates.
 
+**Completeness ruling (2026-07-26; QUESTIONS.md "CONTEXT 4.5 / 7-E4 AMENDMENT"), for chunk 6.**
+A missing 1-minute stamp on a day whose gate-1 volume reconciliation PASSES is a NO-TRADE minute,
+not missing data -- the vendor omits tradeless minutes. E4 is redefined accordingly: the
+09:15-11:14 profile window is valid when the DAY passes gate 1, and **E4's minute-count trigger
+("missing > 5 of its 120") is RETIRED**. Nothing here or anywhere in ``src/`` counts window
+minutes as a usability test, and chunk 6 must not reintroduce one: a tradeless minute contributes
+zero volume to the profile, so a prorata POC over the traded minutes is the same number either
+way. No liquidity filter exists (the trader specified none).
+
 Prices stay integer paise (CONTEXT 7-E11); stamps stay naive IST (CONTEXT 7-E8).
 
 Source files in this package are ASCII-only on purpose (see src/acumen/config.py).

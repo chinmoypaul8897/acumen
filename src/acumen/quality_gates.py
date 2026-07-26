@@ -10,11 +10,23 @@ excludes a flagged day and counts it (CONTEXT 7-E3).
   the small positive shortfall being the pre-open call-auction volume the exchange counts in
   the daily total but not in continuous-session 1-min candles). Outside the band -> flag,
   exclude, log. The daily figure is the RAW daily store (chunk 2) bhavcopy volume.
-* **Gate 2 -- candle integrity.** Expect 375 minutes 09:15..15:29. **Missing > 15 -> exclude.**
-  Any duplicate stamp, ``high < low``, or a CLOSE outside ``[low, high]`` -> exclude (exactly
-  the criteria CONTEXT 4.5 enumerates -- ``open`` is not among them). An out-of-session bar is
-  dropped at the candle level (CONTEXT 7-E2), not counted as a day-exclusion trigger.
-  (Milder window-level damage that this gate PASSES is caught by CONTEXT 7-E4 in chunk 6.)
+* **Gate 2 -- candle integrity** (REDEFINED by the architect's completeness ruling, 2026-07-26 --
+  QUESTIONS.md "CONTEXT 4.5 / 7-E4 AMENDMENT"; CONTEXT v1.3 will carry it). Completeness is
+  measured by gate 1, not by a minute count: **the vendor omits minutes in which nothing traded**,
+  so a missing stamp on a day whose gate-1 volume reconciliation PASSES is a NO-TRADE minute and
+  every traded rupee is already accounted for. The exclusion triggers are exactly four: any
+  duplicate stamp; impossible OHLC (``high < low`` or a CLOSE outside ``[low, high]`` -- CONTEXT
+  4.5's own two, ``open`` is not among them); any NEGATIVE price or volume; and missing minutes
+  ``> 15`` **on a day where gate 1 ALSO fails** (there, missing stamps are indistinguishable from
+  data loss). Missing minutes alone, with gate 1 passing, are recorded as LIQUIDITY STATISTICS and
+  never exclude. An out-of-session bar is dropped at the candle level (CONTEXT 7-E2), not counted
+  as a day-exclusion trigger. NO liquidity filter exists anywhere -- the trader specified none.
+* **CONTEXT 7-E4 (chunk 6's POC window) is redefined the same way and its minute-count trigger is
+  RETIRED.** The 09:15-11:14 profile window is valid when the DAY passes gate 1; zero-volume
+  minutes contribute zero volume to the profile, which remains arithmetically true. Nothing in
+  ``src/`` implements the retired "missing > 5 of its 120" count, and
+  ``tests/test_quality_gates.py`` keeps an ``ast`` probe that fails if a later chunk reintroduces
+  it.
 * **Gate 3 -- adjustment sanity (RESOLVES OPEN-8).** On a known split/bonus ex-date, compare
   SmartAPI 1-minute prices from BEFORE the ex-date against the RAW daily store for the same
   pre-ex day. The GATE LESSON (PROGRESS.md chunk-4): a cross-source price comparison is only
@@ -98,13 +110,21 @@ def volume_gate(daily_volume: int, minute_volume_sum: int) -> VolumeGateResult:
 #: CONTEXT 4.5 gate 2: the full session is 375 one-minute candles, 09:15..15:29.
 EXPECTED_SESSION_MINUTES: int = 375
 
-#: CONTEXT 4.5 gate 2: more than this many missing minutes in the day -> exclude.
+#: CONTEXT 4.5 gate 2: more than this many missing minutes in the day is a data-loss trigger --
+#: but ONLY on a day where gate 1 also fails (the completeness ruling, 2026-07-26). On a
+#: gate-1-passing day the same missing minutes are tradeless minutes and are counted as liquidity.
 MAX_MISSING_MINUTES: int = 15
 
 
 @dataclass(frozen=True)
 class IntegrityGateResult:
-    """Gate-2 outcome for one symbol-day."""
+    """Gate-2 outcome for one symbol-day.
+
+    ``missing`` is always the raw count of absent session stamps -- it is a LIQUIDITY statistic on
+    a gate-1-passing day and an exclusion trigger only when ``missing_excluded`` is True (the
+    completeness ruling). ``liquidity_note`` names the tradeless-minute case explicitly so an
+    INCLUDED day with 60 absent stamps never reads as a silent pass.
+    """
 
     present: int
     missing: int
@@ -113,6 +133,11 @@ class IntegrityGateResult:
     ohlc_violations: int
     passed: bool
     reasons: tuple[str, ...]
+    negative_values: int = 0
+    #: True when this day was excluded FOR its missing minutes (i.e. gate 1 did not pass too).
+    missing_excluded: bool = False
+    #: Non-empty when missing minutes were recorded as liquidity rather than treated as damage.
+    liquidity_note: str = ""
 
 
 def session_minutes(day: date) -> tuple[datetime, ...]:
@@ -121,22 +146,34 @@ def session_minutes(day: date) -> tuple[datetime, ...]:
     return tuple(open_dt + timedelta(minutes=i) for i in range(EXPECTED_SESSION_MINUTES))
 
 
-def integrity_gate(bars: Sequence["_Bar"], day: date) -> IntegrityGateResult:
-    """CONTEXT 4.5 gate 2: 375 stamps, no dupes, OHLC sane; missing > 15 -> exclude. PURE.
+def integrity_gate(
+    bars: Sequence["_Bar"], day: date, *, volume_reconciled: bool | None = None
+) -> IntegrityGateResult:
+    """CONTEXT 4.5 gate 2, as REDEFINED by the completeness ruling (2026-07-26). PURE.
 
     Args:
         bars: the day's 1-minute bars (each with ``stamp`` naive IST and integer-paise OHLC).
         day: the trade date the bars must all belong to.
+        volume_reconciled: this day's GATE-1 verdict. ``True`` = gate 1 passed, so absent stamps
+            are tradeless minutes (the vendor omits them) and every traded rupee is accounted for
+            -- they are recorded as liquidity and do NOT exclude. ``False`` = gate 1 failed, so
+            absent stamps are indistinguishable from data loss and ``missing > 15`` excludes.
+            ``None`` = gate 1 could not be run at all (no raw daily row for the day); the ruling's
+            licence is "gate-1 PASSES", and an unrun gate has not passed, so ``None`` keeps the
+            conservative pre-amendment behaviour and ``missing > 15`` excludes.
 
-    A day is EXCLUDED (``passed == False``) on exactly CONTEXT 4.5 gate-2's criteria: more
-    than 15 missing minutes, OR any duplicate stamp, OR any OHLC violation (``high < low`` or a
-    CLOSE outside ``[low, high]`` -- the two the spec enumerates; ``open`` is deliberately NOT
-    tested, as CONTEXT 4.5 does not list it). Bars stamped outside the 09:15..15:29 session are
-    counted (``out_of_session``, for the report) but do NOT by themselves exclude the day:
-    CONTEXT 7-E2 excludes an out-of-session candle at the CANDLE level (drop the stray bar), not
-    at the day level. A day that is ENTIRELY a non-standard session (e.g. Muhurat evening) still
-    excludes -- its 375 regular-session minutes are all missing, so the missing>15 rule fires.
-    Every failure that fired is named in ``reasons``.
+    A day is EXCLUDED (``passed == False``) on exactly the ruling's four triggers: any duplicate
+    stamp; impossible OHLC (``high < low`` or a CLOSE outside ``[low, high]`` -- the two CONTEXT
+    4.5 enumerates; ``open`` is deliberately NOT tested); any NEGATIVE price or volume; and
+    ``missing > 15`` when gate 1 did not pass. Bars stamped outside the 09:15..15:29 session are
+    counted (``out_of_session``, for the report) but do NOT by themselves exclude the day: CONTEXT
+    7-E2 excludes an out-of-session candle at the CANDLE level (drop the stray bar), not at the day
+    level. A day that is ENTIRELY a non-standard session (e.g. a Muhurat evening) has all 375
+    regular-session minutes absent AND cannot reconcile its volume, so gate 1 fails and the
+    missing-minutes trigger still fires -- the redefinition does not let one through.
+
+    Every failure that fired is named in ``reasons``; a day INCLUDED with absent stamps names that
+    in ``liquidity_note`` rather than passing silently.
     """
     reasons: list[str] = []
     expected = set(session_minutes(day))
@@ -145,6 +182,7 @@ def integrity_gate(bars: Sequence["_Bar"], day: date) -> IntegrityGateResult:
     duplicates = 0
     out_of_session = 0
     ohlc_violations = 0
+    negative_values = 0
     present_in_session: set[datetime] = set()
 
     for bar in bars:
@@ -158,16 +196,47 @@ def integrity_gate(bars: Sequence["_Bar"], day: date) -> IntegrityGateResult:
         present_in_session.add(stamp)
         if not (bar.low_paise <= bar.high_paise and bar.low_paise <= bar.close_paise <= bar.high_paise):
             ohlc_violations += 1  # CONTEXT 4.5 gate-2: high<low or close-outside-[low,high] ONLY
+        # The ruling's third trigger: a negative price or share count is IMPOSSIBLE, not merely
+        # improbable. Volume is included -- a negative share count is as impossible as a negative
+        # price and would poison gate 1's own sum. ``open`` IS tested here: the OHLC-sanity trigger
+        # deliberately omits it (CONTEXT 4.5 does not list it), but "negative values" names no
+        # field, and a negative open is impossible on any reading.
+        if min(bar.open_paise, bar.high_paise, bar.low_paise, bar.close_paise, bar.volume) < 0:
+            negative_values += 1
 
     present = len(present_in_session)
     missing = len(expected - present_in_session)
 
+    liquidity_note = ""
+    missing_excluded = False
     if missing > MAX_MISSING_MINUTES:
-        reasons.append(f"{missing} missing minutes (> {MAX_MISSING_MINUTES}); day excluded")
+        if volume_reconciled is True:
+            # The completeness ruling: gate 1 PASSED, so the absent stamps are no-trade minutes.
+            liquidity_note = (
+                f"{missing} of {EXPECTED_SESSION_MINUTES} session minutes carry no trade "
+                f"({present} traded); gate 1 reconciles the day's volume, so these are NO-TRADE "
+                "minutes, not missing data -- recorded as liquidity, not an exclusion"
+            )
+        else:
+            missing_excluded = True
+            why = (
+                "gate 1 ALSO fails on this day, so the absent stamps are indistinguishable from "
+                "data loss"
+                if volume_reconciled is False
+                else "gate 1 could not be run for this day (no raw daily row), so completeness is "
+                "unproven"
+            )
+            reasons.append(
+                f"{missing} missing minutes (> {MAX_MISSING_MINUTES}) and {why}; day excluded"
+            )
+    elif missing:
+        liquidity_note = f"{missing} of {EXPECTED_SESSION_MINUTES} session minutes carry no trade"
     if duplicates:
         reasons.append(f"{duplicates} duplicate stamp(s)")
     if ohlc_violations:
         reasons.append(f"{ohlc_violations} OHLC-sanity violation(s) (high<low or close out of range)")
+    if negative_values:
+        reasons.append(f"{negative_values} bar(s) carry a NEGATIVE price or volume (impossible)")
 
     passed = not reasons
     return IntegrityGateResult(
@@ -178,6 +247,9 @@ def integrity_gate(bars: Sequence["_Bar"], day: date) -> IntegrityGateResult:
         ohlc_violations=ohlc_violations,
         passed=passed,
         reasons=tuple(reasons),
+        negative_values=negative_values,
+        missing_excluded=missing_excluded,
+        liquidity_note=liquidity_note,
     )
 
 
@@ -364,10 +436,11 @@ def combine_adjustment_verdicts(verdicts: Iterable[str]) -> str:
 
 
 class _Bar:  # pragma: no cover - typing aid only (structural)
-    """Structural stand-in: anything with naive ``stamp`` and integer-paise OHLC fields."""
+    """Structural stand-in: naive ``stamp``, integer-paise OHLC, and an integer share ``volume``."""
 
     stamp: datetime
     open_paise: int
     high_paise: int
     low_paise: int
     close_paise: int
+    volume: int

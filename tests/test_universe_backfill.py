@@ -528,7 +528,11 @@ def test_the_report_carries_every_section_the_card_names(tmp_path: Path) -> None
         assert heading in text, heading
     assert "TOTAL coverage" in text
     assert ROUTE_TABLE_PATH in text and ROUTE_MAP_REQUIRED in text
-    assert f"demerger@{DEMERGER_EX.isoformat()}: measured/measured" in text
+    # The synthetic vendor scaled price AND volume by the same demerger factor. The price side has no
+    # ``ours`` for a demerger, so it is MEASURED; the volume side takes that same proven factor under
+    # the Q-12 ruling's candidate order (ours > chosen-price-factor > measured-minimum > absent)
+    # instead of re-measuring an observable the pre-open auction biases.
+    assert f"demerger@{DEMERGER_EX.isoformat()}: measured/price-factor" in text
     assert "survivorship" in text.lower()
     assert str(len(DAYS)) in text
 
@@ -640,3 +644,306 @@ def test_gate3_skips_an_ex_date_outside_the_stored_span() -> None:
     tally = ub.GateTally(closes={date(2023, 3, 1): 400000, date(2023, 3, 2): 100000})
     ub.gate3_over_events(tally, "AAA", factors)
     assert tally.gate3_checked == 0
+
+
+# --- the CONTEXT 4.5 gate-2 completeness redefinition, through the runner ------------------
+#
+# The synthetic vendor emits THREE bars per day whose fold reproduces the daily high/low/volume
+# exactly. That is 372 of 375 session minutes absent on every single day -- the exact shape the
+# architect's completeness ruling is about, and it was already in this fixture before the ruling
+# existed. Pre-ruling, gate 2 excluded every one of those days. Now gate 1 reconciles them, so they
+# are INCLUDED and the absent stamps are counted as liquidity.
+
+
+def test_gate2_a_gate1_passing_day_with_tradeless_minutes_is_included_and_counted(
+    tmp_path: Path,
+) -> None:
+    store = _make_daily_store(tmp_path, {"AAA": 100000})
+    cache = ub.build_daily_cache(store, ["AAA"], DAYS[0], DAYS[-1])
+    tokens = {"AAA": "1"}
+    config = _config(tmp_path, store)
+    ledger = ub.run_universe(SyntheticVendor(cache, tokens), FakeMaster(tokens), ["AAA"], (),
+                             cache, config, log=lambda m: None)
+
+    record = ledger.records["AAA"]
+    assert record.status == ub.STATUS_SETTLED
+    assert record.gate1_pass == record.gate1_total == len(DAYS)
+    assert record.gate2_excluded == 0, "gate 1 reconciles every day, so nothing is data loss"
+    assert record.liquidity_days == record.depth_days, "every day carries tradeless minutes"
+    assert record.gate2_missing == 0
+    assert record.median_minutes_per_day == 3 and record.min_minutes_per_day == 3
+    assert record.gate_definition == ub.GATE_DEFINITION
+
+
+def test_gate2_still_excludes_a_missing_minute_day_when_gate1_also_fails(tmp_path: Path) -> None:
+    """The other half of the ruling: where gate 1 FAILS, absent stamps are indistinguishable from
+    data loss and the day is still excluded. Same 372-missing-minute days as the test above -- only
+    the gate-1 verdict differs. (12 symbols so one quarantine stays under the halt ceiling.)"""
+    symbols = [f"S{i:02d}" for i in range(12)]
+    store, cache, tokens = _quarantine_config(tmp_path, symbols)
+    config = _config(tmp_path, store)
+
+    class OneBadSymbol(SyntheticVendor):
+        def get_candles(self, token, interval, from_dt, to_dt, *, exchange="NSE"):  # type: ignore[no-untyped-def]
+            bars = super().get_candles(token, interval, from_dt, to_dt, exchange=exchange)
+            if self._by_token[token] != "S00":
+                return bars
+            return tuple(
+                OneMinuteBar(b.stamp, b.open_paise, b.high_paise, b.low_paise, b.close_paise,
+                             b.volume // 2)
+                for b in bars
+            )
+
+    ledger = ub.run_universe(OneBadSymbol(cache, tokens), FakeMaster(tokens), symbols, (),
+                             cache, config, log=lambda m: None)
+
+    bad = ledger.records["S00"]
+    assert bad.status == ub.STATUS_QUARANTINED
+    assert bad.gate1_pass == 0
+    assert bad.gate2_excluded == bad.depth_days
+    assert bad.gate2_missing == bad.depth_days
+    assert bad.liquidity_days == 0, "a day gate 1 rejects is never counted as liquidity"
+    # ... while its 11 neighbours, with the SAME 3-bar days, are included and counted as liquidity.
+    good = ledger.records["S01"]
+    assert good.status == ub.STATUS_SETTLED
+    assert good.gate2_excluded == 0 and good.liquidity_days == good.depth_days
+
+
+# --- the Q-12-addendum quarantine-recovery reroute -----------------------------------------
+
+#: A bonus whose SUBJECT says 1:1 (our CONTEXT 4.2 factor 0.5) while the vendor actually applied
+#: 0.9 -- the ruling's "unrecorded or vendor-variant event". Routing sends a bonus-only symbol down
+#: the cheap table path, which has no price oracle, so our wrong 0.5 divides every pre-ex price and
+#: gate 1 fails the whole pre-ex span. Only the map's probes can see it.
+VARIANT_EX = DAYS[20]
+VENDOR_VARIANT_FACTOR = Decimal("0.9")
+
+
+def _variant_setup(tmp_path: Path):
+    store = _make_daily_store(tmp_path, {"TTT": 100000})
+    cache = ub.build_daily_cache(store, ["TTT"], DAYS[0], DAYS[-1])
+    tokens = {"TTT": "1"}
+    client = SyntheticVendor(cache, tokens, adjusted={"TTT": (VARIANT_EX, VENDOR_VARIANT_FACTOR)})
+    actions = (_action("TTT", VARIANT_EX, "Bonus 1:1"),)
+    return store, cache, tokens, client, actions
+
+
+def test_a_quarantined_table_path_symbol_is_rerouted_through_the_map_and_recovers(
+    tmp_path: Path,
+) -> None:
+    """The Q-12 addendum ruling, end to end.
+
+    TTT routes table-path (bonus only). Our factor 0.5 is not what the vendor used, so the ingest
+    stores a 1.8x-wrong price and a 44%-short volume on every pre-ex day; gate 1 fails them all and
+    the symbol quarantines at ~50%. The reroute then probes its eras, measures the vendor's real
+    0.9, applies it to the ALREADY-STORED days by the NET factor 0.9/0.5 = 1.8 in one division, and
+    gate 1 passes on every day -- so the symbol settles.
+
+    (Gate 3 still reports a break across the ex-date and that is CORRECT: our CONTEXT 4.2 factor
+    genuinely is wrong for this symbol. The reroute recovers the DATA; it does not pretend the
+    factor table is right.)
+    """
+    store, cache, tokens, client, actions = _variant_setup(tmp_path)
+    config = _config(tmp_path, store)
+    ledger = ub.run_universe(client, FakeMaster(tokens), ["TTT"], actions, cache, config,
+                             log=lambda m: None)
+
+    record = ledger.records["TTT"]
+    assert record.status == ub.STATUS_SETTLED, record.note
+    assert record.reroute_attempted is True
+    assert record.route == ROUTE_MAP_REQUIRED
+    assert "quarantine-recovery (Q-12 addendum ruling)" in record.route_reasons
+    # the BEFORE numbers are kept, so the recovery is auditable rather than merely different
+    assert record.prior_status == ub.STATUS_QUARANTINED
+    assert record.prior_gate1_pass < record.gate1_pass
+    assert record.gate1_pass == record.gate1_total == len(DAYS)
+    assert "gate 1" in record.reroute_note
+
+    # the map that did it is on disk, with the vendor's real factor and its provenance
+    amap = va.load_map("TTT", data_dir=config.map_data_dir)
+    assert va.map_is_current(amap)
+    choice = amap.eras[0].choices[0]
+    assert choice.price_source == va.SOURCE_MEASURED
+    assert choice.price_factor == pytest.approx(VENDOR_VARIANT_FACTOR, abs=Decimal("0.0005"))
+    assert choice.volume_source == va.SOURCE_PRICE_FACTOR
+
+    # and the stored prices really are RAW now, to the paisa, on a pre-ex day
+    day = DAYS[0]
+    row = cache.day("TTT", day)
+    assert row is not None
+    stored = config.minute_store.minutes("TTT", day)
+    assert max(b.high_paise for b in stored) == row.high_paise
+    assert min(b.low_paise for b in stored) == row.low_paise
+    # Volume is recovered per BAR, so the day's sum can differ from the daily total by at most one
+    # share per bar (three here) -- three orders of magnitude inside gate 1's own band, which is why
+    # gate 1 passes on every day above.
+    assert abs(sum(b.volume for b in stored) - row.volume) <= len(stored)
+
+
+def test_the_reroute_runs_once_and_a_resume_neither_re_probes_nor_re_divides(
+    tmp_path: Path,
+) -> None:
+    """Idempotence on the fetched store, which is what makes the reroute safe to leave in the run.
+
+    After the recovery, a resumed run finds nothing owed (the gate definition, the map's estimator
+    marker and its fetch date all match), so it processes NOTHING and makes no request. Forcing the
+    symbol back through ``process_symbol`` is also a no-op: the identity guard sees a store that is
+    already raw, the net factor is 1, and not one day is rewritten -- so the prices cannot be
+    divided a second time.
+    """
+    store, cache, tokens, client, actions = _variant_setup(tmp_path)
+    config = _config(tmp_path, store)
+    ub.run_universe(client, FakeMaster(tokens), ["TTT"], actions, cache, config, log=lambda m: None)
+    day = DAYS[0]
+    after_first = [b.high_paise for b in config.minute_store.minutes("TTT", day)]
+
+    resumed = SyntheticVendor(cache, tokens, adjusted={"TTT": (VARIANT_EX, VENDOR_VARIANT_FACTOR)})
+    ledger = ub.RunLedger.load(config.ledger_path)
+    assert ub.needs_reprocessing(ledger.records["TTT"], config) is None
+    ub.run_universe(resumed, FakeMaster(tokens), ["TTT"], actions, cache, config,
+                    log=lambda m: None)
+    assert resumed.calls == [], "a settled, current symbol costs no request on a resume"
+
+    forced = SyntheticVendor(cache, tokens, adjusted={"TTT": (VARIANT_EX, VENDOR_VARIANT_FACTOR)})
+    amap = va.load_map("TTT", data_dir=config.map_data_dir)
+    applied = mb.rebuild_symbol_raw_with_map(
+        config.minute_store, store, "TTT", amap, tick_paise=5,
+        applied_factors=mb.SymbolFactors.identity("TTT", tick_paise=5),
+    )
+    assert applied.days_rewritten == 0, "an already-raw store is never divided again"
+    assert [b.high_paise for b in config.minute_store.minutes("TTT", day)] == after_first
+    assert forced.calls == []
+
+
+def test_a_map_built_under_the_superseded_estimator_is_rebuilt_not_consumed(
+    tmp_path: Path,
+) -> None:
+    """The Q-12 staleness marker, through the runner. A map file written before the ruling carries
+    no ``volume_estimator`` key; the run must rebuild it from probe windows rather than consume its
+    median-derived factors -- and must say so, so the operator sees why a settled symbol re-ran."""
+    store, cache, tokens, client, actions = _variant_setup(tmp_path)
+    config = _config(tmp_path, store)
+    ub.run_universe(client, FakeMaster(tokens), ["TTT"], actions, cache, config, log=lambda m: None)
+
+    path = va.map_path("TTT", config.map_data_dir)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload.pop("volume_estimator")  # exactly what a pre-ruling map file looks like
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    ledger = ub.RunLedger.load(config.ledger_path)
+    why = ub.needs_reprocessing(ledger.records["TTT"], config)
+    assert why is not None and "superseded estimator" in why
+
+    logged: list[str] = []
+    resumed = SyntheticVendor(cache, tokens, adjusted={"TTT": (VARIANT_EX, VENDOR_VARIANT_FACTOR)})
+    ledger = ub.run_universe(resumed, FakeMaster(tokens), ["TTT"], actions, cache, config,
+                             log=logged.append)
+    assert any("stale under Q-12" in line for line in logged)
+    assert va.map_is_current(va.load_map("TTT", data_dir=config.map_data_dir))
+    assert ledger.records["TTT"].status == ub.STATUS_SETTLED
+    assert ledger.records["TTT"].gate1_pass == len(DAYS), "still raw after the rebuild"
+
+
+def test_needs_reprocessing_flags_a_pre_ruling_row_and_clears_after_the_pass(
+    tmp_path: Path,
+) -> None:
+    """A row written before the completeness ruling carries a different gate marker, so a resume
+    RE-GATES it from the stored candles -- no window refetched -- and then stops flagging it."""
+    store = _make_daily_store(tmp_path, {"AAA": 100000})
+    cache = ub.build_daily_cache(store, ["AAA"], DAYS[0], DAYS[-1])
+    tokens = {"AAA": "1"}
+    config = _config(tmp_path, store)
+    ub.run_universe(SyntheticVendor(cache, tokens), FakeMaster(tokens), ["AAA"], (), cache, config,
+                    log=lambda m: None)
+
+    ledger = ub.RunLedger.load(config.ledger_path)
+    assert ub.needs_reprocessing(ledger.records["AAA"], config) is None
+    # rewind the row to the pre-ruling state: the marker absent and gate 2 excluding every day
+    ledger.records["AAA"].gate_definition = ""
+    ledger.records["AAA"].gate2_excluded = len(DAYS)
+    ledger.records["AAA"].liquidity_days = 0
+    ledger.save()
+
+    stale = ub.RunLedger.load(config.ledger_path)
+    why = ub.needs_reprocessing(stale.records["AAA"], config)
+    assert why is not None and "gate definition" in why
+
+    resumed = SyntheticVendor(cache, tokens)
+    reledger = ub.run_universe(resumed, FakeMaster(tokens), ["AAA"], (), cache, config,
+                               log=lambda m: None)
+    record = reledger.records["AAA"]
+    assert resumed.calls == [], "re-gating reads the store; it never refetches a window"
+    assert record.gate_definition == ub.GATE_DEFINITION
+    assert record.gate2_excluded == 0 and record.liquidity_days == record.depth_days
+    assert record.prior_gate2_excluded == len(DAYS), "the BEFORE number is kept for the report"
+    assert ub.needs_reprocessing(record, config) is None, "self-clearing"
+
+
+# --- the failure-pattern analysis (PURE) ---------------------------------------------------
+
+
+def _tally_with(failing: set[date], gap: Decimal, volume: int = 9000) -> ub.GateTally:
+    tally = ub.GateTally()
+    for day in DAYS:
+        tally.gate1_total += 1
+        tally.gate1_days.append(day)
+        tally.gate1_volumes.append(volume)
+        tally.closes[day] = 100000
+        if day in failing:
+            tally.gate1_failures.append((day, gap, volume))
+        else:
+            tally.gate1_pass += 1
+    return tally
+
+
+def test_failure_profile_calls_a_whole_pre_ex_era_an_adjustment_problem() -> None:
+    """Every day before the ex-date fails and every day after it passes -- one wrong factor applied
+    to a whole span, which is what the ruling means by "clustered before a CA ex-date"."""
+    profile = ub.gate1_failure_profile(
+        _tally_with({d for d in DAYS if d < VARIANT_EX}, Decimal("44.4")), [VARIANT_EX]
+    )
+    assert profile.verdict == ub.PATTERN_CLUSTERED
+    assert profile.above_ceiling == profile.failures  # all above +5.0%
+    assert "whole span" in profile.detail
+
+
+def test_failure_profile_calls_thin_scattered_days_an_auction_liquidity_shape() -> None:
+    """A handful of failures spread across both eras, all above the +5.0% ceiling, on days whose raw
+    daily volume is far below the symbol's own median: the auction share of a thin day."""
+    tally = _tally_with(set(), Decimal("0"))
+    thin = [DAYS[3], DAYS[9], DAYS[25], DAYS[33]]
+    tally.gate1_failures = [(d, Decimal("7.5"), 300) for d in thin]
+    tally.gate1_pass = tally.gate1_total - len(thin)
+    profile = ub.gate1_failure_profile(tally, [VARIANT_EX])
+    assert profile.verdict == ub.PATTERN_SCATTERED
+    assert profile.above_ceiling == 4 and profile.below_floor == 0
+    assert profile.median_volume_above_ceiling == 300 < profile.median_volume_all
+    assert "auction share of a thin day" in profile.detail
+
+
+def test_failure_profile_reports_no_failure_as_nothing_to_explain() -> None:
+    profile = ub.gate1_failure_profile(_tally_with(set(), Decimal("0")), [VARIANT_EX])
+    assert profile.verdict == ub.PATTERN_NONE and profile.failures == 0
+
+
+def test_the_report_carries_the_before_after_table_and_the_deferred_ceiling_evidence(
+    tmp_path: Path,
+) -> None:
+    """The two report sections the rulings owe the architect."""
+    store, cache, tokens, client, actions = _variant_setup(tmp_path)
+    config = _config(tmp_path, store)
+    ledger = ub.run_universe(client, FakeMaster(tokens), ["TTT"], actions, cache, config,
+                             log=lambda m: None)
+    unknown = ub.unknown_series_sweep(store, ["TTT"], DAYS[0], END)
+    text = ub.write_report(ledger, ["TTT"], unknown, config, generated_at=NOW).read_text(
+        encoding="utf-8"
+    )
+
+    assert "### 3a. BEFORE / AFTER the 2026-07-26 rulings" in text
+    assert "### 3b. Traded-minute statistics per symbol" in text
+    assert "### Gate 2 redefined" in text
+    assert "no minimum traded" in text.lower() or "NO liquidity filter" in text
+    assert "quarantine-recovery" in text
+    assert "the -0.1% floor is NOT widened" in text or "[-0.1%, 5.0%]" in text
+    # the band is quoted from the constants, so a widened band would show up here
+    assert "-0.1%" in text and "5.0%" in text

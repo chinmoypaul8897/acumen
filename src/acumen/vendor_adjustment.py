@@ -110,6 +110,23 @@ _PRICE_CONTAINMENT_REL: Decimal = Decimal("0.001")
 SOURCE_OURS: str = "ours"  # our CONTEXT 4.2 factor -- an exact known multiplier
 SOURCE_MEASURED: str = "measured"  # the vendor's factor, measured from the fetched/raw ratio
 SOURCE_ABSENT: str = "absent"  # the vendor did not apply this event in this era (factor 1.0)
+#: VOLUME side only (Q-12 ruling clause ii): the factor the PRICE oracle already proved for this
+#: same event, reused as a volume candidate. A rights or demerger has no ``ours`` volume factor at
+#: all -- the vendor scaled volume by something that is not our TERP -- but its price factor is
+#: pinned to 2 paise per probe day, so it is the best-evidenced volume candidate available.
+SOURCE_PRICE_FACTOR: str = "price-factor"
+
+#: Q-12 ruling clause (i): the measured VOLUME estimator needs at least this many probe days whose
+#: PRICE containment passes. Fewer is not a measurement of a one-directionally contaminated
+#: observable, so NO measured-volume candidate is offered at all and the era stands or falls on
+#: ``ours`` / the chosen price factor / absent.
+MIN_VOLUME_ESTIMATOR_DAYS: int = 3
+
+#: Identity of the volume estimator a persisted map was built with. Stamped into the map JSON so a
+#: map written under the SUPERSEDED median estimator (Q-11 as originally ruled) is detectable as
+#: stale and rebuilt, rather than silently consumed. Bump this string whenever the estimator or the
+#: volume candidate set changes.
+MAP_VOLUME_ESTIMATOR: str = "min-over-price-passing-days-v2"
 
 _ONE: Decimal = Decimal(1)
 #: Ratio tolerance for calling a solved/measured value "actually ours" or "actually absent".
@@ -121,9 +138,17 @@ _RATIO_TOL: Decimal = Decimal("0.0005")
 #: crossed) rather than committing an economically impossible multiplier.
 _MEASURED_UPPER: Decimal = _ONE + _RATIO_TOL
 
-#: Cost of each source in the min-cost arbitration: prefer a known exact factor, then a vendor
-#: omission, then a measured observation.
+#: Cost of each source in the PRICE min-cost arbitration: prefer a known exact factor, then a
+#: vendor omission, then a measured observation. UNCHANGED by Q-12 (the price observable is
+#: symmetric and unbiased, so nothing about the price side moved).
 _COST = {SOURCE_OURS: 0, SOURCE_ABSENT: 1, SOURCE_MEASURED: 2}
+
+#: Cost of each source in the VOLUME min-cost arbitration, exactly the Q-12 ruling's order:
+#: ``ours(share-count) > chosen-price-factor > measured-minimum > absent``. ``absent`` moved from
+#: second to LAST on this side only. It can never demote a share-count event or a cash dividend
+#: (both carry a cost-0 volume ``ours``), so the reordering only ever decides an event with NO
+#: volume ``ours`` -- a rights, a demerger, a Q-6-pending rights -- which is the ruling's target.
+_VOLUME_COST = {SOURCE_OURS: 0, SOURCE_PRICE_FACTOR: 1, SOURCE_MEASURED: 2, SOURCE_ABSENT: 3}
 
 
 class VendorAdjustmentError(RuntimeError):
@@ -235,8 +260,15 @@ class EraMeasurement:
 
     ``ex_dates`` is the era KEY: the sorted ex-dates of the price-moving events in ``(D, F]`` for
     every day of this era. ``price_cumulative`` is the median of the probe days' high/low ratios
-    (``fetched/raw``); ``volume_cumulative`` is the median of ``raw/fetched`` volume (the multiplier
-    that recovers raw shares). The spreads record how tight the observation is.
+    (``fetched/raw``) -- the ruled estimator, unchanged: that observable is the same number every
+    day, so the median is unbiased. The spreads record how tight the observation is.
+
+    ``volume_cumulative`` (the median of ``raw/fetched`` volume) is **DIAGNOSTIC ONLY** since the
+    Q-12 ruling: the volume observable is one-sidedly contaminated by the pre-open call auction
+    (``measured = true / (1 - auction)`` >= ``true``), so its median is biased HIGH and the
+    committed estimator is :func:`volume_estimator` -- the MINIMUM over the probe days whose PRICE
+    containment passes. The median is kept because the report and the audit want to SEE the bias
+    that the ruling corrects; nothing consumes it as a factor.
     """
 
     ex_dates: tuple[date, ...]
@@ -293,6 +325,51 @@ def _median(values: Sequence[Decimal]) -> Decimal:
     return (ordered[mid - 1] + ordered[mid]) / Decimal(2)
 
 
+def price_passing_probe_days(
+    era: EraMeasurement, k_price: Decimal, tol_paise: int = DEFAULT_PRICE_CONTAINMENT_PAISE
+) -> tuple[ProbeDay, ...]:
+    """The era's probe days whose un-adjusted high AND low land inside price containment. PURE.
+
+    The Q-12 ruling restricts the volume estimator to "days whose PRICE containment passes". This
+    is that filter, evaluated per day against the era's CHOSEN ``k_price`` -- the same arithmetic
+    :func:`_price_contained` applies to the whole era, one day at a time. A day the price oracle
+    rejects carries a confounded ratio (a vendor re-adjustment floor inside the era, a corrupt
+    fold) and must never be allowed to set the volume floor.
+    """
+    return tuple(p for p in era.probe_days if _day_price_contained(p, k_price, tol_paise))
+
+
+def volume_estimator(
+    era: EraMeasurement,
+    k_price: Decimal,
+    *,
+    tol_paise: int = DEFAULT_PRICE_CONTAINMENT_PAISE,
+    min_days: int = MIN_VOLUME_ESTIMATOR_DAYS,
+) -> Decimal | None:
+    """The Q-12 measured VOLUME estimator: the MINIMUM of ``raw/fetched`` over price-passing days.
+
+    PURE. Returns ``None`` -- i.e. **no measured-volume candidate exists** -- when fewer than
+    ``min_days`` of the era's probe days pass price containment under ``k_price``.
+
+    Why the minimum and not the ruled-for-price median: the 1-minute sum systematically UNDER-counts
+    the exchange's daily total, because the pre-open call auction trades in neither the continuous
+    session nor a 1-minute candle. So every day's observable is ``true / (1 - auction_share)``,
+    which is >= the true factor, never below it -- a one-directional contamination, and exactly the
+    asymmetry gate 1's own ``[-0.1%, +5.0%]`` band models. The median therefore lands roughly half
+    the probe days BELOW the committed factor, each producing a NEGATIVE gap the un-widened -0.1%
+    floor rejects, which marked eras un-provable that a single exact factor reconciles (ABB:
+    median 0.8986 vs the true 0.8976). The observable's FLOOR is the unbiased point. It is also
+    conservative in the safe direction: an estimator slightly BELOW truth un-adjusts volume slightly
+    low, which pushes gate-1 gaps POSITIVE, into the band's wide side.
+    """
+    if k_price <= 0:
+        return None
+    days = price_passing_probe_days(era, k_price, tol_paise)
+    if len(days) < min_days:
+        return None
+    return min(p.volume_recovery() for p in days)
+
+
 # --- the resolved map ------------------------------------------------------------------
 
 
@@ -333,6 +410,10 @@ class AdjustmentMap:
     all_event_ex_dates: tuple[date, ...]
     eras: tuple[EraResolution, ...]
     tick_paise: int | None = None
+    #: Which volume estimator built this map (:data:`MAP_VOLUME_ESTIMATOR`). A map read back with a
+    #: different value was built under a superseded ruling and must be rebuilt, not consumed --
+    #: see :func:`map_is_current`.
+    volume_estimator_id: str = MAP_VOLUME_ESTIMATOR
 
     def _era_index(self) -> dict[tuple[date, ...], EraResolution]:
         return {era.ex_dates: era for era in self.eras}
@@ -378,9 +459,16 @@ def build_map(
     """Build the adjustment map from measured eras + the event list. PURE, deterministic.
 
     Works backwards (eras newest = fewest in-window events, first), carrying each event's decision
-    into older eras. Price and volume are resolved independently; the price oracle is 2-paise
-    containment vs the raw daily high/low, the volume oracle is gate-1's band. An era whose events
-    admit no passing assignment is marked ``provable=False`` -- its days are excluded and counted.
+    into older eras. The price oracle is 2-paise containment vs the raw daily high/low, the volume
+    oracle is gate-1's band (UNWIDENED). An era whose events admit no passing assignment is marked
+    ``provable=False`` -- its days are excluded and counted.
+
+    Price and volume stay independently ARBITRATED, but the passes are ORDERED (Q-12 ruling clause
+    ii): price resolves first, and each event's chosen price factor is then offered to the volume
+    pass as a candidate -- so a rights or demerger, which has no ``ours`` volume factor at all, can
+    be reconciled by the factor the price oracle already pinned to 2 paise per probe day. The
+    measured volume candidate is :func:`volume_estimator` (the minimum over price-passing days),
+    not a median (clause i).
     """
     sym = symbol.strip().upper()
     by_ex: dict[date, EventSpec] = {e.ex_date: e for e in events}
@@ -432,11 +520,24 @@ def build_map(
             get_ours=lambda e: e.our_price_factor,
             oracle=lambda k_chain, per: _price_contained(era, k_chain, price_tol_paise),
         )
-        volume = _resolve_pass(
-            win, era.volume_cumulative, vol_canon,
-            get_ours=lambda e: e.our_volume_factor(),
-            oracle=lambda k_chain, per: _volume_reconciled(era, k_chain),
-        )
+        # Q-12 clause (ii): the volume pass sees the price pass's OWN result -- each event's chosen
+        # price factor becomes a volume candidate, and the era's chosen price chain is what the
+        # estimator's day filter (clause i) is evaluated against. Hence price FIRST, then volume.
+        volume = None
+        if price is not None:
+            chosen_price = {ex: factor for ex, (_src, factor) in price.items()}
+            k_price_chosen = _ONE
+            for factor in chosen_price.values():
+                k_price_chosen *= factor
+            volume = _resolve_pass(
+                win,
+                volume_estimator(era, k_price_chosen, tol_paise=price_tol_paise),
+                vol_canon,
+                get_ours=lambda e: e.our_volume_factor(),
+                oracle=lambda k_chain, per: _volume_reconciled(era, k_chain),
+                costs=_VOLUME_COST,
+                price_factors=chosen_price,
+            )
         if price is None or volume is None:
             decided[era.ex_dates] = None
             reasons[era.ex_dates] = "no candidate chain satisfies price containment + gate-1"
@@ -456,7 +557,21 @@ def build_map(
     # isolates the one event; the median tightens containment without re-labelling anything. ------
     by_key: dict[tuple[date, ...], EraMeasurement] = {e.ex_dates: e for e in ordered_eras}
     price_scalar = _refine_scalars(decided, by_key, by_ex, "price")
-    vol_scalar = _refine_scalars(decided, by_key, by_ex, "volume")
+    # The VOLUME refinement is filtered by price containment too (Q-12 clause i applies to the
+    # estimator wherever it is formed, not only inside one era), so it needs each era's REFINED
+    # price chain -- the very chain phase 3 commits and consumes.
+    refined_k_price: dict[tuple[date, ...], Decimal] = {}
+    for key, choice in decided.items():
+        if choice is None:
+            continue
+        chain = _ONE
+        for ex, (psrc, pval, _vsrc, _vval) in choice.items():
+            chain *= _factor_for_source(by_ex[ex], psrc, price_scalar.get(ex, pval), price=True)
+        refined_k_price[key] = chain
+    vol_scalar = _refine_scalars(
+        decided, by_key, by_ex, "volume",
+        price_chains=refined_k_price, price_tol_paise=price_tol_paise,
+    )
 
     # --- Phase 3: assemble each era with the refined factors + oracle diagnostics --------------
     resolutions: list[EraResolution] = []
@@ -471,8 +586,16 @@ def build_map(
         if provable:
             for e in win:
                 psrc, _p0, vsrc, _v0 = era_choice[e.ex_date]
-                pval = _factor_for_source(e, psrc, price_scalar.get(e.ex_date), price=True)
-                vval = _factor_for_source(e, vsrc, vol_scalar.get(e.ex_date), price=False)
+                # Fall back to the phase-1 value when no refined scalar exists: the refinement only
+                # TIGHTENS an already-arbitrated factor, so a missing refinement must never turn a
+                # provable era into a crash.
+                pval = _factor_for_source(e, psrc, price_scalar.get(e.ex_date, _p0), price=True)
+                if vsrc == SOURCE_PRICE_FACTOR:
+                    # Q-12 clause (ii): this event's volume factor IS its committed price factor --
+                    # read from ``pval`` above so the two can never drift apart in the audit row.
+                    vval = pval
+                else:
+                    vval = _factor_for_source(e, vsrc, vol_scalar.get(e.ex_date, _v0), price=False)
                 choices.append(
                     EventChoice(
                         kind=e.kind, ex_date=e.ex_date,
@@ -518,27 +641,52 @@ def build_map(
 
 def _resolve_pass(
     win: Sequence[EventSpec],
-    cumulative: Decimal,
+    cumulative: Decimal | None,
     canonical: Mapping[date, tuple[str, Decimal]],
     *,
     get_ours,
     oracle,
+    costs: Mapping[str, int] = _COST,
+    price_factors: Mapping[date, Decimal] | None = None,
 ) -> dict[date, tuple[str, Decimal]] | None:
     """Resolve one era for ONE pass (price or volume). Returns per-event (source, factor) or None.
 
     Each event gets a small candidate list; a NEW event (not yet in ``canonical``) may be OURS /
-    ABSENT / a freshly-SOLVED measured value; a CARRIED event keeps its canonical source (a no-ours
-    event may also flip to ABSENT -- the era-inconsistency). At most one freshly-solved measured per
-    assignment (never two unknowns from one equation). The min-cost passing assignment wins.
+    ABSENT / a freshly-SOLVED measured value / -- on the VOLUME pass only -- its own chosen PRICE
+    FACTOR; a CARRIED event keeps its canonical source (a no-ours event may also flip to ABSENT --
+    the era-inconsistency). At most one freshly-solved measured per assignment (never two unknowns
+    from one equation). The min-cost passing assignment wins, costed by ``costs``.
+
+    Args:
+        cumulative: the era's measured cumulative observable, or ``None`` when no measured candidate
+            may be offered at all (Q-12: fewer than :data:`MIN_VOLUME_ESTIMATOR_DAYS` price-passing
+            probe days means the volume observable was not measured, so nothing is SOLVEd).
+        costs: :data:`_COST` for price, :data:`_VOLUME_COST` for volume (the Q-12 order).
+        price_factors: VOLUME pass only -- each event's already-chosen PRICE factor, offered as the
+            :data:`SOURCE_PRICE_FACTOR` candidate. A price factor of exactly 1 is NOT offered: that
+            is what ``absent`` means, and relabelling a vendor omission as a measurement would make
+            the audit row lie.
     """
     option_lists: list[list[tuple[str, object, int]]] = []
     for e in win:
         ours = get_ours(e)
+        from_price = None if price_factors is None else price_factors.get(e.ex_date)
         opts: list[tuple[str, object, int]] = []
         if e.ex_date in canonical:
             csrc, cval = canonical[e.ex_date]
             if csrc == SOURCE_OURS:
-                opts.append((SOURCE_OURS, ours if ours is not None else cval, 0))
+                opts.append((SOURCE_OURS, ours if ours is not None else cval, costs[SOURCE_OURS]))
+            elif csrc == SOURCE_PRICE_FACTOR:
+                # Carried: this event's volume TRACKS its price factor, so the value is read from
+                # THIS era's price resolution, not from the older era's number. That matters when the
+                # price side FLIPPED to absent in this era (the era-inconsistency): the volume must
+                # flip with it -- and then the honest label is ABSENT, because a factor of 1 is a
+                # vendor omission, not a measurement.
+                tracked = cval if from_price is None else from_price
+                if tracked == _ONE:
+                    opts.append((SOURCE_ABSENT, _ONE, costs[SOURCE_ABSENT]))
+                else:
+                    opts.append((SOURCE_PRICE_FACTOR, tracked, costs[SOURCE_PRICE_FACTOR]))
             elif csrc == SOURCE_MEASURED:
                 # A carried MEASURED event is a SINGLE observed scalar (the ruling's "single
                 # scalar per event"): it uses that canonical value, never a fresh re-solve --
@@ -546,16 +694,22 @@ def _resolve_pass(
                 # absorb the rights' residual in an era where it is NOT applied. A no-ours event
                 # (a demerger) may instead VANISH (the era-inconsistency); a with-ours event
                 # (a rights whose vendor factor differs from our TERP) stays measured.
-                opts.append((SOURCE_MEASURED, cval, 2))
+                opts.append((SOURCE_MEASURED, cval, costs[SOURCE_MEASURED]))
                 if ours is None:
-                    opts.append((SOURCE_ABSENT, _ONE, 1))
+                    opts.append((SOURCE_ABSENT, _ONE, costs[SOURCE_ABSENT]))
             else:  # carried ABSENT
-                opts.append((SOURCE_ABSENT, _ONE, 1))
+                opts.append((SOURCE_ABSENT, _ONE, costs[SOURCE_ABSENT]))
         else:
             if ours is not None:
-                opts.append((SOURCE_OURS, ours, 0))
-            opts.append((SOURCE_ABSENT, _ONE, 1))
-            opts.append((SOURCE_MEASURED, "SOLVE", 2))
+                opts.append((SOURCE_OURS, ours, costs[SOURCE_OURS]))
+            if from_price is not None and from_price != _ONE:
+                # A chosen price factor of exactly 1 is not offered under this label: that IS what
+                # ABSENT means, and relabelling a vendor omission as a measurement would make the
+                # audit row lie. ABSENT is already in the list below.
+                opts.append((SOURCE_PRICE_FACTOR, from_price, costs[SOURCE_PRICE_FACTOR]))
+            opts.append((SOURCE_ABSENT, _ONE, costs[SOURCE_ABSENT]))
+            if cumulative is not None:
+                opts.append((SOURCE_MEASURED, "SOLVE", costs[SOURCE_MEASURED]))
         option_lists.append(opts)
 
     best: tuple[int, int, dict[date, tuple[str, Decimal]]] | None = None
@@ -572,7 +726,7 @@ def _resolve_pass(
         assignment: dict[date, tuple[str, Decimal]] = {}
         ok = True
         if solve_index >= 0:
-            if known == 0:
+            if known == 0 or cumulative is None:
                 continue
             solved = cumulative / known
             e = win[solve_index]
@@ -612,17 +766,28 @@ def _refine_scalars(
     by_key: Mapping[tuple[date, ...], EraMeasurement],
     by_ex: Mapping[date, EventSpec],
     which: str,
+    *,
+    price_chains: Mapping[tuple[date, ...], Decimal] | None = None,
+    price_tol_paise: int = DEFAULT_PRICE_CONTAINMENT_PAISE,
 ) -> dict[date, Decimal]:
-    """Refine each MEASURED event's scalar to the median over ALL its pre-ex probe days. PURE.
+    """Refine each MEASURED event's scalar over ALL its pre-ex probe days. PURE.
 
-    The ruling's ``k-hat`` is "the median ratio over pre-ex-date probe days" -- and an event's
-    pre-ex days span EVERY era in which it is applied (the rights sits in both the 2016 and 2019
-    eras). Isolating the one event on a probe day means dividing the day's cumulative observable
-    (``fetched/raw`` for price, ``raw/fetched`` for volume) by the OTHER in-era events' resolved
-    factors. The median over all such days is the single scalar; it only tightens containment and
-    never changes a source label (that was fixed in phase 1). Assumes at most one MEASURED event
-    per era for a given pass (guaranteed by the <=1-fresh-solve rule), so the "other" events are
-    always known exactly.
+    An event's pre-ex days span EVERY era in which it is applied (the rights sits in both RELIANCE's
+    2016 and 2019 eras). Isolating the one event on a probe day means dividing the day's cumulative
+    observable (``fetched/raw`` for price, ``raw/fetched`` for volume) by the OTHER in-era events'
+    resolved factors. The result only tightens containment and never changes a source label (that
+    was fixed in phase 1). Assumes at most one MEASURED event per era for a given pass (guaranteed
+    by the <=1-fresh-solve rule), so the "other" events are always known exactly.
+
+    The two sides use the estimator each was ruled: **price = the MEDIAN** over its days (the
+    observable is symmetric), **volume = the MINIMUM over the days whose PRICE containment passes**
+    (Q-12 clause i -- the auction contaminates the volume observable in one direction only). The
+    volume side therefore needs ``price_chains``: each era's committed ``k_price``, against which
+    the per-day containment filter runs. Without it (price pass) no filter applies.
+
+    A measured event with fewer than :data:`MIN_VOLUME_ESTIMATOR_DAYS` qualifying volume days is
+    OMITTED from the result -- the caller then keeps the phase-1 solved value, which was itself
+    admitted only against a qualifying estimator.
     """
     per_event: dict[date, list[Decimal]] = {}
     for key, choice in decided.items():
@@ -640,21 +805,38 @@ def _refine_scalars(
                 others *= opv if which == "price" else ovv
             if others == 0:
                 continue
-            for p in era.probe_days:
-                if which == "price":
+            if which == "price":
+                for p in era.probe_days:
                     for fetched, raw in ((p.fetched_high, p.raw_high), (p.fetched_low, p.raw_low)):
                         per_event.setdefault(ex, []).append(
                             (Decimal(fetched) / Decimal(raw)) / others
                         )
-                else:
+            else:
+                k_price = None if price_chains is None else price_chains.get(key)
+                days = (
+                    era.probe_days if k_price is None
+                    else price_passing_probe_days(era, k_price, price_tol_paise)
+                )
+                for p in days:
                     per_event.setdefault(ex, []).append(p.volume_recovery() / others)
-    return {ex: _median(vals) for ex, vals in per_event.items() if vals}
+    if which == "price":
+        return {ex: _median(vals) for ex, vals in per_event.items() if vals}
+    return {
+        ex: min(vals)
+        for ex, vals in per_event.items()
+        if len(vals) >= MIN_VOLUME_ESTIMATOR_DAYS
+    }
 
 
 def _factor_for_source(
     event: EventSpec, source: str, refined: Decimal | None, *, price: bool
 ) -> Decimal:
     """The factor to commit for one event given its resolved SOURCE and refined scalar. PURE."""
+    if source == SOURCE_PRICE_FACTOR:  # resolved by the caller from the committed price factor
+        raise VendorAdjustmentError(
+            f"{event.kind}@{event.ex_date}: {SOURCE_PRICE_FACTOR} must be resolved from the "
+            "event's committed price factor, not from a refined scalar"
+        )
     if source == SOURCE_ABSENT:
         return _ONE
     if source == SOURCE_OURS:
@@ -705,14 +887,24 @@ def _price_contained(era: EraMeasurement, k_price: Decimal, tol_paise: int) -> b
     """
     if k_price <= 0:
         return False
-    for p in era.probe_days:
-        for fetched, raw in ((p.fetched_high, p.raw_high), (p.fetched_low, p.raw_low)):
-            if raw <= 0:
-                return False
-            un, _snap, _off = unadjust_price_paise(fetched, k_price, tick_paise=None)
-            limit = max(Decimal(tol_paise), Decimal(raw) * _PRICE_CONTAINMENT_REL)
-            if abs(Decimal(un - raw)) > limit:
-                return False
+    return all(_day_price_contained(p, k_price, tol_paise) for p in era.probe_days)
+
+
+def _day_price_contained(probe: ProbeDay, k_price: Decimal, tol_paise: int) -> bool:
+    """One probe day's containment test -- the per-day unit :func:`_price_contained` quantifies over.
+
+    Split out (not new arithmetic) because the Q-12 volume estimator needs the SAME per-day verdict
+    to decide which days may set the volume floor (:func:`price_passing_probe_days`).
+    """
+    if k_price <= 0:
+        return False
+    for fetched, raw in ((probe.fetched_high, probe.raw_high), (probe.fetched_low, probe.raw_low)):
+        if raw <= 0:
+            return False
+        un, _snap, _off = unadjust_price_paise(fetched, k_price, tick_paise=None)
+        limit = max(Decimal(tol_paise), Decimal(raw) * _PRICE_CONTAINMENT_REL)
+        if abs(Decimal(un - raw)) > limit:
+            return False
     return True
 
 
@@ -860,6 +1052,7 @@ def to_dict(adjustment_map: AdjustmentMap) -> dict:
         "symbol": adjustment_map.symbol,
         "fetch_date": adjustment_map.fetch_date.isoformat(),
         "tick_paise": adjustment_map.tick_paise,
+        "volume_estimator": adjustment_map.volume_estimator_id,
         "all_event_ex_dates": [d.isoformat() for d in adjustment_map.all_event_ex_dates],
         "eras": [
             {
@@ -923,9 +1116,23 @@ def from_dict(payload: Mapping) -> AdjustmentMap:
             all_event_ex_dates=tuple(date.fromisoformat(d) for d in payload["all_event_ex_dates"]),
             eras=eras,
             tick_paise=payload.get("tick_paise"),
+            # A map written before the Q-12 ruling carries no marker at all -> "" -> stale, which is
+            # exactly right: it was built with the superseded median volume estimator.
+            volume_estimator_id=str(payload.get("volume_estimator", "")),
         )
     except (KeyError, ValueError, TypeError) as exc:
         raise VendorAdjustmentError(f"cannot read adjustment map: {exc}") from exc
+
+
+def map_is_current(adjustment_map: AdjustmentMap) -> bool:
+    """Was this map built with the CURRENT volume estimator (:data:`MAP_VOLUME_ESTIMATOR`)?
+
+    A ``False`` here is not a corrupt file -- it is a map built under a superseded ruling. It must be
+    REBUILT (probe windows only; no stored candle is refetched) rather than consumed, because its
+    committed volume factors came from the biased median and its un-provable eras may be provable
+    under the ruled estimator.
+    """
+    return adjustment_map.volume_estimator_id == MAP_VOLUME_ESTIMATOR
 
 
 def persist_map(adjustment_map: AdjustmentMap, data_dir: Path | None = None) -> Path:
