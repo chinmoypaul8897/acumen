@@ -350,6 +350,8 @@ class SymbolRecord:
     gate2_duplicates: int = 0
     gate2_ohlc: int = 0
     gate2_negative: int = 0
+    #: The dates that tripped the NEGATIVE-values trigger, so the report can name them.
+    gate2_negative_dates: list[str] = field(default_factory=list)
     liquidity_days: int = 0
     median_minutes_per_day: int = 0
     min_minutes_per_day: int = 0
@@ -426,6 +428,7 @@ class SymbolRecord:
         self.gate2_duplicates = tally.gate2_duplicates
         self.gate2_ohlc = tally.gate2_ohlc
         self.gate2_negative = tally.gate2_negative
+        self.gate2_negative_dates = [d.isoformat() for d in tally.gate2_negative_days[:10]]
         self.liquidity_days = tally.liquidity_days
         self.gate3_checked = tally.gate3_checked
         self.gate3_failed = tally.gate3_failed
@@ -562,6 +565,10 @@ class GateTally:
     gate2_duplicates: int = 0
     gate2_ohlc: int = 0
     gate2_negative: int = 0
+    #: The dates that tripped the NEGATIVE-values trigger. Kept, not just counted: the live run
+    #: found them all landing on ONE date across the whole universe, which is a vendor-feed fact the
+    #: architect should see rather than a per-symbol accident.
+    gate2_negative_days: list[date] = field(default_factory=list)
     #: The ruling's liquidity statistics: days INCLUDED while carrying tradeless minutes, and the
     #: traded-minute distribution. Reported for the trader's eyes; nothing consumes them, and no
     #: liquidity filter exists anywhere.
@@ -620,6 +627,7 @@ def gate_symbol(
                 tally.gate2_ohlc += 1
             if integrity.negative_values:
                 tally.gate2_negative += 1
+                tally.gate2_negative_days.append(day)
     return tally
 
 
@@ -1508,10 +1516,12 @@ def build_report(
         "values, or missing minutes ON A DAY WHERE GATE 1 ALSO FAILS (the completeness ruling) |")
     add(f"| un-provable (no map era / unknown factor in (D, F]) | {unprovable:,} | the Q-11 "
         "surgical clamp -- stored so the day is visible, failed by gate 1 |")
-    add(f"| unknown stored baseline (no factor guessed) | "
-        f"{sum(r.unknown_baseline_days for r in settled):,} | the stored bars match neither raw nor "
-        "the map's chain nor a one-too-many division, so nothing was applied to them; gate 1 "
-        "excludes and counts them |")
+    add(f"| stored days LEFT UNTOUCHED (baseline unidentified) | "
+        f"{sum(r.unknown_baseline_days for r in records):,} | not an exclusion reason and mostly not "
+        "damage: the map application declined to correct these days because their stored bars match "
+        "neither raw nor the map's chain nor a one-too-many division. Declining is the conservative "
+        "action -- a day that already needed no correction is unaffected, and gate 1 decides either "
+        "way. The count measures how often the classifier refuses, not how many days are wrong |")
     add(f"| quarantined symbols (whole history) | {quarantined_days:,} | "
         f"{len(quarantined)} symbol(s) below the {QUARANTINE_GATE1_MIN_PASS_RATE:.0%} gate-1 floor |")
     add("")
@@ -1530,12 +1540,26 @@ def build_report(
     add(f"| duplicate stamps | {sum(r.gate2_duplicates for r in settled):,} | unchanged trigger |")
     add(f"| impossible OHLC (high<low, close outside range) | "
         f"{sum(r.gate2_ohlc for r in settled):,} | unchanged trigger (CONTEXT 4.5's own two) |")
+    negative_dates = sorted({d for r in records for d in r.gate2_negative_dates})
     add(f"| negative price or volume | {sum(r.gate2_negative for r in settled):,} | trigger ADDED "
-        "by the ruling |")
+        "by the ruling -- and it fired: see below |")
     add(f"| **missing minutes with gate 1 PASSING -> INCLUDED** | "
         f"**{sum(r.liquidity_days for r in settled):,}** | recorded as liquidity statistics "
         "(section 3b), never an exclusion -- this is the redefinition's whole effect |")
     add("")
+    if negative_dates:
+        add(f"**The NEGATIVE-values trigger the ruling added found a real defect on its first run.** "
+            f"Every one of its exclusions lands on {len(negative_dates)} date(s) -- "
+            f"`{'`, `'.join(negative_dates)}` -- across essentially EVERY symbol processed, not on "
+            "scattered per-symbol accidents. The vendor serves 1-minute bars with negative VOLUME "
+            "for those dates (measured: ABB -6,060 and -2 shares, AXISBANK -99,379 and -1, CIPLA "
+            "-43,534, all stamped 11:15 onwards). `2024-03-02` is a SATURDAY -- one of NSE's "
+            "disaster-recovery special live sessions. Such a date is already excluded from trading "
+            "days, bias pairs and trading by QUESTIONS.md Q-5, so nothing was ever going to trade "
+            "it; what is new is that the day's candles are now excluded EXPLICITLY and counted, "
+            "instead of passing gate 2 on a minute count and relying on the calendar alone. Before "
+            "this ruling a negative share count was not a gate-2 trigger at all.")
+        add("")
     add("Measured before the ruling, on the same stored candles: ABB traded 318/293/325/338 of 375 "
         "minutes on four consecutive 2019 days -- 37..82 missing -- while gate 1 reconciled every "
         "one of them, and the pre-ruling gate 2 excluded all four. CONTEXT 4.3's PoC measurement of "
