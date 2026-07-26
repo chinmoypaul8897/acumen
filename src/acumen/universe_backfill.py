@@ -96,6 +96,16 @@ GATE_DEFINITION: str = "gate2-completeness-2026-07-26"
 #: The route reason a quarantine-recovery reroute stamps on a symbol (Q-12 addendum ruling).
 _RECOVERY_REASON: str = "quarantine-recovery (Q-12 addendum ruling)"
 
+#: Identity of the discipline the map was applied to an already-stored day under. The first FIX-2
+#: pass used a one-way "is this day raw?" test, which is wrong in the dangerous direction: a
+#: genuinely-raw day whose 1-minute fold sits a few tenths of a percent off the bhavcopy high/low
+#: (a pre-open-auction or block-window print the continuous series never held) was called "not raw"
+#: and divided a SECOND time -- measured on 37 ASHOKLEY days. It is now a three-hypothesis baseline
+#: classification (:func:`acumen.minute_backfill.stored_day_baseline`), which both prevents that and
+#: REPAIRS a doubly-divided day by multiplying it back. A row stamped with anything else is
+#: re-processed so the repair reaches it; bump this whenever that discipline changes.
+REBUILD_DISCIPLINE: str = "baseline-classification-2026-07-26"
+
 #: Per-symbol terminal states in this run's ledger.
 STATUS_SETTLED: str = "settled"
 STATUS_QUARANTINED: str = "quarantined"
@@ -346,6 +356,10 @@ class SymbolRecord:
     #: Which gate definition produced the numbers above. A record stamped with anything else is
     #: RE-GATED from the store (no refetch) on the next run -- see :data:`GATE_DEFINITION`.
     gate_definition: str = ""
+    #: Which map-application discipline produced this row (:data:`REBUILD_DISCIPLINE`).
+    rebuild_discipline: str = ""
+    #: Stored days whose bars matched no known baseline -- left untouched, excluded by gate 1.
+    unknown_baseline_days: int = 0
     # --- the before/after snapshot, so a re-gate is auditable rather than merely different -----
     prior_status: str = ""
     prior_gate1_pass: int = -1
@@ -416,6 +430,7 @@ class SymbolRecord:
         self.gate3_checked = tally.gate3_checked
         self.gate3_failed = tally.gate3_failed
         self.gate_definition = GATE_DEFINITION
+        self.rebuild_discipline = REBUILD_DISCIPLINE
 
     def carry_prior_from(self, previous: "SymbolRecord | None") -> None:
         """Seed a fresh record from the ledger row it replaces, so a re-run stays auditable.
@@ -986,9 +1001,11 @@ def process_symbol(
         applied = mb.rebuild_symbol_raw_with_map(
             config.minute_store, cached_store, symbol, adjustment_map, tick_paise=tick_paise,
         )
-        if applied.days_rewritten:
+        record.unknown_baseline_days = len(applied.unknown_baseline_days)
+        if applied.days_rewritten or applied.unknown_baseline_days:
             log(f"    applied the map to {applied.days_rewritten} already-stored day(s) "
-                f"({applied.identity_days} already raw, {len(applied.unprovable_days)} un-provable)")
+                f"({applied.identity_days} already raw, {len(applied.unprovable_days)} un-provable, "
+                f"{len(applied.unknown_baseline_days)} unknown baseline -- left untouched)")
 
     result = mb.backfill_symbol(
         client, master, config.minute_store, symbol, clamp, config.end,
@@ -1111,6 +1128,7 @@ def reroute_quarantined_to_map(
     record.snapshot_prior()
     record.apply_tally(tally)
     record.unprovable_days = len(applied.unprovable_days)
+    record.unknown_baseline_days = len(applied.unknown_baseline_days)
     _settle(record, tally, view.factors)
     record.reroute_note = (
         f"map {record.map_eras_provable}/{record.map_eras} eras provable; "
@@ -1143,6 +1161,11 @@ def needs_reprocessing(record: SymbolRecord, config: RunConfig) -> str | None:
         return None  # nothing stored, nothing to re-gate
     if record.gate_definition != GATE_DEFINITION:
         return f"gate definition {record.gate_definition or '(pre-ruling)'} -> {GATE_DEFINITION}"
+    if record.rebuild_discipline != REBUILD_DISCIPLINE:
+        return (
+            f"map-application discipline {record.rebuild_discipline or '(one-way raw test)'} -> "
+            f"{REBUILD_DISCIPLINE}"
+        )
     if record.route == ROUTE_MAP_REQUIRED:
         try:
             amap = mb.load_adjustment_map_for(record.symbol, data_dir=config.map_data_dir)
@@ -1485,6 +1508,10 @@ def build_report(
         "values, or missing minutes ON A DAY WHERE GATE 1 ALSO FAILS (the completeness ruling) |")
     add(f"| un-provable (no map era / unknown factor in (D, F]) | {unprovable:,} | the Q-11 "
         "surgical clamp -- stored so the day is visible, failed by gate 1 |")
+    add(f"| unknown stored baseline (no factor guessed) | "
+        f"{sum(r.unknown_baseline_days for r in settled):,} | the stored bars match neither raw nor "
+        "the map's chain nor a one-too-many division, so nothing was applied to them; gate 1 "
+        "excludes and counts them |")
     add(f"| quarantined symbols (whole history) | {quarantined_days:,} | "
         f"{len(quarantined)} symbol(s) below the {QUARANTINE_GATE1_MIN_PASS_RATE:.0%} gate-1 floor |")
     add("")

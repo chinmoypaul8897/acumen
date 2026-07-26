@@ -605,6 +605,9 @@ class RebuildResult:
     unadjusted_days: int
     unprovable_days: list[date] = field(default_factory=list)
     tick_flagged_days: list[date] = field(default_factory=list)
+    #: Days whose stored bars match NO known baseline (:data:`BASELINE_UNKNOWN`). Left untouched --
+    #: no factor is guessed -- and excluded + counted by gate 1 (CONTEXT 7-E3).
+    unknown_baseline_days: list[date] = field(default_factory=list)
 
 
 def rebuild_symbol_raw(
@@ -654,16 +657,100 @@ def rebuild_symbol_raw(
 
 #: A stored day counts as "already raw" only if its fold high/low sit within this fraction of the
 #: raw daily (0.1% -- absorbs market microstructure, well below the smallest adjustment factor).
+#: Used only by :func:`_stored_day_is_raw`, the ONE-WAY guard the Q-10 factor-table migration uses.
 _RAW_PRICE_REL_TOL: Decimal = Decimal("0.001")
+
+#: Outer bound on how far a fold/raw ratio may sit from a hypothesis and still be recognised as it
+#: (:func:`stored_day_baseline`). 2% comfortably absorbs the fold-vs-bhavcopy microstructure
+#: difference -- the bhavcopy's high/low can include a pre-open auction or block-window print that
+#: never appears in a continuous 1-minute candle -- while staying far inside the gap between the
+#: hypotheses for every real factor. Measured live: ASHOKLEY has 37 raw days whose fold high sits
+#: 0.1%-0.5% off the bhavcopy high, which a 0.1% test wrongly calls "not raw".
+_BASELINE_MATCH_TOL: Decimal = Decimal("0.02")
+
+BASELINE_RAW: str = "raw"                    # stored == raw; nothing to do
+BASELINE_AS_FETCHED: str = "as-fetched"      # stored == the vendor's bars; divide by the map's k
+BASELINE_OVER_DIVIDED: str = "over-divided"  # stored == raw / k; multiply BACK by k
+BASELINE_UNKNOWN: str = "unknown"            # matches no hypothesis; NEVER touched, gate 1 decides
+
+
+def stored_day_baseline(
+    stored: Sequence[StoredBar], daily_row, k_price: Decimal, k_volume: Decimal
+) -> str:
+    """Where does a stored symbol-day sit relative to raw? PURE-ish (no I/O).
+
+    A rebuild must not ask "is this day raw?" and divide whenever the answer is no -- that turns any
+    day the test misjudges into a day divided twice. It asks instead WHICH of a small set of
+    well-separated, known baselines the day is on, and refuses to touch a day that matches none.
+
+    The observable is the price fold ratio ``fold_high / raw_daily_high`` (and the same for the low),
+    which is exact -- unlike volume, it carries no auction shortfall. Against a map factor
+    ``k_price`` the hypotheses are:
+
+    * ``1``          -> :data:`BASELINE_RAW` -- already un-adjusted; skip it;
+    * ``k_price``    -> :data:`BASELINE_AS_FETCHED` -- still the vendor's bars; divide by ``k_price``;
+    * ``1/k_price``  -> :data:`BASELINE_OVER_DIVIDED` -- divided one time too many; multiply BACK.
+
+    The third is not a curiosity: it makes the rebuild idempotent BY CONSTRUCTION rather than by
+    bookkeeping, and it is as well-determined as the other two (the three ratios are 1, 0.5 and 2 for
+    a 1:1 bonus). It is also right on a vendor that FORWARD-adjusted a day: multiplying by ``k``
+    lands on raw either way.
+
+    The winner is the nearest hypothesis, and it must sit within ``min(2%, |1 - k| / 2)`` of the
+    ratio -- half the distance to its neighbour, capped -- so the hypotheses can never both claim a
+    ratio. Anything else is :data:`BASELINE_UNKNOWN`: the day's provenance is lost, no factor is
+    guessed, and gate 1 excludes and counts it (CONTEXT 7-E3).
+
+    ``k_price == 1`` carries no price information (the two hypotheses coincide), so the volume ratio
+    ``minute_sum / raw_daily_volume`` decides against ``1`` / ``1/k_volume`` / ``k_volume``. With both
+    factors 1 there is nothing to do at all and the day is :data:`BASELINE_RAW` by definition.
+    """
+    if k_price != Decimal(1):
+        raw_high = int(daily_row["high_paise"])
+        raw_low = int(daily_row["low_paise"])
+        if raw_high <= 0 or raw_low <= 0:
+            return BASELINE_UNKNOWN
+        ratios = [
+            Decimal(max(b.high_paise for b in stored)) / Decimal(raw_high),
+            Decimal(min(b.low_paise for b in stored)) / Decimal(raw_low),
+        ]
+        verdicts = {_nearest_baseline(ratio, k_price) for ratio in ratios}
+        return verdicts.pop() if len(verdicts) == 1 else BASELINE_UNKNOWN
+    if k_volume != Decimal(1):
+        daily_volume = int(daily_row["volume"])
+        if daily_volume <= 0:
+            return BASELINE_UNKNOWN
+        minute_volume = sum(int(b.volume) for b in stored)
+        # Volume moves the OTHER way (raw = stored x k_volume), so as-fetched sits at 1/k_volume.
+        return _nearest_baseline(
+            Decimal(minute_volume) / Decimal(daily_volume), Decimal(1) / k_volume
+        )
+    return BASELINE_RAW
+
+
+def _nearest_baseline(ratio: Decimal, k: Decimal) -> str:
+    """Which of ``1`` / ``k`` / ``1/k`` is ``ratio`` on, or :data:`BASELINE_UNKNOWN`. PURE."""
+    if k <= 0:
+        return BASELINE_UNKNOWN
+    tol = min(_BASELINE_MATCH_TOL, abs(Decimal(1) - k) / Decimal(2))
+    candidates = (
+        (abs(ratio - Decimal(1)), BASELINE_RAW),
+        (abs(ratio - k), BASELINE_AS_FETCHED),
+        (abs(ratio - Decimal(1) / k), BASELINE_OVER_DIVIDED),
+    )
+    distance, verdict = min(candidates, key=lambda item: item[0])
+    return verdict if distance <= tol else BASELINE_UNKNOWN
 
 
 def _stored_day_is_raw(stored: Sequence[StoredBar], daily_row) -> bool:
     """Is a stored symbol-day ALREADY raw? Checks BOTH price and volume. PURE-ish (no I/O).
 
-    Volume must reconcile to the raw daily (gate 1), AND the stored fold high/low must match the raw
-    daily high/low within :data:`_RAW_PRICE_REL_TOL` (0.1%). An ADJUSTED day is off by its factor on
-    price (a special dividend leaves volume reconciled but price ~2% low; a bonus is 50% low on
-    both), so it fails and gets un-adjusted; a genuinely raw day passes both and is skipped.
+    The ONE-WAY guard used by the Q-10 factor-table path, where there is no map to name the
+    hypotheses. Volume must reconcile to the raw daily (gate 1), AND the stored fold high/low must
+    match the raw daily high/low within :data:`_RAW_PRICE_REL_TOL` (0.1%). The map-backed rebuild uses
+    :func:`stored_day_baseline` instead: a tight one-way test is safe when the alternative is "leave
+    it alone" and dangerous when the alternative is "divide it", which is what this one used to be
+    asked to decide.
     """
     daily_volume = int(daily_row["volume"])
     minute_volume = sum(int(b.volume) for b in stored)
@@ -727,25 +814,31 @@ def rebuild_symbol_raw_with_map(
     tick_paise: int | None = None,
     applied_factors: SymbolFactors | None = None,
 ) -> RebuildResult:
-    """Un-adjust an already-fetched store to RAW IN PLACE via the Q-11 map, with an IDENTITY GUARD.
+    """Bring an already-fetched store to the map's RAW, IN PLACE, by BASELINE CLASSIFICATION.
+
+    Safe to re-run, and safe on a store in any mixed state, because it never asks "is this day raw?"
+    and divides whenever the answer is no. It asks WHICH known baseline each day sits on
+    (:func:`stored_day_baseline`) and applies the one correction that baseline needs:
+
+    * :data:`BASELINE_RAW` -> nothing (skip; counted in ``identity_days``);
+    * :data:`BASELINE_AS_FETCHED` -> divide by the map's ``k_price``, scale volume by ``k_volume``;
+    * :data:`BASELINE_OVER_DIVIDED` -> multiply BACK by ``k_price`` (a day a previous pass divided
+      one time too many -- this is what makes the rebuild idempotent by construction);
+    * :data:`BASELINE_UNKNOWN` -> LEFT ALONE and counted. Its provenance is lost, no factor is
+      guessed, and gate 1 excludes and counts it (CONTEXT 7-E3).
+
+    The one-way ``is it raw?`` test this used to use was measured to be wrong in the dangerous
+    direction: the bhavcopy's high/low can carry a pre-open-auction or block-window print that no
+    continuous 1-minute candle holds, so 37 genuinely-raw ASHOKLEY days sat 0.1%-0.5% off it, were
+    called "not raw", and were divided a second time.
 
     ``applied_factors`` names the factor-table chain the store was ALREADY un-adjusted by at ingest
     (the quarantine-recovery reroute of a table-path symbol -- QUESTIONS.md Q-12 addendum). Given it,
-    each day is corrected by the NET factor ``k_map / k_table`` in one division
-    (:func:`net_map_factors`); omitted, the stored bars are treated as the vendor's as-fetched bars,
-    which is the case for every map-required symbol (its un-provable days were stored unmodified).
+    an as-fetched-relative day is corrected by the NET factor ``k_map / k_table`` in ONE division
+    (:func:`net_map_factors`), never a second full division on top of the first.
 
-    Unlike :func:`rebuild_symbol_raw` (Q-10 factor-table, NOT idempotent), this is safe to re-run.
-    The identity guard (:func:`_stored_day_is_raw`) skips any day that is ALREADY raw -- checked on
-    BOTH price (the stored fold high/low match the raw daily within a microstructure tolerance) AND
-    volume (gate 1 passes). Both are required because Q-11 un-adjusts price and volume INDEPENDENTLY:
-    a price-only corporate action (a special dividend: k_price<1, k_volume=1) leaves volume already
-    reconciled, so a volume-only guard would skip the day with its PRICE still adjusted -- a wrong
-    price silently reaching the backtest. An adjusted day is off on price and/or volume by its
-    factor, fails the guard, and is un-adjusted through the map. Rebuilding an already-RAW store
-    (e.g. a TCS store migrated under Q-10) is therefore a NO-OP -- the Q-11 regression. A day with no
-    raw daily row cannot be verified either way, so it is left as-is (gate 1 excludes it downstream);
-    a day whose era the map cannot resolve is counted un-provable and left as-is.
+    A day with no raw daily row cannot be classified at all, so it is left as-is (gate 1 excludes it
+    downstream); a day whose era the map cannot resolve is counted un-provable and left as-is.
     """
     sym = symbol.strip().upper()
     result = RebuildResult(symbol=sym, days_rewritten=0, identity_days=0, unadjusted_days=0)
@@ -757,34 +850,24 @@ def rebuild_symbol_raw_with_map(
         if frame.empty:
             result.identity_days += 1  # no raw daily row to verify against -> leave as-is (safe)
             continue
-        if _stored_day_is_raw(stored, frame.iloc[0]):
-            result.identity_days += 1  # already RAW on price AND volume -> identity guard, skip
-            continue
         fd = fetch_date_for_day(store, sym, day) if applied_factors is not None else None
         net = net_map_factors(adjustment_map, day, applied_factors, fd)
         if net is None:
             result.unprovable_days.append(day)  # unprobed / un-provable era -> gate 1 excludes it
-            if applied_factors is None or fd is None:
-                continue
-            # A day the map cannot resolve, on a store that was already divided by the FACTOR TABLE
-            # (the quarantine-recovery reroute). Left as it is, this one day would sit at
-            # ``fetched / k_table`` while every other day sits at ``fetched`` or at raw -- three
-            # different baselines in one store, and a later pass could not know which. Restore it to
-            # AS-FETCHED, which is exactly where a map-required symbol's un-provable day already
-            # sits, so the whole store has ONE invariant: raw where provable, as-fetched where not.
-            # It is still excluded and counted by gate 1 either way (CONTEXT 7-E3).
-            k_table_price = unadj.cumulative_factor(applied_factors.factors, day, fd, symbol=sym)
-            k_table_volume = unadj.cumulative_factor(
-                applied_factors.factors, day, fd, symbol=sym, kinds=ca.SHARE_COUNT_KINDS
-            )
-            if k_table_price <= 0 or k_table_volume <= 0:
-                continue
-            if k_table_price == Decimal(1) and k_table_volume == Decimal(1):
-                continue  # nothing was applied to this day; it already IS as-fetched
-            net_price = Decimal(1) / k_table_price
-            net_volume = Decimal(1) / k_table_volume
-        else:
-            net_price, net_volume = net
+            continue
+        net_price, net_volume = net
+        baseline = stored_day_baseline(stored, frame.iloc[0], net_price, net_volume)
+        if baseline == BASELINE_RAW:
+            result.identity_days += 1
+            continue
+        if baseline == BASELINE_UNKNOWN:
+            result.unknown_baseline_days.append(day)
+            continue
+        if baseline == BASELINE_OVER_DIVIDED:
+            # Divided one time too many by exactly this chain: multiply back. Inverting the net
+            # factors is the exact repair, and the ratios 1 / k / 1/k are far enough apart that the
+            # classification is a measurement, not a fit.
+            net_price, net_volume = Decimal(1) / net_price, Decimal(1) / net_volume
         if net_price == Decimal(1) and net_volume == Decimal(1):
             # The map agrees with whatever was already applied -- the exact identity. Nothing to do,
             # and nothing rewritten (which is also what makes the reroute cheap and re-runnable).

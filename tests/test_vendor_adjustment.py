@@ -514,16 +514,13 @@ def test_net_map_factors_divides_out_what_the_factor_table_already_applied() -> 
     assert abs(recovered - raw_price) <= 2
 
 
-def test_a_day_the_map_cannot_resolve_is_restored_to_as_fetched_so_the_store_has_one_invariant(
-    tmp_path,
-) -> None:
-    """The reroute's un-provable branch.
+def test_a_day_the_map_cannot_resolve_is_left_exactly_as_it_was_and_counted(tmp_path) -> None:
+    """The reroute's un-provable branch: the map has no answer, so NOTHING is applied.
 
-    A day the map cannot resolve, sitting on a store that was already divided by the factor table,
-    would otherwise be the only day in the store at a THIRD baseline (``fetched / k_table``) -- and a
-    later pass could not tell which baseline it was on. It is restored to AS-FETCHED, which is exactly
-    where a map-required symbol's un-provable day already sits, so the whole store carries ONE
-    invariant: raw where provable, as-fetched where not. Gate 1 excludes it either way.
+    The day keeps whatever the factor table left on it, is counted in ``unprovable_days``, and gate 1
+    excludes it (CONTEXT 7-E3). Leaving it alone is what makes a later pass safe too: the map returns
+    no factors for this day, so no later pass can classify or correct it either -- there is no state
+    in which it gets divided by a chain that was never proven for it.
     """
     ex = date(2018, 5, 31)
     F = date(2026, 7, 25)
@@ -560,9 +557,65 @@ def test_a_day_the_map_cannot_resolve_is_restored_to_as_fetched_so_the_store_has
         store, daily, "VAR", amap, tick_paise=5, applied_factors=applied
     )
     assert res.unprovable_days == [day]
+    assert res.days_rewritten == 0
     back = store.minutes("VAR", day)[0]
-    assert abs(back.open_paise - fetched_price) <= 2, "restored to AS-FETCHED, one known baseline"
-    assert abs(back.volume - int(Decimal(raw_vol) / Decimal("0.9"))) <= 2
+    assert back.open_paise == stored_price, "untouched -- no factor was proven for this day"
+    assert back.volume == stored_vol
+    assert fetched_price  # the fetched value is not what we claim to have recovered
+
+
+def test_the_three_baselines_are_separable_and_a_fourth_is_refused() -> None:
+    """:func:`stored_day_baseline`'s hypotheses, on the ASHOKLEY-shaped numbers that forced it.
+
+    For a 1:1 bonus the ratios are 1 (raw), 0.5 (as-fetched) and 2.0 (divided one time too many) --
+    an order of magnitude apart, so a 2% tolerance both absorbs the fold-vs-bhavcopy microstructure
+    difference AND cannot confuse two hypotheses. A ratio near none of them is refused.
+    """
+    day = date(2016, 10, 3)
+    raw_high, raw_low, raw_vol = 145000, 143000, 120958
+    half, one, two = Decimal("0.5"), Decimal(1), Decimal(2)
+
+    def bars(scale: Decimal, vol_scale: Decimal):
+        return [OneMinuteBar(
+            datetime.combine(day, time(9, 15)),
+            int(Decimal(raw_low) * scale), int(Decimal(raw_high) * scale),
+            int(Decimal(raw_low) * scale), int(Decimal(raw_high) * scale),
+            int(Decimal(raw_vol) * vol_scale),
+        )]
+
+    row = {"trade_date": day, "high_paise": raw_high, "low_paise": raw_low,
+           "close_paise": raw_high, "volume": raw_vol}
+    assert mb.stored_day_baseline(bars(one, one), row, half, half) == mb.BASELINE_RAW
+    assert mb.stored_day_baseline(bars(half, two), row, half, half) == mb.BASELINE_AS_FETCHED
+    assert mb.stored_day_baseline(bars(two, half), row, half, half) == mb.BASELINE_OVER_DIVIDED
+    assert mb.stored_day_baseline(bars(Decimal("0.75"), one), row, half, half) == mb.BASELINE_UNKNOWN
+
+    # the measured ASHOKLEY case: a genuinely RAW day whose fold high sits 0.4% off the bhavcopy high
+    # (a print the continuous 1-minute series never held). The old 0.1% one-way test called this "not
+    # raw" and divided it a second time; it must read as RAW.
+    off = [OneMinuteBar(datetime.combine(day, time(9, 15)),
+                        raw_low, int(raw_high * Decimal("0.996")), raw_low,
+                        int(raw_high * Decimal("0.996")), raw_vol)]
+    assert mb.stored_day_baseline(off, row, half, half) == mb.BASELINE_RAW
+    assert not mb._stored_day_is_raw(  # the old one-way test, kept for the Q-10 factor-table path
+        [mb.StoredBar("X", b.stamp, b.open_paise, b.high_paise, b.low_paise, b.close_paise, b.volume)
+         for b in off],
+        row,
+    ), "the tight one-way test really does reject it -- which is why it is not used to decide a divide"
+
+
+def test_a_price_neutral_map_falls_back_to_the_volume_axis() -> None:
+    """``k_price == 1`` carries no price information (both hypotheses coincide), so volume decides.
+    With BOTH factors 1 there is nothing to correct and the day is raw by definition."""
+    day = date(2020, 3, 24)
+    row = {"trade_date": day, "high_paise": 100000, "low_paise": 99000,
+           "close_paise": 99500, "volume": 1000}
+    stamp = datetime.combine(day, time(9, 15))
+    raw = [OneMinuteBar(stamp, 99000, 100000, 99000, 99500, 1000)]
+    fetched = [OneMinuteBar(stamp, 99000, 100000, 99000, 99500, 2000)]  # volume 1/0.5
+    assert mb.stored_day_baseline(raw, row, Decimal(1), Decimal("0.5")) == mb.BASELINE_RAW
+    assert mb.stored_day_baseline(fetched, row, Decimal(1), Decimal("0.5")) == mb.BASELINE_AS_FETCHED
+    assert mb.stored_day_baseline(fetched, row, Decimal(1), Decimal(1)) == mb.BASELINE_RAW
 
 
 # --- regressions for the FIX-4 adversarial-review findings -----------------------------
