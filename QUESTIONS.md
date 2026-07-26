@@ -1344,3 +1344,65 @@ no-trade minute, not missing data, so it is no longer an exclusion. The finding'
 what the ruling was made on. Executed the same session; the before/after counts are in
 `docs/backfill_minute_report.md`.
 
+
+---
+
+## Q-13 · chunk 6 · class A · **OPEN** · NON-BLOCKING (interim below is calibrated, not guessed)
+
+**Question.** CONTEXT 3.3 fixes the ticks-per-row rounding as *"`tpr = totalTicks/N` rounded to a
+whole number (minimum 1), **direction chosen so the realized row count is closest to requested
+N**"*. When the two directions are EQUALLY close, the spec does not say which wins. Which one does
+TradingView take?
+
+**Why it is a hole, and why it is not cosmetic.** The two directions build different grids, so the
+POC lands on a different price. Measured this session over the stored 1-minute history (spec
+window, N=24, real per-symbol ticks):
+
+| symbol | stored days | days sitting exactly on the tie | POC differs | median difference | worst | difference exceeds one row height |
+|---|---|---|---|---|---|---|
+| TCS | 2,430 | 487 (20.0%) | 487 of 487 | Rs 0.45 | Rs 20.35 | 43 |
+| BHARTIARTL | 2,429 | 262 (10.8%) | 262 of 262 | Rs 0.35 | Rs 18.55 | 23 |
+| DIXON | 2,192 | 321 (14.6%) | 321 of 321 | Rs 3.50 | Rs 187.50 | 33 |
+| ABB | 2,429 | 259 (10.7%) | 259 of 259 | Rs 1.25 | Rs 57.75 | 19 |
+
+So on roughly **one stock-day in six to ten** the POC price -- the level every entry, stop and
+target of that day hangs on (CONTEXT 3.4) -- is decided by a rule CONTEXT.md does not state.
+
+**Why the calibration does not settle it.** SIX of the 25 frozen `poc/data` symbol-days sit on the
+tie (TCS 07-20, HDFCBANK 07-20, DIXON 07-15, DIXON 07-14, MANAPPURAM 07-17, MANAPPURAM 07-14) --
+but **none of the five days the trader gave a TradingView reading for** (the F7 anchors) is one of
+them. The 5/5 calibration match therefore does not exercise the tie in either direction.
+
+**INTERIM (executed, and it is a measured choice, not a preference).** The tie keeps the **smaller
+`tpr`** -- the FINER profile, i.e. MORE rows. Three reasons, in order of weight:
+
+1. It reproduces the frozen calibration printout on **all 25 days to 4e-13**, including all six tie
+   days. The other direction moves six of the 25 frozen `poc_prorata` values, i.e. it would
+   contradict the artifact CONTEXT 8 F7 calls authoritative.
+2. It is the same direction the PoC implementation took (`poc/poc3_volume_poc_test.py`, the script
+   whose output the trader's 5/5 match was measured against), so nothing about the calibration's
+   provenance changes.
+3. Where TradingView's own published example is NOT a tie it also lands on the finer side (100
+   ticks, N=30 -> 34 rows over 25 rows), so "more rows" is at least consistent with the one datum
+   TV documents. This is corroboration, not proof -- TV documents no tie case.
+
+Pinned by `tests/test_poc.py::test_the_tpr_tie_keeps_the_finer_profile_the_direction_the_frozen_printout_was_built_with`
+and by the all-25 reproduction test, so the interim cannot be flipped silently.
+
+**Blocks.** Nothing today. It is a candidate for the chunk-6 TRADER GATE: if the trader's Q32 chart
+days (or any future reading) land on a tie day, they settle it empirically. If the architect wants
+certainty sooner, the cheapest oracle is one screenshot of any tie-day chart with the row count
+visible -- the realized ROW COUNT alone (25 vs 26 rows for 130 ticks at N=24) answers it without a
+POC reading at all.
+
+### chunk 6 FINDING (not a spec hole) -- a window with bars but ZERO volume
+
+CONTEXT 3.3's tie rule is unconditional, so a profile whose rows are ALL zero (a 09:15-11:14 window
+holding candles but no traded volume on a day that still passes gate 1) resolves literally to the
+topmost row's midpoint -- a POC carrying no information. Nothing was invented: the literal spec
+answer is what the engine returns, and `DayProfile.zero_volume_profile` FLAGS the day so chunk 9
+can count it instead of trusting it silently. **Measured frequency: 0 of 9,480 stored symbol-days**
+across TCS, BHARTIARTL, DIXON and ABB -- the vendor omits tradeless minutes entirely, so a window
+with no volume is a window with no candles, which is the separate `no-poc-no-candles-in-window`
+answer (11 days per symbol, mostly non-standard sessions). Recorded so the architect can rule the
+degenerate case out of trading if he wants; on today's evidence it never happens.

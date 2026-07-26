@@ -36,6 +36,7 @@ acumen-backfill = "acumen.backfill_daily:main"
 acumen-build-adjustment-map = "acumen.build_adjustment_map:main"
 acumen-ca-report = "acumen.ca_report:main"
 acumen-minute-backfill = "acumen.minute_backfill:main"
+acumen-poc-evidence = "acumen.poc_evidence:main"
 acumen-universe-backfill = "acumen.universe_backfill:main"
 
 [tool.setuptools.packages.find]
