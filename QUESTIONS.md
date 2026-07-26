@@ -1406,3 +1406,56 @@ across TCS, BHARTIARTL, DIXON and ABB -- the vendor omits tradeless minutes enti
 with no volume is a window with no candles, which is the separate `no-poc-no-candles-in-window`
 answer (11 days per symbol, mostly non-standard sessions). Recorded so the architect can rule the
 degenerate case out of trading if he wants; on today's evidence it never happens.
+
+### Q-13 REVIEWER ADDENDUM (chunk-6 REVIEW, 2026-07-26) -- three measured additions, nothing decided
+
+Recorded by the chunk-6 review session (docs/reviews/REVIEW_6.md). Nothing here changes the
+interim, the code or any ruling; all three items are measurements the architect should have when
+Q-13 goes back to the trader.
+
+**(1) Q-13's interim and its statistics are independently confirmed.** The reviewer recomputed all
+25 frozen `poc_prorata` values from the `poc/data` CSVs with a from-scratch implementation of
+CONTEXT 3.3 that imports nothing from `src/acumen`: 25/25 reproduce, worst error **4.0e-13**, and
+the six tie days are exactly the six named above. Flipping the tie to the coarser side moves
+exactly those six and no others. BHARTIARTL's row in the table above reproduces from the store to
+the digit (262 tie days, POC differs 262/262, median Rs 0.35, worst Rs 18.55, 23 beyond one row
+height); the 2,429-vs-2,418 denominator difference is exactly the empty-window days (decision B118).
+
+**(2) The chunk-6 gate's discriminating day sits on the tie under BOTH windows.**
+`docs/gate_chunk6_poc_evidence.md` asks the trader to check **BHARTIARTL 2026-07-17**. Recomputed
+from the minute store under both silences at once:
+
+| window | tie -> finer (the interim) | tie -> coarser | rows drawn |
+|---|---|---|---|
+| 8-candle (spec) | **1914.60** | 1914.65 | 26 vs 22 |
+| 9-candle (alternative) | **1914.50** | 1914.55 | 26 vs 22 |
+
+The **Q42 window conclusion is safe either way** -- the 8-vs-9 gap is Rs 0.10 in both directions
+and the ordering is preserved. But the absolute price he is asked to match depends on Q-13, so a
+reading of 1914.65 would confirm the 8-candle window while REFUTING this interim. The good news is
+the reverse: **one reading off that one chart settles Q42 and Q-13 together**, and the row count is
+visible on the same screenshot (26 rows under the interim, 22 under the coarser direction). The
+pack's closing paragraph asks for "any chart with the rows countable" without noting that the two
+charts already in the pack are exactly such days. The pack is the architect's document; the review
+recommends one added sentence rather than editing it.
+
+**(3) A SECOND, smaller silence in the same CONTEXT 3.3 sentence: the rounding MODE of
+`totalTicks`.** CONTEXT 3.3 says `totalTicks = round((top - bottom)/tick)` without naming a
+rounding mode. On the tick grid the division is exact, so the mode is invisible -- but the
+instrument master carries TODAY's tick, and NSE widened ticks, so historical days traded on a finer
+grid: measured, `(top - bottom)` is not a whole number of ticks on **42.1%** of BHARTIARTL's stored
+days, **68.4%** of ABB's, **43.6%** of AUBANK's and **42.8%** of ADANIENT's (BEL, whose tick did not
+widen: 0.7%), and the dominant residual is **exactly half a tick**, which is precisely where the
+mode decides. Measured consequence on BHARTIARTL at N=24: half-even (the implemented choice,
+decision B114) and half-up give a different `totalTicks` on **449 of 2,418 days (18.6%)** and a
+different **POC on 10 of them** (median Rs 0.40, worst Rs 9.85). Two orders of magnitude smaller
+than the tie above, but not zero. **Not raised as a separate question** -- it is the same sentence,
+the same oracle (a row count off any chart) and the same trader round-trip -- and the implemented
+choice is defensible (Python's own `round`; the rounding this repo already uses for money). It is
+now pinned by `tests/test_review6_probes.py::test_total_ticks_rounds_half_even_and_not_by_truncation`
+so it cannot flip silently either. **The architect may want to fold it into Q-13's answer.**
+
+**(4) Recording request.** Q-13 carries no `ARCHITECT'S RULING ... verbatim` block, unlike
+Q-10/Q-11/Q-12 and the completeness amendment. The chunk-6 review was told an architect interim
+confirmation exists; it is not in this file. It should be recorded here in the same verbatim form,
+so a later session reads it from the repo instead of from a conversation.
