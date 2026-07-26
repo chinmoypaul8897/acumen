@@ -206,3 +206,36 @@ def test_map_required_with_a_map_is_allowed() -> None:
 def test_table_path_never_needs_a_map() -> None:
     decision = classify_route(SYM, factors=(_factor(KIND_BONUS, date(2018, 5, 31), "0.5"),))
     assert map_covers_route(decision, adjustment_map_present=False) == (True, "")
+
+
+def test_an_event_whose_ex_date_is_still_in_the_FUTURE_does_not_force_the_map() -> None:
+    """Measured on the live universe (2026-07-26): ULTRACEMCO's special dividend ex 2026-07-30
+    and POWERINDIA/GVT&D's dividends ex 2026-08-21 are ANNOUNCED but not yet ex. The
+    un-adjustment window is (D, F], so an ex-date after F is in NO stored day's window -- the
+    vendor cannot have back-adjusted for something that has not happened yet."""
+    fetch_date = date(2026, 7, 26)
+    announced = (_factor(KIND_DIVIDEND, date(2026, 7, 30), "0.98"),)
+    assert classify_route(SYM, factors=announced).route == ROUTE_MAP_REQUIRED
+    assert classify_route(SYM, factors=announced, until=fetch_date).route == ROUTE_TABLE_PATH
+
+
+def test_the_two_bounds_compose() -> None:
+    clamp, fetch_date = date(2016, 10, 1), date(2026, 7, 26)
+    inside = _factor(KIND_RIGHTS, date(2020, 5, 13), "0.99")
+    too_old = _factor(KIND_RIGHTS, date(2011, 4, 1), "0.9")
+    too_new = _factor(KIND_DIVIDEND, date(2026, 8, 21), "0.98")
+    assert classify_route(SYM, factors=(too_old, too_new), since=clamp,
+                          until=fetch_date).route == ROUTE_TABLE_PATH
+    decision = classify_route(SYM, factors=(too_old, inside, too_new), since=clamp,
+                              until=fetch_date)
+    assert decision.route == ROUTE_MAP_REQUIRED
+    assert len(decision.reasons) == 1 and "2020-05-13" in decision.reasons[0]
+
+
+def test_a_pending_or_unparsed_event_in_the_future_is_also_out_of_scope() -> None:
+    fetch_date = date(2026, 7, 26)
+    pending = (PendingFactor(event=_event(KIND_DIVIDEND, date(2026, 8, 21)), needs="cum close"),)
+    unparsed = (ParseException(action=_action(date(2026, 9, 1), "Something Odd"), reason="?"),)
+    assert classify_route(SYM, pending=pending, parse_exceptions=unparsed,
+                          until=fetch_date).route == ROUTE_TABLE_PATH
+    assert classify_route(SYM, pending=pending, parse_exceptions=unparsed).route == ROUTE_MAP_REQUIRED

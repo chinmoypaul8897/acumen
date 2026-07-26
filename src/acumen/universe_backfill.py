@@ -583,6 +583,7 @@ def plan_symbol(
         pending=view.pending,
         parse_exceptions=view.parse_exceptions,
         since=clamp,
+        until=config.end,   # F: the un-adjustment window is (D, F]; a future ex-date is in none
     )
     record.route = decision.route
     record.route_reasons = list(decision.reasons)

@@ -980,7 +980,7 @@ def run(args: argparse.Namespace) -> int:
         _print_symbol_factors(sf)
         amap = load_adjustment_map_for(symbol, explicit_path=args.adjustment_map,
                                        data_dir=map_data_dir)
-        decision = _print_route(view, clamp_start(start), amap)
+        decision = _print_route(view, clamp_start(start), amap, until=end)
         if args.acceptance:
             _print_acceptance(daily_store, minute_store, symbol, sf)
         if args.rebuild:
@@ -1020,7 +1020,7 @@ def run(args: argparse.Namespace) -> int:
     # event, so a wrong price would pass gate-1 volume unseen (REVIEW_5A F1/F2).
     adjustment_map = load_adjustment_map_for(symbol, explicit_path=args.adjustment_map,
                                              data_dir=map_data_dir)
-    decision = _print_route(view, clamp_start(start), adjustment_map)
+    decision = _print_route(view, clamp_start(start), adjustment_map, until=end)
     allowed, why_not = map_covers_route(decision, adjustment_map is not None)
     if not allowed:
         print(f"\nSTOPPING (routing rule): {why_not}")
@@ -1103,7 +1103,8 @@ def _print_symbol_factors(sf: SymbolFactors) -> None:
         print(f"  Q-6-pending rights ex-dates: {list(sf.pending_ex_dates)}")
 
 
-def _print_route(view: SymbolCorpActions, since: date, amap: "va.AdjustmentMap | None"):
+def _print_route(view: SymbolCorpActions, since: date, amap: "va.AdjustmentMap | None",
+                 until: date | None = None):
     """Print (and return) the symbol's Q-11-addendum routing decision."""
     decision = classify_route(
         view.symbol,
@@ -1112,6 +1113,7 @@ def _print_route(view: SymbolCorpActions, since: date, amap: "va.AdjustmentMap |
         pending=view.pending,
         parse_exceptions=view.parse_exceptions,
         since=since,
+        until=until,
     )
     print(f"\nROUTE (Q-11 addendum) for {view.symbol} " + "-" * 36)
     print(f"  route          : {decision.route}")

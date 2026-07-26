@@ -92,6 +92,7 @@ def classify_route(
     pending: Sequence[PendingFactor] = (),
     parse_exceptions: Iterable[ParseException] = (),
     since: date | None = None,
+    until: date | None = None,
 ) -> RouteDecision:
     """Route one symbol per the Q-11 addendum routing rule. PURE.
 
@@ -105,8 +106,14 @@ def classify_route(
         parse_exceptions: subjects no CONTEXT 4.2 row explains, on THIS symbol. Same reasoning.
         since: ignore events with an ex-date strictly before this. Pass the symbol's minute
             clamp: an event older than every minute bar the ingest will store can never appear
-            in any ``(D, F]`` window, so it cannot affect one stored price. ``None`` considers
-            the whole history.
+            in any ``(D, F]`` window, so it cannot affect one stored price.
+        until: ignore events with an ex-date strictly after this. Pass the FETCH DATE ``F``: the
+            un-adjustment window is ``(D, F]``, so an ANNOUNCED-but-not-yet-ex event is in no
+            day's window either -- the vendor cannot have back-adjusted for something that has
+            not happened. Measured on the live universe (2026-07-26): ULTRACEMCO's special
+            dividend ex 2026-07-30 and POWERINDIA/GVT&D's dividends ex 2026-08-21 are all in
+            the FUTURE, and without this bound they force those three symbols onto the map path
+            for an event that touches no stored price. Same reasoning as ``since``, other end.
 
     Returns:
         A :class:`RouteDecision` whose ``reasons`` name every event that forced the map, so the
@@ -116,7 +123,9 @@ def classify_route(
     reasons: list[str] = []
 
     def in_scope(ex_date: date) -> bool:
-        return since is None or ex_date >= since
+        if since is not None and ex_date < since:
+            return False
+        return until is None or ex_date <= until
 
     for factor in factors:
         if factor.symbol != sym or not in_scope(factor.ex_date):
