@@ -136,6 +136,26 @@ SERIES_INSTRUMENT: str = "instrument"
 SERIES_KNOWN_OTHER: str = "known-non-instrument"
 SERIES_UNKNOWN: str = "unknown"
 
+#: :meth:`DailyStore.verify` anomaly kinds (REVIEW_2 F7). Spelled once so a caller can branch
+#: on them instead of matching prose.
+VERIFY_LEDGER_WITHOUT_ROWS: str = "ledger-present-but-no-rows"
+VERIFY_ROW_COUNT_BELOW_FLOOR: str = "row-count-below-floor"
+VERIFY_ROWS_WITHOUT_LEDGER: str = "rows-without-a-file-present-ledger-row"
+VERIFY_UNREADABLE_MONTH: str = "unreadable-month-file"
+#: NOT an anomaly: a weekend-dated bhavcopy holding few rows. QUESTIONS.md Q-5 (ruled, executed
+#: chunk 3) already EXCLUDES every weekend-dated session from trading days, bias pairs and
+#: trading, so such a date is by that ruling not a full-market day and the row-count floor --
+#: which exists to catch a partial or truncated WRITE -- does not describe it. Reported as a
+#: NOTE so it is never hidden, and counted separately from the blocking anomalies.
+VERIFY_NON_STANDARD_SESSION_ROWS: str = "weekend-session-row-count (Q-5: not a trading day)"
+
+#: A full-market NSE day publishes thousands of rows (every symbol x every series). A date
+#: whose month file holds this few is a partial or damaged write, not a market. The floor is
+#: applied only from :data:`ROW_COUNT_FLOOR_FROM` because the early-2000s archive bhavcopies
+#: are genuinely smaller and their exact size is not a fact this project holds.
+MIN_ROWS_PER_DATE: int = 500
+ROW_COUNT_FLOOR_FROM: date = date(2011, 1, 1)
+
 _PRICE_COLUMNS: tuple[str, ...] = (
     "open_paise",
     "high_paise",
@@ -148,6 +168,47 @@ _PRICE_COLUMNS: tuple[str, ...] = (
 
 class DailyStoreError(RuntimeError):
     """The daily store cannot answer, or cannot safely be written."""
+
+
+@dataclass(frozen=True)
+class StoreAnomaly:
+    """One disagreement between the outcome ledger and the rows on disk (REVIEW_2 F7)."""
+
+    kind: str
+    trade_date: date | None
+    detail: str
+
+    def __str__(self) -> str:  # operator-facing one-liner
+        when = "-" if self.trade_date is None else self.trade_date.isoformat()
+        return f"{when}  {self.kind}: {self.detail}"
+
+
+@dataclass(frozen=True)
+class VerifyResult:
+    """The outcome of :meth:`DailyStore.verify` over a date range."""
+
+    from_date: date
+    to_date: date
+    months_read: int
+    ledger_present_dates: int
+    dates_with_rows: int
+    rows_total: int
+    anomalies: tuple[StoreAnomaly, ...]
+    #: Observations that are NOT store defects and therefore do not block a run, but are
+    #: reported every time so they can never be quietly lost (currently: weekend-dated
+    #: sessions under the row-count floor -- see :data:`VERIFY_NON_STANDARD_SESSION_ROWS`).
+    notes: tuple[StoreAnomaly, ...] = ()
+
+    @property
+    def ok(self) -> bool:
+        """True when no ANOMALY was found. Notes do not make a store unusable."""
+        return not self.anomalies
+
+    def by_kind(self) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for item in self.anomalies + self.notes:
+            counts[item.kind] = counts.get(item.kind, 0) + 1
+        return counts
 
 
 @dataclass(frozen=True)
@@ -563,6 +624,172 @@ class DailyStore:
             day for day, outcome in self.outcomes().items() if outcome.is_terminal
         }
         return tuple(day for day in date_range(from_date, to_date) if day not in settled)
+
+    # --- consistency check (REVIEW_2 F7) -------------------------------------------
+
+    def verify(
+        self,
+        from_date: date | None = None,
+        to_date: date | None = None,
+        *,
+        min_rows: int = MIN_ROWS_PER_DATE,
+        row_floor_from: date = ROW_COUNT_FLOOR_FROM,
+    ) -> VerifyResult:
+        """Cross-check the outcome ledger against the rows the month files actually hold.
+
+        REVIEW_2 Finding 7: ``file-present`` in ``ledger.parquet`` and the presence of that
+        date's rows in its month file are maintained independently. The write order makes the
+        pair safe under a crash, but nothing on the READ side ever checks the agreement -- so a
+        month file lost to a disk error, a bad sync or a manual ``rm`` leaves a store that
+        reports a trading day with no candles, and :meth:`acumen.calendar.TradingCalendar.
+        from_daily_store` would still build happily from the ledger alone. The finding asks for
+        exactly this check, "run once before chunk 9's full backtest"; chunk 5B runs it before
+        the universe minute backfill, because the daily store is the ORACLE that both the
+        vendor-adjustment maps (QUESTIONS.md Q-11) and gate 1 (CONTEXT 4.5) are measured
+        against -- an oracle is verified before it is trusted, not after.
+
+        Three anomaly classes, all reported, none fatal to the check itself:
+
+        * :data:`VERIFY_LEDGER_WITHOUT_ROWS` -- the ledger claims ``file-present`` and the
+          month file holds no row for that date. This is the finding's own failure mode.
+        * :data:`VERIFY_ROW_COUNT_BELOW_FLOOR` -- the date HAS rows, but too few for a
+          full-market NSE session (``<= min_rows``, applied from ``row_floor_from``). A
+          partial or truncated write looks exactly like this.
+        * :data:`VERIFY_ROWS_WITHOUT_LEDGER` -- rows exist for a date the ledger does not mark
+          ``file-present``. Harmless to a reader (queries go through the rows) but it means the
+          ledger, which IS the derived trading calendar (Q-3), is missing a trading day.
+        * :data:`VERIFY_UNREADABLE_MONTH` -- a month file that will not open (the power-loss
+          signature; REVIEW_2 F6).
+
+        One observation is reported as a NOTE rather than an anomaly, because an existing
+        ruling already covers it: a WEEKEND-dated file-present date under the row-count floor
+        (:data:`VERIFY_NON_STANDARD_SESSION_ROWS`). QUESTIONS.md Q-5 excludes weekend-dated
+        sessions from trading days entirely, so such a date is by that ruling not a full-market
+        day and the floor -- which exists to catch a partial WRITE -- does not describe it. It
+        is still reported on every run. A LOW row count on a WEEKDAY stays an anomaly: nothing
+        in the spec distinguishes a weekday special session from a truncated write, so the
+        conservative reading holds.
+
+        Args:
+            from_date: inclusive start; defaults to the ledger's earliest attempted date.
+            to_date: inclusive end; defaults to the ledger's latest attempted date.
+            min_rows: a date at or below this row count is flagged (see :data:`MIN_ROWS_PER_DATE`).
+            row_floor_from: the row-count floor applies only from this date onward.
+
+        Raises:
+            DailyStoreError: no range was given and the ledger is empty (nothing to verify
+                against -- the caller must say which range it means).
+        """
+        ledger = self.outcomes()
+        if from_date is None or to_date is None:
+            if not ledger:
+                raise DailyStoreError(
+                    "verify() was called with no date range on a store whose ledger is empty. "
+                    "Pass from_date/to_date explicitly -- there is nothing to derive a range "
+                    "from, and guessing one would verify nothing while reporting success."
+                )
+            from_date = from_date if from_date is not None else min(ledger)
+            to_date = to_date if to_date is not None else max(ledger)
+        if to_date < from_date:
+            raise DailyStoreError(
+                f"Empty range: {to_date.isoformat()} is before {from_date.isoformat()}."
+            )
+
+        anomalies: list[StoreAnomaly] = []
+        notes: list[StoreAnomaly] = []
+        rows_by_date: dict[date, int] = {}
+        months_read = 0
+        for path in self._month_paths(from_date, to_date):
+            try:
+                table = pq.read_table(path, columns=["trade_date"])
+            except Exception as exc:  # a corrupt/truncated month: report, keep going
+                anomalies.append(
+                    StoreAnomaly(
+                        kind=VERIFY_UNREADABLE_MONTH,
+                        trade_date=None,
+                        detail=(
+                            f"{path.relative_to(self.root)} will not open "
+                            f"({type(exc).__name__}: {exc}); quarantine it (move aside, never "
+                            f"delete) and rebuild with {REBUILD_LEDGER_COMMAND}"
+                        ),
+                    )
+                )
+                continue
+            months_read += 1
+            for day in table.column("trade_date").to_pylist():
+                if from_date <= day <= to_date:
+                    rows_by_date[day] = rows_by_date.get(day, 0) + 1
+
+        present_dates = {
+            day
+            for day, outcome in ledger.items()
+            if from_date <= day <= to_date and outcome.outcome == OUTCOME_PRESENT
+        }
+        for day in sorted(present_dates):
+            count = rows_by_date.get(day, 0)
+            if count == 0:
+                anomalies.append(
+                    StoreAnomaly(
+                        kind=VERIFY_LEDGER_WITHOUT_ROWS,
+                        trade_date=day,
+                        detail=(
+                            f"ledger says {OUTCOME_PRESENT} but {self.month_path(day).name} "
+                            "holds no row for this date"
+                        ),
+                    )
+                )
+            elif day >= row_floor_from and count <= min_rows:
+                if day.weekday() in _WEEKEND_DAYS:
+                    # Q-5, already ruled and executed (chunk 3): a weekend-dated session is not a
+                    # trading day at all, so the full-market floor does not describe it. NOTED,
+                    # never hidden -- and never silently converted into a store defect either.
+                    notes.append(
+                        StoreAnomaly(
+                            kind=VERIFY_NON_STANDARD_SESSION_ROWS,
+                            trade_date=day,
+                            detail=(
+                                f"{count} rows on a {day.strftime('%A')}; QUESTIONS.md Q-5 "
+                                "excludes weekend-dated sessions from trading days, bias pairs "
+                                "and trading, so this is a real special session, not a partial "
+                                "write (the ledger's own row_count agrees with the rows on disk)"
+                            ),
+                        )
+                    )
+                else:
+                    anomalies.append(
+                        StoreAnomaly(
+                            kind=VERIFY_ROW_COUNT_BELOW_FLOOR,
+                            trade_date=day,
+                            detail=(
+                                f"{count} rows (expected > {min_rows} for a full-market day on or "
+                                f"after {row_floor_from.isoformat()}); a partial or truncated write"
+                            ),
+                        )
+                    )
+        for day in sorted(set(rows_by_date) - present_dates):
+            recorded = ledger.get(day)
+            said = "absent from the ledger" if recorded is None else f"ledger says {recorded.outcome}"
+            anomalies.append(
+                StoreAnomaly(
+                    kind=VERIFY_ROWS_WITHOUT_LEDGER,
+                    trade_date=day,
+                    detail=(
+                        f"{rows_by_date[day]} rows on disk but {said}; the ledger IS the derived "
+                        "trading calendar (Q-3), so this date is missing from it"
+                    ),
+                )
+            )
+
+        return VerifyResult(
+            from_date=from_date,
+            to_date=to_date,
+            months_read=months_read,
+            ledger_present_dates=len(present_dates),
+            dates_with_rows=len(rows_by_date),
+            rows_total=sum(rows_by_date.values()),
+            anomalies=tuple(anomalies),
+            notes=tuple(notes),
+        )
 
 
 # --- the Q-4 series rule (PURE) ----------------------------------------------------------

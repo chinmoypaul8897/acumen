@@ -1037,3 +1037,60 @@ policy for the vendor's demerger scope) is SUPERSEDED by per-event measurement.
   **TCS regression:** map resolves to exactly {2018 bonus, ours, 0.5}; the already-raw store's rebuild
   is a no-op (gate-1-already-passes identity guard) and its gate-1-by-year table is unchanged
   (2016-18 ~97-100%). CONTEXT ownership and any §7-E11/§9 note stay with the architect.
+
+### Q-11 ADDENDUM (chunk 5B PREP, 2026-07-26) -- ROUTING: which symbols must go through the map
+
+REVIEW_5A left two LOW findings for chunk 5B, both about CONSUMING the FIX-4 map rather than
+building it: **F1** (the map is built, proven and consumable, but no `src/` caller passes a
+persisted map -- the operator CLI always took the Q-10 factor-table path) and **F2** (that
+fallback has no PRICE oracle, so for a non-share-count event it scales price but not volume and
+a ~2%-wrong price passes gate-1 volume unnoticed). F1 is a wiring job; F2 needs a RULE for which
+symbols may use the cheap path at all. The architect ruled it.
+
+**ARCHITECT'S RULING (routing), verbatim:**
+
+> "ARCHITECT'S RULING (routing): a symbol whose CA history contains ANY
+> non-share-count event (rights, special dividend, demerger) is MAP-REQUIRED -- its
+> eras must be probed and its ingest must run through the adjustment map's per-day
+> price containment. Bonus/split-only symbols may use the factor-table path (their
+> map would be identical: ours/ours). The classifier runs off the chunk-3 CA table;
+> unknown-parse events force MAP-REQUIRED conservatively."
+
+**EXECUTED by the chunk-5B prep session (2026-07-26).** Every clause is code with a test behind
+it, in `src/acumen/adjustment_route.py` (PURE) and wired into both operator entry points.
+
+- **The classifier** (`classify_route`) runs off the chunk-3 CA table exactly as the ruling
+  says -- it takes the built `Factor`s, `Suppression`s, `PendingFactor`s and the parse
+  `exceptions` for one symbol and returns `map-required` / `table-path` plus the REASON for
+  every event that forced the map (so the report can show why a symbol is on the expensive
+  path). MAP-REQUIRED is forced by: a price-moving factor (`k != 1`) whose kind is not in
+  `SHARE_COUNT_KINDS` (a rights, a special dividend); any suppression (a demerger, a Q-6
+  tier-2 rights); any pending factor; any parse exception on that symbol.
+- **"Non-share-count" is read as the ruling's own enumeration** -- rights, special dividend,
+  demerger -- i.e. the events that MOVE a price without moving the share count. An ordinary
+  dividend and a buyback carry `k = 1` (CONTEXT 4.2), move no price and fragment no era; reading
+  them in would make EVERY symbol map-required and contradict the ruling's own "bonus/split-only
+  symbols may use the factor-table path". Recorded as decision B93 rather than assumed silently.
+- **Scoping to the minute clamp.** An event whose ex-date is older than the symbol's minute
+  clamp (`max(2016-10-01, first data)`) can appear in no `(D, F]` window of any bar the ingest
+  will ever store, so it cannot affect one stored price and does not force the map (`since=`).
+  Recorded as decision B94.
+- **The refusal** (`map_covers_route`, the ruling's "its ingest must run through the map"):
+  `acumen-minute-backfill` now loads `data/adjustment_maps/<SYMBOL>.json` (or an explicit
+  `--adjustment-map`), passes it to `backfill_symbol(adjustment_map=...)` and to a new
+  map-backed `--rebuild`, and **refuses with exit code 2** when a MAP-REQUIRED symbol has no
+  map -- printing the exact `acumen-build-adjustment-map` command that fixes it. An explicitly
+  named map that does not exist RAISES rather than being silently ignored (an operator who
+  names a map and is ignored would believe the run was map-backed when it was not). F1 and F2
+  are closed by this commit.
+- **The universe runner** (`acumen-universe-backfill`, chunk 5B proper) classifies every symbol
+  up front, PROBES each map-required symbol's eras and builds+persists its map BEFORE ingesting
+  it, and reports the route counts and the map inventory (events measured vs ours vs absent).
+
+**Known limit, flagged not decided.** `vendor_adjustment.events_from_factor_table` builds era
+keys from factors with `k != 1` plus suppressions plus pending RIGHTS. A pending DIVIDEND (one
+whose cum close the daily store could not supply) makes a symbol map-required but does NOT enter
+its era keys, so if the vendor did adjust for it the era's containment simply fails and those
+days are un-provable -> excluded + counted. Safe (nothing wrong is stored, gate 1 and containment
+both hold) and disclosed here rather than silently patched.
+

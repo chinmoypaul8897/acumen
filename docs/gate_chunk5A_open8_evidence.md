@@ -458,7 +458,14 @@ demerger 2023-07-20 (no factor), bonus 2024-10-28 (ours 0.5). Ordinary dividends
 ¹ The 2024-11 identity era's 10-paise max is a single microstructure day (2024-11-07: the bhavcopy
 high 132400 exceeds every 1-min high 132390 — an odd-lot/block trade the daily counts but the
 continuous series does not, the same reason gate-1's band skews positive). It is NOT an adjustment
-error; provability uses the MEDIAN residual (0 paise), so the day is provable and gate-1 passes.
+error, and the day is provable with gate-1 passing. **Corrected reason (REVIEW_5A F3, chunk-5B
+prep):** an earlier draft of this footnote said provability used "the MEDIAN residual (0 paise)".
+That described decision B88, which B92 SUPERSEDED before the commit: the shipped code
+(`vendor_adjustment._price_contained`) checks **every** probe day against
+`max(2 paise, 0.1% × raw)`. 10 paise sits under that day's 0.1% relative floor (≈132 paise), so
+the day is provable on the RELATIVE-FLOOR branch, not on a median. The conclusion was always
+right; only the stated mechanism was stale. The per-day check is the stricter rule — it is what
+catches a bimodal era, which a median would hide.
 
 VOLUME is measured independently and confirms the ruling's "rights scaled in volume with a vendor
 factor": the **rights volume factor is measured 0.987707** (≠ its price 0.987305, and ≠ our TERP

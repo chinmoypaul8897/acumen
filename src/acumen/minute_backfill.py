@@ -30,6 +30,7 @@ Source files in this package are ASCII-only on purpose (see src/acumen/config.py
 from __future__ import annotations
 
 import argparse
+import json
 import time
 from dataclasses import dataclass, field
 from datetime import date, datetime, time as dtime, timedelta
@@ -42,6 +43,7 @@ from . import minute_unadjust as unadj
 from . import quality_gates as gates
 from . import smartapi_client as sac
 from . import vendor_adjustment as va
+from .adjustment_route import classify_route, map_covers_route
 from .aggregate import aggregate_15min
 from .bias import Candle
 from .bias_engine import MinuteLoader
@@ -113,6 +115,104 @@ class SymbolFactors:
         return cls(symbol=symbol.strip().upper(), tick_paise=tick_paise)
 
 
+@dataclass(frozen=True)
+class SymbolCorpActions:
+    """One symbol's whole chunk-3 corporate-action picture -- factors AND what did not resolve.
+
+    :class:`SymbolFactors` carries only what the un-adjustment arithmetic consumes. The ROUTING
+    rule (QUESTIONS.md Q-11 addendum, :mod:`acumen.adjustment_route`) also has to see what did
+    NOT resolve -- a pending factor, an unparsed subject -- because those force the map path
+    conservatively. This is the fuller view; :meth:`symbol_factors` narrows it back down.
+    """
+
+    symbol: str
+    factors: tuple[ca.Factor, ...] = ()
+    suppressions: tuple[ca.Suppression, ...] = ()
+    pending: tuple[ca.PendingFactor, ...] = ()
+    pending_rights_ex_dates: tuple[date, ...] = ()
+    parse_exceptions: tuple[ca.ParseException, ...] = ()
+
+    def symbol_factors(self, *, tick_paise: int | None = None) -> SymbolFactors:
+        return SymbolFactors(
+            symbol=self.symbol,
+            factors=self.factors,
+            suppressions=self.suppressions,
+            pending_ex_dates=self.pending_rights_ex_dates,
+            tick_paise=tick_paise,
+        )
+
+
+def corp_actions_for_symbol(
+    symbol: str,
+    actions: Sequence[ca.CorporateAction],
+    daily_store: DailyStore,
+) -> SymbolCorpActions:
+    """Build one symbol's CONTEXT 4.2 factor table from already-fetched raw actions.
+
+    Split out of :func:`build_symbol_factors` so the universe run (chunk 5B) can fetch the NSE
+    corporate-action history ONCE for all years and reuse it across ~210 symbols instead of
+    re-fetching and re-parsing the whole market per symbol.
+
+    Cum-date closes come from the RAW daily store, so bonus/split/rights/special-dividend
+    factors are concrete. Demergers and Q-6-unrecoverable rights come back as suppressions; a
+    factor that needs a price we do not hold comes back pending.
+    """
+    sym = symbol.strip().upper()
+    report = ca.parse_actions([a for a in actions if a.symbol == sym])
+
+    def cum_close(lookup_symbol: str, ex_date: date) -> int | None:
+        prev = _last_daily_before(daily_store, lookup_symbol, ex_date)
+        if prev is None:
+            return None
+        frame = daily_store.daily(lookup_symbol, prev, prev)
+        return None if frame.empty else int(frame.iloc[0]["close_paise"])
+
+    try:
+        overrides = ca.load_rights_overrides()
+    except ca.CorporateActionError:
+        overrides = {}
+    table = ca.build_factor_table(report.events, cum_close=cum_close, rights_overrides=overrides)
+    pending_rights = tuple(
+        sorted({p.event.ex_date for p in table.pending if p.event.kind == ca.KIND_RIGHTS})
+    )
+    return SymbolCorpActions(
+        symbol=sym,
+        factors=table.factors,
+        suppressions=table.suppressions,
+        pending=table.pending,
+        pending_rights_ex_dates=pending_rights,
+        parse_exceptions=report.exceptions,
+    )
+
+
+def fetch_corp_action_history(
+    start: date,
+    end: date,
+    *,
+    allow_network: bool = False,
+    cache_dir: Path | None = None,
+    today: date | None = None,
+) -> tuple[ca.CorporateAction, ...]:
+    """The NSE corporate-action rows covering ``[start.year, end.year]``, one year per request.
+
+    Day-cached and opt-in (CONTEXT 4.2): with ``allow_network=False`` this reads only the
+    day-cache, so a reviewer with the frozen cache gets a deterministic history and a bare clone
+    gets an empty one.
+    """
+    actions: list[ca.CorporateAction] = []
+    for year in range(start.year, end.year + 1):
+        actions.extend(
+            ca.fetch_nse_corporate_actions(
+                date(year, 1, 1),
+                date(year, 12, 31),
+                allow_network=allow_network,
+                cache_dir=cache_dir,
+                today=today,
+            )
+        )
+    return tuple(actions)
+
+
 def build_symbol_factors(
     symbol: str,
     start: date,
@@ -136,42 +236,11 @@ def build_symbol_factors(
     Network is opt-in: with ``allow_network=False`` this reads only the day-cache, so a reviewer
     with the frozen cache gets a deterministic table and a bare clone gets an empty one.
     """
-    sym = symbol.strip().upper()
-    actions: list[ca.CorporateAction] = []
-    for year in range(start.year, end.year + 1):
-        actions.extend(
-            ca.fetch_nse_corporate_actions(
-                date(year, 1, 1),
-                date(year, 12, 31),
-                allow_network=allow_network,
-                cache_dir=cache_dir,
-                today=today,
-            )
-        )
-    report = ca.parse_actions([a for a in actions if a.symbol == sym])
-
-    def cum_close(lookup_symbol: str, ex_date: date) -> int | None:
-        prev = _last_daily_before(daily_store, lookup_symbol, ex_date)
-        if prev is None:
-            return None
-        frame = daily_store.daily(lookup_symbol, prev, prev)
-        return None if frame.empty else int(frame.iloc[0]["close_paise"])
-
-    try:
-        overrides = ca.load_rights_overrides()
-    except ca.CorporateActionError:
-        overrides = {}
-    table = ca.build_factor_table(report.events, cum_close=cum_close, rights_overrides=overrides)
-    pending_rights = tuple(
-        sorted({p.event.ex_date for p in table.pending if p.event.kind == ca.KIND_RIGHTS})
+    actions = fetch_corp_action_history(
+        start, end, allow_network=allow_network, cache_dir=cache_dir, today=today
     )
-    return SymbolFactors(
-        symbol=sym,
-        factors=table.factors,
-        suppressions=table.suppressions,
-        pending_ex_dates=pending_rights,
-        tick_paise=tick_paise,
-    )
+    view = corp_actions_for_symbol(symbol, actions, daily_store)
+    return view.symbol_factors(tick_paise=tick_paise)
 
 
 # --- clamp + window planning (PURE) ----------------------------------------------------
@@ -844,7 +913,35 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--acceptance", action="store_true",
                         help="Q-10 acceptance (read-only): print gate-1 by year BEFORE (as stored) "
                              "and AFTER (un-adjusted in memory); makes NO SmartAPI pulls")
+    parser.add_argument("--adjustment-map", default=None,
+                        help="path to a persisted Q-11 adjustment map JSON; default: "
+                             "<data_dir>/adjustment_maps/<SYMBOL>.json when it exists")
+    parser.add_argument("--map-data-dir", default=None,
+                        help="data dir holding adjustment_maps/ (default: config data_dir)")
     return parser.parse_args(argv)
+
+
+def load_adjustment_map_for(
+    symbol: str,
+    *,
+    explicit_path: str | Path | None = None,
+    data_dir: Path | None = None,
+) -> "va.AdjustmentMap | None":
+    """The persisted Q-11 map for ``symbol``, or ``None`` when none exists (REVIEW_5A F1).
+
+    An explicit path MUST exist -- an operator who names a map and gets silently ignored would
+    believe the run was map-backed when it was not. The default discovery path is allowed to be
+    absent (a bonus/split-only symbol has no map and needs none).
+    """
+    if explicit_path is not None:
+        path = Path(explicit_path)
+        if not path.is_file():
+            raise va.VendorAdjustmentError(f"--adjustment-map {path} does not exist")
+        return va.from_dict(json.loads(path.read_text(encoding="utf-8")))
+    path = va.map_path(symbol, data_dir)
+    if not path.is_file():
+        return None
+    return va.load_map(symbol, data_dir)
 
 
 def _default_root(subdir: str) -> Path:
@@ -870,18 +967,31 @@ def run(args: argparse.Namespace) -> int:
     # The Q-10 offline modes (rebuild / acceptance) read the already-fetched store and the CA
     # history; they make NO SmartAPI pulls, so they need no login (the master loads from cache
     # for the tick). Building the factor table needs the NSE CA history -- opt-in via --allow-network.
+    map_data_dir = Path(args.map_data_dir) if args.map_data_dir else None
     if args.rebuild or args.acceptance:
         master = load_instrument_master(cache_dir=args.cache_dir, allow_network=args.allow_network)
         tick_paise = _tick_paise(master, symbol)
         print(f"  instrument master loaded; {symbol} tick = {master.tick_size(symbol)} "
               f"({tick_paise} paise)")
-        sf = build_symbol_factors(symbol, start, end, daily_store, allow_network=args.allow_network,
-                                  cache_dir=args.cache_dir, tick_paise=tick_paise)
+        actions = fetch_corp_action_history(start, end, allow_network=args.allow_network,
+                                            cache_dir=args.cache_dir)
+        view = corp_actions_for_symbol(symbol, actions, daily_store)
+        sf = view.symbol_factors(tick_paise=tick_paise)
         _print_symbol_factors(sf)
+        amap = load_adjustment_map_for(symbol, explicit_path=args.adjustment_map,
+                                       data_dir=map_data_dir)
+        decision = _print_route(view, clamp_start(start), amap)
         if args.acceptance:
             _print_acceptance(daily_store, minute_store, symbol, sf)
         if args.rebuild:
-            _print_rebuild(minute_store, symbol, sf)
+            allowed, why_not = map_covers_route(decision, amap is not None)
+            if not allowed:
+                print(f"\nSTOPPING (routing rule): {why_not}")
+                return 2
+            if amap is not None:
+                _print_rebuild_with_map(minute_store, daily_store, symbol, amap, tick_paise)
+            else:
+                _print_rebuild(minute_store, symbol, sf)
         return 0
 
     if not args.allow_network:
@@ -900,9 +1010,22 @@ def run(args: argparse.Namespace) -> int:
           f"tick = {master.tick_size(symbol)} ({tick_paise} paise)")
 
     # Q-10: assemble the symbol's factor table so the ingest path un-adjusts each window to RAW.
-    sf = build_symbol_factors(symbol, start, end, daily_store, allow_network=True,
-                              cache_dir=args.cache_dir, tick_paise=tick_paise)
+    actions = fetch_corp_action_history(start, end, allow_network=True, cache_dir=args.cache_dir)
+    view = corp_actions_for_symbol(symbol, actions, daily_store)
+    sf = view.symbol_factors(tick_paise=tick_paise)
     _print_symbol_factors(sf)
+
+    # Q-11 addendum (routing): a MAP-REQUIRED symbol is ingested THROUGH its measured adjustment
+    # map or not at all -- the factor-table fallback has no price oracle for a non-share-count
+    # event, so a wrong price would pass gate-1 volume unseen (REVIEW_5A F1/F2).
+    adjustment_map = load_adjustment_map_for(symbol, explicit_path=args.adjustment_map,
+                                             data_dir=map_data_dir)
+    decision = _print_route(view, clamp_start(start), adjustment_map)
+    allowed, why_not = map_covers_route(decision, adjustment_map is not None)
+    if not allowed:
+        print(f"\nSTOPPING (routing rule): {why_not}")
+        client.logout()
+        return 2
 
     started = time.monotonic()
 
@@ -921,9 +1044,11 @@ def run(args: argparse.Namespace) -> int:
             end = min(end, pending[min(args.max_windows, len(pending)) - 1][1])
             print(f"  (debug) capping this run to {args.max_windows} pending windows -> end {end}")
 
-    print("\nbackfilling (un-adjusting each window to RAW on ingest) ...")
+    path_name = "map" if adjustment_map is not None else "factor-table"
+    print(f"\nbackfilling (un-adjusting each window to RAW on ingest, {path_name} path) ...")
     result = backfill_symbol(client, master, minute_store, symbol, start, end,
-                             symbol_factors=sf, on_progress=on_progress)
+                             symbol_factors=sf, adjustment_map=adjustment_map,
+                             on_progress=on_progress)
 
     print("\nWINDOW LEDGER " + "-" * 60)
     print(f"  windows planned  : {result.windows_planned}")
@@ -976,6 +1101,39 @@ def _print_symbol_factors(sf: SymbolFactors) -> None:
         print(f"      {s.ex_date}  {s.kind}: {s.reason}  [{minute_effect}]")
     if sf.pending_ex_dates:
         print(f"  Q-6-pending rights ex-dates: {list(sf.pending_ex_dates)}")
+
+
+def _print_route(view: SymbolCorpActions, since: date, amap: "va.AdjustmentMap | None"):
+    """Print (and return) the symbol's Q-11-addendum routing decision."""
+    decision = classify_route(
+        view.symbol,
+        factors=view.factors,
+        suppressions=view.suppressions,
+        pending=view.pending,
+        parse_exceptions=view.parse_exceptions,
+        since=since,
+    )
+    print(f"\nROUTE (Q-11 addendum) for {view.symbol} " + "-" * 36)
+    print(f"  route          : {decision.route}")
+    for reason in decision.reasons:
+        print(f"      forced by  : {reason}")
+    if amap is None:
+        print("  adjustment map : (none loaded)")
+    else:
+        provable = sum(1 for era in amap.eras if era.provable)
+        print(f"  adjustment map : F={amap.fetch_date}, {provable}/{len(amap.eras)} eras provable")
+    return decision
+
+
+def _print_rebuild_with_map(minute_store: MinuteStore, daily_store: DailyStore, symbol: str,
+                            amap: "va.AdjustmentMap", tick_paise: int | None) -> None:
+    print("\nQ-11 REBUILD via the adjustment map (idempotent, identity-guarded) " + "-" * 4)
+    result = rebuild_symbol_raw_with_map(minute_store, daily_store, symbol, amap,
+                                         tick_paise=tick_paise)
+    print(f"  days rewritten   : {result.days_rewritten}")
+    print(f"  identity days    : {result.identity_days} (already RAW on price AND volume)")
+    print(f"  un-provable days : {len(result.unprovable_days)} (gate 1 excludes + counts)")
+    print("  store now holds RAW same-day prices (CONTEXT 7-E11).")
 
 
 def _print_acceptance(daily_store: DailyStore, minute_store: MinuteStore, symbol: str,
@@ -1064,7 +1222,8 @@ def _print_gate3_report(client: sac.SmartApiClient, master: InstrumentMaster, da
 def main(argv: list[str] | None = None) -> int:
     try:
         return run(parse_args(argv))
-    except (DailyStoreError, InstrumentMasterError, sac.SmartApiError, ca.CorporateActionError) as exc:
+    except (DailyStoreError, InstrumentMasterError, sac.SmartApiError, ca.CorporateActionError,
+            va.VendorAdjustmentError) as exc:
         print(f"\nERROR: {type(exc).__name__}: {exc}")
         return 2
 

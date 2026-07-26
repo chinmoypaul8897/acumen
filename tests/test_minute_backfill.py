@@ -293,3 +293,119 @@ def test_minute_loader_returns_none_for_a_day_with_no_data(tmp_path: Path) -> No
     store = MinuteStore.at(tmp_path / "m")
     loader = mb.minute_loader(store)
     assert loader("TCS", date(2016, 10, 3)) is None  # old-date carry fallback (R1-Q6)
+
+
+# --- chunk-5B: the Q-11 map wired into the operator CLI (REVIEW_5A F1/F2) --------------
+
+
+def _persisted_map(data_dir: Path, symbol: str) -> None:
+    """Write a minimal but real AdjustmentMap for ``symbol`` under ``data_dir``."""
+    from acumen import vendor_adjustment as va
+
+    amap = va.AdjustmentMap(
+        symbol=symbol,
+        fetch_date=date(2026, 7, 26),
+        all_event_ex_dates=(date(2023, 7, 20),),
+        eras=(
+            va.EraResolution(
+                label="probe",
+                ex_dates=(date(2023, 7, 20),),
+                choices=(
+                    va.EventChoice(
+                        kind="demerger", ex_date=date(2023, 7, 20),
+                        price_factor=Decimal("0.907863"), price_source=va.SOURCE_MEASURED,
+                        volume_factor=Decimal("0.907921"), volume_source=va.SOURCE_MEASURED,
+                    ),
+                ),
+                k_price=Decimal("0.907863"),
+                k_volume=Decimal("0.907921"),
+                price_containment_paise=1,
+                volume_gap_pct=Decimal("0.5"),
+                provable=True,
+                probe_days=(date(2023, 6, 15),),
+                note="test map",
+            ),
+        ),
+        tick_paise=5,
+    )
+    va.persist_map(amap, data_dir=data_dir)
+
+
+def _cli_env(monkeypatch: pytest.MonkeyPatch, subject: str, symbol: str = "ACME") -> None:
+    """Point the CLI at a fake master and a scripted one-row corporate-action history."""
+    from acumen import corp_actions as ca
+
+    monkeypatch.setattr(mb, "load_instrument_master", lambda **kw: FakeMaster({symbol: "999"}))
+    monkeypatch.setattr(
+        mb, "fetch_corp_action_history",
+        lambda *a, **kw: (ca.CorporateAction(symbol=symbol, ex_date=date(2023, 7, 20),
+                                             subject=subject, source="nse", series="EQ"),),
+    )
+
+
+def _rebuild_args(tmp_path: Path, data_dir: Path, symbol: str = "ACME"):
+    return mb.parse_args([
+        "--symbol", symbol, "--rebuild",
+        "--from", "2016-10-01", "--to", "2026-07-26",
+        "--store", str(tmp_path / "m"), "--daily-store", str(tmp_path / "d"),
+        "--map-data-dir", str(data_dir),
+    ])
+
+
+def test_cli_refuses_to_ingest_a_map_required_symbol_with_no_map(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The routing rule's teeth: a demerger symbol may NOT fall back to the factor table."""
+    _cli_env(monkeypatch, "Scheme of Arrangement")
+    code = mb.run(_rebuild_args(tmp_path, tmp_path / "no_maps"))
+    out = capsys.readouterr().out
+    assert code == 2
+    assert "map-required" in out
+    assert "STOPPING (routing rule)" in out
+    assert "acumen-build-adjustment-map" in out
+
+
+def test_cli_ingests_a_map_required_symbol_once_its_map_is_present(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _cli_env(monkeypatch, "Scheme of Arrangement")
+    data_dir = tmp_path / "maps"
+    _persisted_map(data_dir, "ACME")
+    code = mb.run(_rebuild_args(tmp_path, data_dir))
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "map-required" in out
+    assert "1/1 eras provable" in out
+    assert "Q-11 REBUILD via the adjustment map" in out  # the MAP rebuild, not the Q-10 one
+
+
+def test_cli_lets_a_bonus_only_symbol_use_the_factor_table_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _cli_env(monkeypatch, "Bonus 1:1")
+    code = mb.run(_rebuild_args(tmp_path, tmp_path / "no_maps"))
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "table-path" in out
+    assert "Q-10 REBUILD" in out
+
+
+def test_load_adjustment_map_for_returns_none_when_there_is_no_map(tmp_path: Path) -> None:
+    assert mb.load_adjustment_map_for("ACME", data_dir=tmp_path) is None
+
+
+def test_load_adjustment_map_for_reads_a_persisted_map(tmp_path: Path) -> None:
+    _persisted_map(tmp_path, "ACME")
+    loaded = mb.load_adjustment_map_for("ACME", data_dir=tmp_path)
+    assert loaded is not None
+    assert loaded.symbol == "ACME"
+    assert loaded.factors_for_day(date(2023, 6, 15)) == (Decimal("0.907863"), Decimal("0.907921"))
+
+
+def test_an_explicitly_named_map_that_does_not_exist_raises_rather_than_being_ignored(
+    tmp_path: Path,
+) -> None:
+    from acumen.vendor_adjustment import VendorAdjustmentError
+
+    with pytest.raises(VendorAdjustmentError, match="does not exist"):
+        mb.load_adjustment_map_for("ACME", explicit_path=tmp_path / "nope.json")
