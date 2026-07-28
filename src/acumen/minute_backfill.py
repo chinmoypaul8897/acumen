@@ -657,7 +657,7 @@ def rebuild_symbol_raw(
 
 #: A stored day counts as "already raw" only if its fold high/low sit within this fraction of the
 #: raw daily (0.1% -- absorbs market microstructure, well below the smallest adjustment factor).
-#: Used only by :func:`_stored_day_is_raw`, the ONE-WAY guard the Q-10 factor-table migration uses.
+#: Used only by :func:`_stored_day_is_raw`, which has NO caller in ``src/`` (REVIEW_5B finding C12).
 _RAW_PRICE_REL_TOL: Decimal = Decimal("0.001")
 
 #: Outer bound on how far a fold/raw ratio may sit from a hypothesis and still be recognised as it
@@ -872,9 +872,16 @@ def baseline_correction(
 def _stored_day_is_raw(stored: Sequence[StoredBar], daily_row) -> bool:
     """Is a stored symbol-day ALREADY raw? Checks BOTH price and volume. PURE-ish (no I/O).
 
-    The ONE-WAY guard used by the Q-10 factor-table path, where there is no map to name the
-    hypotheses. Volume must reconcile to the raw daily (gate 1), AND the stored fold high/low must
-    match the raw daily high/low within :data:`_RAW_PRICE_REL_TOL` (0.1%). The map-backed rebuild uses
+    **This function has NO caller in ``src/``** (REVIEW_5B finding C12). It is the ONE-WAY guard the
+    FIX-2 map rebuild used before decision B108 replaced it with :func:`stored_day_baseline`, and
+    the attribution that survived in B108's recorded text and in two ``src`` comments -- "the Q-10
+    factor-table path" -- was never true: that path never called it either. It is kept, tested and
+    named honestly rather than deleted, because a one-way "is this raw?" test is a genuinely useful
+    predicate and the repo should hold ONE statement of it; what it must never again be is the thing
+    that decides whether to DIVIDE a day.
+
+    Volume must reconcile to the raw daily (gate 1), AND the stored fold high/low must match the raw
+    daily high/low within :data:`_RAW_PRICE_REL_TOL` (0.1%). The map-backed rebuild uses
     :func:`stored_day_baseline` instead: a tight one-way test is safe when the alternative is "leave
     it alone" and dangerous when the alternative is "divide it", which is what this one used to be
     asked to decide.

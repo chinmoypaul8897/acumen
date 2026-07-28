@@ -74,6 +74,7 @@ from itertools import product
 from pathlib import Path
 from typing import Callable, Iterable, Mapping, Sequence
 
+from .atomic_io import atomic_write_text
 from .corp_actions import (
     KIND_BONUS,
     KIND_DIVIDEND,
@@ -89,7 +90,13 @@ from .minute_unadjust import (
     unadjust_price_paise,
     unadjust_volume,
 )
-from .quality_gates import volume_gate
+from .quality_gates import (
+    PRICE_CONTAINMENT_MIN_PAISE,
+    PRICE_CONTAINMENT_REL,
+    price_containment_gate,
+    price_containment_limit,
+    volume_gate,
+)
 from .smartapi_client import INTERVAL_ONE_MINUTE, OneMinuteBar
 
 #: How close an un-adjusted HIGH/LOW must sit to the raw daily value to be "contained". The
@@ -99,13 +106,17 @@ from .smartapi_client import INTERVAL_ONE_MINUTE, OneMinuteBar
 #: it while remaining three orders of magnitude below the ~0.3% rights and ~9% demerger errors a
 #: WRONG factor leaves -- so the arbitration choice is never close (a wrong candidate misses by
 #: hundreds of paise).
-DEFAULT_PRICE_CONTAINMENT_PAISE: int = 2
+#:
+#: SINGLE-SOURCED from :mod:`acumen.quality_gates` (the Q-14 ruling puts the same tolerance in the
+#: per-day gate battery, and two copies of one constant is exactly how the two would drift apart).
+DEFAULT_PRICE_CONTAINMENT_PAISE: int = PRICE_CONTAINMENT_MIN_PAISE
 
 #: Relative floor for price containment: a day is contained within max(2 paise, this x raw). 0.1%
 #: absorbs market microstructure (fold-vs-daily-high divergence, ~0.01%) while staying well below
 #: the smallest WRONG-factor residual (the rights ours-vs-vendor gap, ~0.33%) -- so a wrong factor
 #: or a bimodal era still fails on the offending day. See :func:`_price_contained`.
-_PRICE_CONTAINMENT_REL: Decimal = Decimal("0.001")
+#: Also single-sourced from :mod:`acumen.quality_gates` (gate 1P's own tolerance).
+_PRICE_CONTAINMENT_REL: Decimal = PRICE_CONTAINMENT_REL
 
 SOURCE_OURS: str = "ours"  # our CONTEXT 4.2 factor -- an exact known multiplier
 SOURCE_MEASURED: str = "measured"  # the vendor's factor, measured from the fetched/raw ratio
@@ -587,21 +598,57 @@ class EventFloor:
     #: ``None`` on a floor measured before FIX-4 (the carry then falls back to the previous map's own
     #: canonical factor, exactly as it did then).
     event_price_factor: Decimal | None = None
+    # --- the VOLUME side (QUESTIONS.md Q-14: per-side vendor splices) ----------------------
+    #: The Q-14 ruling: "the mechanism is per-side vendor splices -- price and volume applied back
+    #: to DIFFERENT dates for the same event. The floor model gains per-side floors (floor_price,
+    #: floor_volume per event)". ``floor_date`` above IS the price side (:attr:`floor_price` names
+    #: it); this is the volume side, measured by its own run of the same bisection against gate 1's
+    #: own band. ``volume_measured`` False means the volume side was never searched -- which is the
+    #: state of every floor committed before this ruling -- and then the volume chain follows the
+    #: PRICE floor exactly as it did before, so no committed map changes behaviour.
+    floor_volume: date | None = None
+    volume_resolved: bool = False
+    volume_measured: bool = False
+    volume_probes: tuple[FloorProbe, ...] = ()
+    volume_note: str = ""
+    event_volume_factor: Decimal | None = None
+
+    @property
+    def floor_price(self) -> date | None:
+        """The PRICE-side splice date -- the Q-14 ruling's own name for ``floor_date``. PURE."""
+        return self.floor_date
 
     def applies_on(self, day: date) -> bool:
-        """Did the vendor apply this event to a bar stamped ``day``? PURE."""
+        """Did the vendor apply this event's PRICE adjustment to a bar stamped ``day``? PURE."""
         if self.floor_date is None:
             return True
         return day >= self.floor_date
 
+    def applies_on_volume(self, day: date) -> bool:
+        """Did the vendor apply this event's VOLUME adjustment to a bar stamped ``day``? PURE.
+
+        Falls back to the PRICE side when the volume side was never measured, so a floor committed
+        before the Q-14 ruling answers exactly as it did then (one floor, both chains).
+        """
+        if not self.volume_measured:
+            return self.applies_on(day)
+        if self.floor_volume is None:
+            return True
+        return day >= self.floor_volume
+
     @property
     def absent_throughout(self) -> bool:
-        """Is the floor at or above the ex-date -- i.e. absent from EVERY chain we can form? PURE.
+        """Is the PRICE floor at or above the ex-date -- absent from EVERY chain we can form? PURE.
 
         A chain only ever contains events with ``day < ex_date``, so a floor at the ex-date means the
         vendor's back-adjustment never reached one day of our history (Q-11 addendum 4).
         """
         return self.floor_date is not None and self.floor_date >= self.ex_date
+
+    @property
+    def per_side(self) -> bool:
+        """Do the two sides genuinely differ -- the Q-14 mechanism, measured? PURE."""
+        return self.volume_measured and self.floor_volume != self.floor_date
 
 
 def classify_floor_day(
@@ -628,6 +675,124 @@ def classify_floor_day(
     if out_ok and not in_ok:
         return FLOOR_OUT
     return FLOOR_UNDECIDED
+
+
+def classify_floor_day_volume(probe: ProbeDay, k_in: Decimal, k_out: Decimal) -> str:
+    """The VOLUME-side twin of :func:`classify_floor_day` (QUESTIONS.md Q-14). PURE.
+
+    The Q-14 ruling makes the floors PER SIDE, so the volume splice is measured with the volume
+    oracle: un-adjust the day's fetched volume by each candidate chain and require CONTEXT 4.5 gate
+    1's own, unwidened band. Exactly one side reconciling decides; both or neither is
+    :data:`FLOOR_UNDECIDED`.
+
+    The volume observable carries the pre-open auction shortfall, which is why PRICE alone decides
+    the price side. Here it is the only observable there is -- and it is decisive whenever the
+    event's volume factor is far enough from 1 to move a day outside a ``[-0.1%, +5.0%]`` band. An
+    event whose volume factor is ~1 (a demerger the vendor did not rescale shares for) can never be
+    decided on this side, and the search then answers UNDECIDED rather than guessing: that is the
+    honest outcome, and it is exactly the blindness finding Q1 measured.
+    """
+    if k_in <= 0 or k_out <= 0:
+        return FLOOR_UNDECIDED
+    in_ok = volume_gate(probe.raw_volume, unadjust_volume(probe.fetched_volume, k_in)).passed
+    out_ok = volume_gate(probe.raw_volume, unadjust_volume(probe.fetched_volume, k_out)).passed
+    if in_ok and not out_ok:
+        return FLOOR_IN
+    if out_ok and not in_ok:
+        return FLOOR_OUT
+    return FLOOR_UNDECIDED
+
+
+# --- the STORE-backed classifier (Q-14; decision B143) ----------------------------------
+
+#: Which side of the per-side floor model a search is measuring.
+FLOOR_SIDE_PRICE: str = "price"
+FLOOR_SIDE_VOLUME: str = "volume"
+
+
+@dataclass(frozen=True)
+class StoredDay:
+    """One STORED symbol-day reduced to the two observables a floor search reads. PURE data.
+
+    The Q-14 ruling's own closing note is that both sides of the check are LOCAL. A probe buys the
+    ratio ``fetched/raw``; the store already holds it, because ``stored = fetched / k_applied`` by
+    construction of the ingest. So a floor search can be run against the store with no credentialed
+    call at all -- see :func:`classify_stored_price_day`.
+    """
+
+    day: date
+    stored_high: int
+    stored_low: int
+    stored_volume: int
+    raw_high: int
+    raw_low: int
+    raw_volume: int
+
+
+def classify_stored_price_day(
+    stored: StoredDay,
+    event_price_factor: Decimal,
+    tol_paise: int = DEFAULT_PRICE_CONTAINMENT_PAISE,
+) -> str:
+    """Does this STORED day fit with the event IN its price chain, or OUT of it? PURE.
+
+    The arithmetic, stated once (QUESTIONS.md Q-14, decision B143). The store holds
+    ``stored = fetched / k_applied``, where ``k_applied`` is the chain the committed map applied to
+    the day. Under the hypothesis that the vendor's archive was spliced and the event was NOT
+    applied to this day, the vendor's true chain was ``k_applied / k_event``, so the correct raw
+    price is ``fetched x k_event / k_applied = stored x k_event``. Therefore:
+
+    * **event-in**  <=> the stored day is already contained in the raw daily interval -- which is
+      literally :func:`acumen.quality_gates.price_containment_gate`, gate 1P itself;
+    * **event-out** <=> the stored day multiplied BACK by the event's own factor is contained.
+
+    Exactly one containing decides; both (only possible when ``k_event`` is 1, i.e. nothing to
+    test) or neither is :data:`FLOOR_UNDECIDED`. Identical oracle, identical tolerance, and no
+    candle is fetched: the two hypotheses are two multiplications of numbers already on disk.
+    """
+    if event_price_factor <= 0 or event_price_factor == _ONE:
+        return FLOOR_UNDECIDED
+    in_ok = price_containment_gate(
+        stored.stored_high, stored.stored_low, stored.raw_high, stored.raw_low,
+        min_tol_paise=tol_paise,
+    ).passed
+    out_ok = price_containment_gate(
+        _scale_paise(stored.stored_high, event_price_factor),
+        _scale_paise(stored.stored_low, event_price_factor),
+        stored.raw_high, stored.raw_low, min_tol_paise=tol_paise,
+    ).passed
+    if in_ok and not out_ok:
+        return FLOOR_IN
+    if out_ok and not in_ok:
+        return FLOOR_OUT
+    return FLOOR_UNDECIDED
+
+
+def classify_stored_volume_day(stored: StoredDay, event_volume_factor: Decimal) -> str:
+    """The VOLUME-side twin of :func:`classify_stored_price_day`. PURE.
+
+    Volume scales the other way (``stored = fetched x k_applied``), so the event-out hypothesis is
+    the stored volume DIVIDED by the event's own volume factor. The oracle is CONTEXT 4.5 gate 1's
+    unwidened band, exactly as :func:`classify_floor_day_volume` uses it on a probe.
+    """
+    if event_volume_factor <= 0 or event_volume_factor == _ONE:
+        return FLOOR_UNDECIDED
+    in_ok = volume_gate(stored.raw_volume, stored.stored_volume).passed
+    out_ok = volume_gate(
+        stored.raw_volume,
+        int((Decimal(stored.stored_volume) / event_volume_factor).quantize(
+            _ONE, rounding=ROUND_HALF_EVEN
+        )),
+    ).passed
+    if in_ok and not out_ok:
+        return FLOOR_IN
+    if out_ok and not in_ok:
+        return FLOOR_OUT
+    return FLOOR_UNDECIDED
+
+
+def _scale_paise(paise: int, factor: Decimal) -> int:
+    return int((Decimal(paise) * factor).quantize(_ONE, rounding=ROUND_HALF_EVEN))
 
 
 @dataclass(frozen=True)
@@ -866,13 +1031,22 @@ class AdjustmentMap:
         return era.k_price, era.k_volume
 
     def event_applies_on(self, ex_date: date, day: date) -> bool:
-        """Did the vendor apply the event at ``ex_date`` to a bar stamped ``day``? PURE.
+        """Did the vendor apply the event at ``ex_date`` to a bar stamped ``day``? PURE (PRICE side).
 
         True unless a RESOLVED floor for that event sits above ``day`` (Q-11 addendum 2). An event
         with no floor, or one whose search did not resolve, is applied as the era resolved it.
         """
         floor = self._floor_index().get(ex_date)
         return True if floor is None else floor.applies_on(day)
+
+    def event_applies_on_volume(self, ex_date: date, day: date) -> bool:
+        """The same question for the VOLUME side (QUESTIONS.md Q-14 per-side floors). PURE.
+
+        Identical to :meth:`event_applies_on` for every floor whose volume side was never measured,
+        so a map committed before the Q-14 ruling answers exactly as it did then.
+        """
+        floor = self._floor_index().get(ex_date)
+        return True if floor is None else floor.applies_on_volume(day)
 
     def factors_for_day(self, day: date) -> tuple[Decimal, Decimal] | None:
         """``(k_price, k_volume)`` for ``day``, or ``None`` when the day is un-provable.
@@ -888,6 +1062,12 @@ class AdjustmentMap:
         :class:`EventChoice` rows, dropping every event whose application floor sits above ``day``.
         Without floors the product of those same per-event factors IS the era's ``k_price`` /
         ``k_volume``, so a floorless map answers exactly as it did before the ruling.
+
+        The two sides are dropped INDEPENDENTLY (QUESTIONS.md Q-14): the vendor spliced its archive
+        per side, so one event can be absent from a day's PRICE chain while still present in its
+        VOLUME chain. That asymmetry is the whole mechanism behind the 1,963 days finding Q1
+        measured -- the volume side reconciled, so gate 1 passed, while the price side was off by
+        the event's own factor.
         """
         if not self.in_window_ex_dates(day):
             return _ONE, _ONE
@@ -899,10 +1079,11 @@ class AdjustmentMap:
         k_price = _ONE
         k_volume = _ONE
         for choice in era.choices:
-            if not self.event_applies_on(choice.ex_date, day):
-                continue  # below the vendor's splice: ABSENT from this day's chain
-            k_price *= choice.price_factor
-            k_volume *= choice.volume_factor
+            if self.event_applies_on(choice.ex_date, day):
+                k_price *= choice.price_factor
+            # else: below the vendor's PRICE splice -- ABSENT from this day's price chain
+            if self.event_applies_on_volume(choice.ex_date, day):
+                k_volume *= choice.volume_factor
         return k_price, k_volume
 
 
@@ -1102,7 +1283,10 @@ def build_map(
         )
     all_ex = tuple(sorted(by_ex))
     ordered_eras = sorted(era_measurements, key=lambda m: (len(m.ex_dates), m.ex_dates))
-    floor_index = {f.ex_date: f for f in floors if f.resolved}
+    # A floor resolved on EITHER side is a measurement the arbitration must honour (Q-14 per-side
+    # floors): a volume-only splice carries ``resolved=False`` on the price side, and reading only
+    # that flag would silently drop it from the build.
+    floor_index = {f.ex_date: f for f in floors if f.resolved or f.volume_resolved}
 
     # --- Phase 1: backward pass -- decide each event's SOURCE per era (the audit labels) -------
     price_canon: dict[date, tuple[str, Decimal]] = {}
@@ -1122,7 +1306,7 @@ def build_map(
         # Q-11 addendum 4: an event whose MEASURED floor sits above this era's probe days was not
         # applied by the vendor here at all. That is a measurement, not a candidate, so the event is
         # FORCED absent -- and a straddled probe window is refused rather than averaged.
-        forced, straddled = _floored_events(win, era, floor_index)
+        forced_price, forced_volume, straddled = _floored_events(win, era, floor_index)
         if straddled:
             decided[era.ex_dates] = None
             reasons[era.ex_dates] = (
@@ -1138,8 +1322,11 @@ def build_map(
         # era un-provable (its days are excluded + counted, the ruling's surgical clamp); probing
         # the missing intermediate era rescues it. The gap propagates to older eras by construction.
         # A FORCED-absent event is not an unknown -- its factor was measured by the floor search --
-        # so it does not consume the era's one degree of freedom (Q-11 addendum 4 clause ii).
-        new_events = [e for e in win if e.ex_date not in price_canon and e.ex_date not in forced]
+        # so it does not consume the era's one degree of freedom (Q-11 addendum 4 clause ii). Under
+        # the Q-14 per-side floors an event only stops being an unknown when BOTH sides were
+        # measured absent here; a price-only splice still leaves the volume side to arbitrate.
+        settled = set(forced_price) & set(forced_volume)
+        new_events = [e for e in win if e.ex_date not in price_canon and e.ex_date not in settled]
         if len(new_events) > 1:
             decided[era.ex_dates] = None
             reasons[era.ex_dates] = (
@@ -1152,7 +1339,7 @@ def build_map(
             win, era.price_cumulative, price_canon,
             get_ours=lambda e: e.our_price_factor,
             oracle=lambda k_chain, per: _price_contained(era, k_chain, price_tol_paise),
-            forced=forced,
+            forced=forced_price,
         )
         # Q-12 clause (ii): the volume pass sees the price pass's OWN result -- each event's chosen
         # price factor becomes a volume candidate, and the era's chosen price chain is what the
@@ -1171,7 +1358,7 @@ def build_map(
                 oracle=lambda k_chain, per: _volume_reconciled(era, k_chain),
                 costs=_VOLUME_COST,
                 price_factors=chosen_price,
-                forced=forced,
+                forced=forced_volume,
             )
         if price is None or volume is None:
             decided[era.ex_dates] = None
@@ -1282,28 +1469,39 @@ def _floored_events(
     win: Sequence[EventSpec],
     era: EraMeasurement,
     floor_index: Mapping[date, EventFloor],
-) -> tuple[dict[date, tuple[str, Decimal]], list[date]]:
-    """Which of this era's events a MEASURED floor forces ABSENT, and which straddle it. PURE.
+) -> tuple[dict[date, tuple[str, Decimal]], dict[date, tuple[str, Decimal]], list[date]]:
+    """Which of this era's events a MEASURED floor forces ABSENT, per side, and which straddle. PURE.
+
+    Returns ``(forced_price, forced_volume, straddled)``.
 
     Q-11 addendum 4: a floor is a measured property of the vendor's archive, so where it lies above
     an era's probe days the event is not a candidate to arbitrate -- it is known absent. Where the
     probe window sits astride the floor (some days below, some above) the era's single cumulative
     ratio mixes two chains and no era factor can describe it; the caller marks that era un-provable
     rather than averaging the two.
+
+    Q-14 makes the floors PER SIDE, so the two forced sets are computed separately: the price pass
+    is told what the price splice measured and the volume pass what the volume splice measured. A
+    straddle on EITHER side refuses the era, because either one alone makes the era's single
+    cumulative ratio a mixture.
     """
-    forced: dict[date, tuple[str, Decimal]] = {}
+    forced_price: dict[date, tuple[str, Decimal]] = {}
+    forced_volume: dict[date, tuple[str, Decimal]] = {}
     straddled: list[date] = []
     days = [p.day for p in era.probe_days]
     for event in win:
         floor = floor_index.get(event.ex_date)
         if floor is None or not days:
             continue
-        applies = {floor.applies_on(day) for day in days}
-        if applies == {False}:
-            forced[event.ex_date] = (SOURCE_ABSENT, _ONE)
-        elif len(applies) > 1:
+        applies_price = {floor.applies_on(day) for day in days}
+        applies_volume = {floor.applies_on_volume(day) for day in days}
+        if applies_price == {False}:
+            forced_price[event.ex_date] = (SOURCE_ABSENT, _ONE)
+        if applies_volume == {False}:
+            forced_volume[event.ex_date] = (SOURCE_ABSENT, _ONE)
+        if len(applies_price) > 1 or len(applies_volume) > 1:
             straddled.append(event.ex_date)
-    return forced, straddled
+    return forced_price, forced_volume, straddled
 
 
 def _resolve_pass(
@@ -1578,7 +1776,7 @@ def _day_price_contained(probe: ProbeDay, k_price: Decimal, tol_paise: int) -> b
         if raw <= 0:
             return False
         un, _snap, _off = unadjust_price_paise(fetched, k_price, tick_paise=None)
-        limit = max(Decimal(tol_paise), Decimal(raw) * _PRICE_CONTAINMENT_REL)
+        limit = price_containment_limit(raw, tol_paise)
         if abs(Decimal(un - raw)) > limit:
             return False
     return True
@@ -1722,6 +1920,28 @@ def _default_data_dir() -> Path:
     return load_config(include_env=False).path("data_dir")
 
 
+def _probe_to_dict(p: FloorProbe) -> dict:
+    return {
+        "day": p.day.isoformat(),
+        "verdict": p.verdict,
+        "k_in": None if p.k_in is None else str(p.k_in),
+        "k_out": None if p.k_out is None else str(p.k_out),
+        "ratio_high": None if p.ratio_high is None else str(p.ratio_high),
+        "ratio_low": None if p.ratio_low is None else str(p.ratio_low),
+    }
+
+
+def _probe_from_dict(p: Mapping) -> FloorProbe:
+    return FloorProbe(
+        day=date.fromisoformat(str(p["day"])),
+        verdict=str(p["verdict"]),
+        k_in=None if p.get("k_in") is None else Decimal(str(p["k_in"])),
+        k_out=None if p.get("k_out") is None else Decimal(str(p["k_out"])),
+        ratio_high=None if p.get("ratio_high") is None else Decimal(str(p["ratio_high"])),
+        ratio_low=None if p.get("ratio_low") is None else Decimal(str(p["ratio_low"])),
+    )
+
+
 def to_dict(adjustment_map: AdjustmentMap) -> dict:
     """A JSON-ready dict of the map (Decimals as strings, dates as ISO). PURE."""
     return {
@@ -1741,17 +1961,18 @@ def to_dict(adjustment_map: AdjustmentMap) -> dict:
                     None if floor.event_price_factor is None else str(floor.event_price_factor)
                 ),
                 "note": floor.note,
-                "probes": [
-                    {
-                        "day": p.day.isoformat(),
-                        "verdict": p.verdict,
-                        "k_in": None if p.k_in is None else str(p.k_in),
-                        "k_out": None if p.k_out is None else str(p.k_out),
-                        "ratio_high": None if p.ratio_high is None else str(p.ratio_high),
-                        "ratio_low": None if p.ratio_low is None else str(p.ratio_low),
-                    }
-                    for p in floor.probes
-                ],
+                "probes": [_probe_to_dict(p) for p in floor.probes],
+                # --- the VOLUME side (QUESTIONS.md Q-14 per-side floors) ---------------------
+                "floor_volume": (
+                    None if floor.floor_volume is None else floor.floor_volume.isoformat()
+                ),
+                "volume_resolved": floor.volume_resolved,
+                "volume_measured": floor.volume_measured,
+                "volume_note": floor.volume_note,
+                "event_volume_factor": (
+                    None if floor.event_volume_factor is None else str(floor.event_volume_factor)
+                ),
+                "volume_probes": [_probe_to_dict(p) for p in floor.volume_probes],
             }
             for floor in adjustment_map.floors
         ],
@@ -1818,25 +2039,26 @@ def from_dict(payload: Mapping) -> AdjustmentMap:
                     None if f.get("floor_date") is None else date.fromisoformat(str(f["floor_date"]))
                 ),
                 resolved=bool(f["resolved"]),
-                probes=tuple(
-                    FloorProbe(
-                        day=date.fromisoformat(str(p["day"])),
-                        verdict=str(p["verdict"]),
-                        k_in=None if p.get("k_in") is None else Decimal(str(p["k_in"])),
-                        k_out=None if p.get("k_out") is None else Decimal(str(p["k_out"])),
-                        ratio_high=(
-                            None if p.get("ratio_high") is None else Decimal(str(p["ratio_high"]))
-                        ),
-                        ratio_low=(
-                            None if p.get("ratio_low") is None else Decimal(str(p["ratio_low"]))
-                        ),
-                    )
-                    for p in f.get("probes", ())
-                ),
+                probes=tuple(_probe_from_dict(p) for p in f.get("probes", ())),
                 note=str(f.get("note", "")),
                 event_price_factor=(
                     None if f.get("event_price_factor") is None
                     else Decimal(str(f["event_price_factor"]))
+                ),
+                # Q-14 per-side floors. A map written before the ruling carries none of these keys,
+                # so ``volume_measured`` reads False and the volume chain follows the PRICE floor
+                # exactly as it did then -- the committed map's behaviour is unchanged.
+                floor_volume=(
+                    None if f.get("floor_volume") is None
+                    else date.fromisoformat(str(f["floor_volume"]))
+                ),
+                volume_resolved=bool(f.get("volume_resolved", False)),
+                volume_measured=bool(f.get("volume_measured", False)),
+                volume_probes=tuple(_probe_from_dict(p) for p in f.get("volume_probes", ())),
+                volume_note=str(f.get("volume_note", "")),
+                event_volume_factor=(
+                    None if f.get("event_volume_factor") is None
+                    else Decimal(str(f["event_volume_factor"]))
                 ),
             )
             for f in payload.get("floors", ())
@@ -1878,19 +2100,39 @@ def map_is_current(adjustment_map: AdjustmentMap) -> bool:
 
 
 def persist_map(adjustment_map: AdjustmentMap, data_dir: Path | None = None) -> Path:
-    """Write the map to ``data/adjustment_maps/<SYMBOL>.json`` (gitignored). Returns the path."""
+    """Write the map to ``data/adjustment_maps/<SYMBOL>.json`` (gitignored) ATOMICALLY.
+
+    REVIEW_5B finding C4: this was the only store write in the repo that bypassed
+    :mod:`acumen.atomic_io` -- a plain truncate-then-write, with no temp file, no fsync and no
+    rename. The map is the artifact the Q-11 addendum-2 ruling commits a floor's probe evidence to,
+    so a torn write loses exactly the provenance the ruling exists to preserve. It now goes through
+    the same temp -> fsync -> rename path (with the bounded retry the 2026-07-25 power-loss incident
+    hardened) as the parquet stores and the run ledger.
+    """
     path = map_path(adjustment_map.symbol, data_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(to_dict(adjustment_map), indent=2), encoding="utf-8")
-    return path
+    return atomic_write_text(path, json.dumps(to_dict(adjustment_map), indent=2))
 
 
 def load_map(symbol: str, data_dir: Path | None = None) -> AdjustmentMap:
-    """Read a committed adjustment map from ``data/``."""
+    """Read a committed adjustment map from ``data/``.
+
+    A torn or malformed file raises :class:`VendorAdjustmentError` like every other unreadable map
+    (REVIEW_5B finding C4: ``json.JSONDecodeError`` escaped all four guards written for exactly this
+    case, so a damaged map aborted the run with a raw traceback instead of the designed rebuild).
+    """
     path = map_path(symbol, data_dir)
     if not path.is_file():
         raise VendorAdjustmentError(f"no adjustment map for {symbol} at {path}")
-    return from_dict(json.loads(path.read_text(encoding="utf-8")))
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise VendorAdjustmentError(
+            f"the adjustment map at {path} will not parse ({exc}). It is a MEASURED artifact, not "
+            "a cache: rebuilding it re-probes the symbol's eras. Move it aside and re-run the "
+            "backfill for this symbol."
+        ) from exc
+    return from_dict(payload)
 
 
 # --- live measurement (I/O; opt-in) ----------------------------------------------------
@@ -2135,6 +2377,84 @@ def search_event_floor_live(
         note=search.note,
         event_price_factor=event_factor,
     )
+
+
+def search_event_floor_stored(
+    stored: Mapping[date, StoredDay],
+    adjustment_map: AdjustmentMap,
+    ex_date: date,
+    days: Sequence[date],
+    *,
+    side: str = FLOOR_SIDE_PRICE,
+    tol_paise: int = DEFAULT_PRICE_CONTAINMENT_PAISE,
+    max_probes: int = MAX_FLOOR_PROBES,
+    allow_absent_throughout: bool = False,
+) -> tuple[FloorSearch, Decimal | None]:
+    """Measure ONE side of ONE event's vendor application floor FROM THE STORE. PURE.
+
+    The Q-14 ruling's "measured by the same bisection under the same guards": this drives the very
+    same :func:`binary_search_floor` -- same probe budget, same undecided-step allowance, same
+    three-probe ``absent throughout`` rule, same "one event-in or one undecided leaves it
+    UNRESOLVED" -- with a classifier that reads the STORE instead of the vendor
+    (:func:`classify_stored_price_day` / :func:`classify_stored_volume_day`, decision B143). It
+    therefore spends ZERO credentialed calls and is reproducible offline by anyone holding the
+    minute store and the daily store.
+
+    ``days`` are candidate trading days strictly before ``ex_date``, each inside a PROVABLE era --
+    that is what makes ``k_applied`` known, and the two hypotheses exact. Returns the search and the
+    event factor its probes were classified under (committed as the floor's provenance).
+    """
+    event_factor: Decimal | None = None
+    price_side = side == FLOOR_SIDE_PRICE
+
+    def classify(day: date) -> FloorProbe:
+        nonlocal event_factor
+        era = adjustment_map.era_for_day(day)
+        if era is None or not era.provable:
+            return FloorProbe(day=day, verdict=FLOOR_UNDECIDED)
+        choice = next((c for c in era.choices if c.ex_date == ex_date), None)
+        if choice is None:
+            return FloorProbe(day=day, verdict=FLOOR_UNDECIDED)
+        factor = choice.price_factor if price_side else choice.volume_factor
+        if factor == _ONE:
+            # The era carries this event as ABSENT already: "in" and "out" are the same chain, so
+            # the day answers nothing. Never guessed either way.
+            return FloorProbe(day=day, verdict=FLOOR_UNDECIDED)
+        day_row = stored.get(day)
+        if day_row is None:
+            return FloorProbe(day=day, verdict=FLOOR_UNDECIDED)
+        event_factor = factor
+        applied = adjustment_map.factors_for_day(day)
+        k_applied = (applied[0] if price_side else applied[1]) if applied else None
+        verdict = (
+            classify_stored_price_day(day_row, factor, tol_paise) if price_side
+            else classify_stored_volume_day(day_row, factor)
+        )
+        if price_side:
+            ratio_high = Decimal(day_row.stored_high) / Decimal(day_row.raw_high) if day_row.raw_high else None
+            ratio_low = Decimal(day_row.stored_low) / Decimal(day_row.raw_low) if day_row.raw_low else None
+        else:
+            recovery = (
+                Decimal(day_row.stored_volume) / Decimal(day_row.raw_volume)
+                if day_row.raw_volume else None
+            )
+            ratio_high = ratio_low = recovery
+        return FloorProbe(
+            day=day,
+            verdict=verdict,
+            k_in=k_applied,
+            k_out=None if k_applied is None else (
+                k_applied / factor if price_side else k_applied / factor
+            ),
+            ratio_high=ratio_high,
+            ratio_low=ratio_low,
+        )
+
+    search = binary_search_floor(
+        days, classify, max_probes=max_probes,
+        absent_floor_date=ex_date if allow_absent_throughout else None,
+    )
+    return search, event_factor
 
 
 def build_symbol_map_live(

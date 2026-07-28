@@ -1,8 +1,8 @@
 # Minute backfill report -- chunk 5B (full-universe 1-minute run)
 
-Generated 2026-07-28T17:43:52 from `C:\Users\chinm\acumen\data\universe_backfill\ledger.json` and the stores. Re-runnable at any time; makes no network call.
+Generated 2026-07-29T00:36:21 from `C:\Users\chinm\acumen\data\universe_backfill\ledger.json` and the stores. Re-runnable at any time; makes no network call.
 
-Scope: CONTEXT 3.1's F&O stock underlyings (CONTEXT 7-E5 -- TODAY's list, with the survivorship disclosure the report owes), 1-minute candles from `2016-10-01` (CONTEXT 4.3 depth floor) or the symbol's listing, whichever is later, to `2026-07-27`.
+Scope: CONTEXT 3.1's F&O stock underlyings (CONTEXT 7-E5 -- TODAY's list, with the survivorship disclosure the report owes), 1-minute candles from `2016-10-01` (CONTEXT 4.3 depth floor) or the symbol's listing, whichever is later, to `2026-07-28`.
 
 ## 1. Headline
 
@@ -14,19 +14,39 @@ Scope: CONTEXT 3.1's F&O stock underlyings (CONTEXT 7-E5 -- TODAY's list, with t
 | Quarantined (gate-1 pass rate < 80%) | 6 |
 | Not yet processed | 0 |
 | Symbol-days gated (settled symbols) | 420,297 |
-| Gate-1 PASS (strict band) | 413,482 (98.4%) |
+| Gate-1 PASS (strict band) | 413,546 (98.4%) |
 | Gate-1 AUCTION-RELIEF pass (Q-12 addendum 2) | 432 (0.1%) |
-| Gate-1 EFFECTIVE pass (strict + relief) | 413,914 (98.5%) |
+| Gate-1 EFFECTIVE pass (strict + relief) | 413,978 (98.5%) |
+| Gate-1P PASS (per-day price containment, Q-14) | 414,694 (98.6% of 420,470 stored days) |
+| Gate-1P failures with NO raw daily row (Q-14 closes REVIEW_5B Q4) | 178 |
 | Gate-2 exclusions | 1,191 |
-| Un-provable days (no map era / unknown factor) | 300 |
-| Vendor application floors resolved (Q-11 addendum 2) | 10 over 108 probe(s) |
-| **TOTAL coverage** (gate-1-passing days of every symbol-day seen) | **95.2%** |
-| TOTAL coverage, STRICT band only (no relief) | 95.1% |
-| Usable symbol-days (gate 1 AND gate 2) | ~412,723 |
+| Un-provable days (no map era / unknown factor) | 20,212 |
+| Vendor application floors resolved (Q-11 addendum 2, Q-14 per-side) | 14 over 172 probe(s) -- the Q-14 pass's probes are STORE reads, not credentialed calls (section 3f) |
+| Gate 1 AND gate 2 (overlap-aware) | 413,801 |
+| **USABLE symbol-days (gate 1 AND gate 2 AND gate 1P)** | **411,690** |
+| **TOTAL coverage** (usable days of every stored symbol-day) | **94.7%** |
+| Coverage on gate 1 alone, gated denominator (the pre-Q-14 headline) | 95.3% |
+| Coverage on gate 1 alone, STRICT band (no relief) | 95.2% |
 
-**Definition of done (plan.md chunk 5B): >= 95% of symbol-days pass gates.** Measured: **95.2%** of all symbol-days seen pass gate 1, with every failure categorized in section 4. Without the auction relief the same store measures 95.1%; the two numbers are printed side by side everywhere in this report, and the relief count is never folded into the strict one.
+**Definition of done (plan.md chunk 5B): >= 95% of symbol-days pass gates.** The architect's Q-14 ruling of 2026-07-28 put GATE 1P in the battery permanently, so "pass gates" now means gate 1 AND gate 2 AND gate 1P, and the honest denominator is every stored symbol-day (a day with no raw daily row is a gate-1P FAILURE, not an absence -- that is what closes REVIEW_5B's finding Q4). Measured: **411,690 of 434,769 = 94.7%**.
 
-> **DoD VERDICT: MET** -- 413,914 of 434,591 symbol-days pass, at or above the 95% line.
+> **DoD VERDICT: NOT MET** -- 411,690 of 434,769 stored symbol-days pass gate 1, gate 2 AND gate 1P; 1,341 more passing symbol-days would be needed to reach 95%. Every remaining failure is disclosed in section 4 and in the residual register of section 5.
+
+### 1a. Coverage under every defensible reading (REVIEW_5B section 7, recomputed)
+
+The review tabulated six readings of this chunk's coverage and showed that the only one under which the DoD appeared to miss was the report's OWN arithmetic error (its finding Q3). All six are recomputed here from the same ledger, with the error fixed, and the post-Q-14 reading added as G -- which is the one the verdict above uses.
+
+| Reading | Numerator | Denominator | Coverage | DoD |
+|---|---|---|---|---|
+| A gate 1 only, gated denominator (the pre-Q-14 headline) | 413,978 | 434,591 | 95.2569% | MET |
+| B gate 1 strict, no auction relief | 413,546 | 434,591 | 95.1575% | MET |
+| C gate 1 AND gate 2, OVERLAP-AWARE | 413,801 | 434,591 | 95.2162% | MET |
+| D gate 1 AND gate 2, the naive subtraction (WRONG -- finding Q3) | 412,787 | 434,591 | 94.9829% | **NOT MET** |
+| E gate 1 only, denominator = every stored day | 413,978 | 434,769 | 95.2179% | MET |
+| F gate 1 AND gate 2 overlap-aware, stored-day denominator | 413,801 | 434,769 | 95.1772% | MET |
+| **G gate 1 AND gate 2 AND GATE 1P, stored-day denominator** | 411,690 | 434,769 | 94.6917% | **NOT MET** |
+
+Reading **D is arithmetically wrong** and is printed only so the correction is visible: it subtracts all 1,191 gate-2 exclusions from the gate-1-passing count, but a gate-2 missing-minutes exclusion can only fire on a day where gate 1 ALSO failed (the completeness ruling), so those days were never in that numerator. Reading C counts the intersection PER DAY instead, and the difference is 1,014 symbol-days. Reading G is the DoD reading from the Q-14 ruling onward.
 
 ## 2. Route classification (QUESTIONS.md Q-11 addendum)
 
@@ -161,7 +181,7 @@ VOLUME side -- **ours 296**, **price-factor 17**, **measured 27**, **absent 7**.
 | APOLLOHOSP | table-path | 2016-10-01 | 2016-10-03 | 2429 | 128/1/0 | 2415/2429 (99.4%) | 1 | 2416/2429 (99.5%) | - | 2 | 371.9 | settled |
 | ASHOKLEY | map-required | 2016-10-01 | 2016-10-03 | 2429 | 128/1/0 | 2415/2429 (99.4%) | 0 | 2415/2429 (99.4%) | - | 3 | 373.3 | settled |
 | ASIANPAINT | table-path | 2016-10-01 | 2016-10-03 | 2430 | 128/1/0 | 2417/2430 (99.5%) | 1 | 2418/2430 (99.5%) | - | 2 | 373.2 | settled |
-| ASTRAL | map-required | 2016-10-01 | 2016-10-03 | 2430 | 128/1/0 | 1698/2430 (69.9%) | 1 | 1699/2430 (69.9%) | 0 | 636 | 332.7 | quarantined |
+| ASTRAL | map-required | 2016-10-01 | 2016-10-03 | 2430 | 128/1/0 | 1698/2430 (69.9%) | 1 | 1699/2430 (69.9%) | 1 | 636 | 332.7 | quarantined |
 | AUBANK | map-required | 2017-07-10 | 2017-07-10 | 2241 | 119/0/0 | 2235/2240 (99.8%) | 0 | 2235/2240 (99.8%) | - | 3 | 365.6 | settled |
 | AUROPHARMA | table-path | 2016-10-01 | 2016-10-03 | 2429 | 128/1/0 | 2415/2429 (99.4%) | 0 | 2415/2429 (99.4%) | - | 2 | 373.2 | settled |
 | AXISBANK | table-path | 2016-10-01 | 2016-10-03 | 2428 | 128/1/0 | 2410/2428 (99.3%) | 3 | 2413/2428 (99.4%) | - | 2 | 373.3 | settled |
@@ -210,7 +230,7 @@ VOLUME side -- **ours 296**, **price-factor 17**, **measured 27**, **absent 7**.
 | FEDERALBNK | table-path | 2016-10-01 | 2016-10-03 | 2430 | 129/0/0 | 2415/2429 (99.4%) | 1 | 2416/2429 (99.5%) | - | 2 | 373.2 | settled |
 | FORCEMOT | table-path | 2019-08-19 | 2019-08-19 | 1643 | 88/3/0 | 1614/1642 (98.3%) | 8 | 1622/1642 (98.8%) | - | 17 | 317.6 | settled |
 | FORTIS | table-path | 2016-10-01 | 2016-10-03 | 2430 | 129/0/0 | 2410/2429 (99.2%) | 3 | 2413/2429 (99.3%) | - | 11 | 362.9 | settled |
-| GAIL | map-required | 2016-10-01 | 2016-10-03 | 2432 | 129/0/0 | 1990/2431 (81.9%) | 0 | 1990/2431 (81.9%) | 0 | 3 | 373.2 | settled |
+| GAIL | map-required | 2016-10-01 | 2016-10-03 | 2432 | 129/0/0 | 2054/2431 (84.5%) | 0 | 2054/2431 (84.5%) | 1 | 3 | 373.2 | settled |
 | GLENMARK | table-path | 2016-10-01 | 2016-10-03 | 2430 | 129/0/0 | 2414/2429 (99.4%) | 2 | 2416/2429 (99.5%) | - | 3 | 372.1 | settled |
 | GMRAIRPORT | table-path | 2024-12-11 | 2024-12-11 | 402 | 22/0/0 | 400/401 (99.8%) | 0 | 400/401 (99.8%) | - | 0 | 374.2 | settled |
 | GODFRYPHLP | map-required | 2016-10-01 | 2016-10-03 | 2430 | 129/0/0 | 2413/2429 (99.3%) | 1 | 2414/2429 (99.4%) | - | 14 | 327.7 | settled |
@@ -283,9 +303,9 @@ VOLUME side -- **ours 296**, **price-factor 17**, **measured 27**, **absent 7**.
 | NATIONALUM | map-required | 2016-10-01 | 2016-10-03 | 2430 | 129/0/0 | 2414/2429 (99.4%) | 1 | 2415/2429 (99.4%) | - | 2 | 371.6 | settled |
 | NAUKRI | table-path | 2016-10-01 | 2016-10-03 | 2430 | 129/0/0 | 2410/2429 (99.2%) | 3 | 2413/2429 (99.3%) | - | 10 | 349.3 | settled |
 | NBCC | map-required | 2016-10-01 | 2016-10-03 | 2430 | 129/0/0 | 2412/2429 (99.3%) | 3 | 2415/2429 (99.4%) | - | 3 | 372.6 | settled |
-| NESTLEIND | map-required | 2016-10-01 | 2016-10-03 | 2431 | 129/0/0 | 1391/2430 (57.2%) | 0 | 1391/2430 (57.2%) | 0 | 247 | 367.1 | quarantined |
+| NESTLEIND | map-required | 2016-10-01 | 2016-10-03 | 2431 | 129/0/0 | 1391/2430 (57.2%) | 0 | 1391/2430 (57.2%) | 1 | 247 | 367.1 | quarantined |
 | NHPC | map-required | 2016-10-01 | 2016-10-03 | 2429 | 129/0/0 | 2410/2428 (99.3%) | 5 | 2415/2428 (99.5%) | - | 6 | 368.3 | settled |
-| NMDC | map-required | 2016-10-01 | 2016-10-03 | 2432 | 129/0/0 | 2049/2431 (84.3%) | 4 | 2053/2431 (84.5%) | 0 | 6 | 372.8 | settled |
+| NMDC | map-required | 2016-10-01 | 2016-10-03 | 2432 | 129/0/0 | 2049/2431 (84.3%) | 4 | 2053/2431 (84.5%) | 1 | 6 | 372.8 | settled |
 | NTPC | map-required | 2016-10-01 | 2016-10-03 | 2429 | 129/0/0 | 1840/2428 (75.8%) | 1 | 1841/2428 (75.8%) | 1 | 5 | 373.2 | quarantined |
 | NUVAMA | table-path | 2023-09-26 | 2023-10-11 | 691 | 37/0/0 | 679/690 (98.4%) | 1 | 680/690 (98.6%) | - | 1 | 364.2 | settled |
 | NYKAA | map-required | 2021-11-10 | 2021-11-10 | 1168 | 62/0/0 | 1163/1167 (99.7%) | 3 | 1166/1167 (99.9%) | - | 1 | 373.4 | settled |
@@ -427,7 +447,7 @@ Every row here was gated once under the pre-ruling definitions and then re-gated
 | FEDERALBNK | table-path | 2415/2429 (99.4%) | 2416/2429 (99.5%) | 2 | 2 | settled | settled |
 | FORCEMOT | table-path | 1614/1642 (98.3%) | 1622/1642 (98.8%) | 25 | 17 | settled | settled |
 | FORTIS | table-path | 2410/2429 (99.2%) | 2413/2429 (99.3%) | 12 | 11 | settled | settled |
-| GAIL | map-required | 1990/2431 (81.9%) | 1990/2431 (81.9%) | 3 | 3 | settled | settled |
+| GAIL | map-required | 1990/2431 (81.9%) | 2054/2431 (84.5%) | 3 | 3 | settled | settled |
 | GLENMARK | table-path | 2414/2429 (99.4%) | 2416/2429 (99.5%) | 3 | 3 | settled | settled |
 | GMRAIRPORT | table-path | 400/401 (99.8%) | 400/401 (99.8%) | 0 | 0 | settled | settled |
 | GODFRYPHLP | map-required | 2413/2429 (99.3%) | 2414/2429 (99.4%) | 14 | 14 | settled | settled |
@@ -572,13 +592,15 @@ Every row here was gated once under the pre-ruling definitions and then re-gated
 | WIPRO | map-required | 2415/2429 (99.4%) | 2415/2429 (99.4%) | 3 | 3 | settled | settled |
 | YESBANK | table-path | 2413/2429 (99.3%) | 2413/2429 (99.3%) | 3 | 3 | settled | settled |
 | ZYDUSLIFE | table-path | 1083/1086 (99.7%) | 1084/1086 (99.8%) | 2 | 2 | settled | settled |
-| **TOTAL (210)** | | **401,844/434,514 (92.5%)** | **423,014/434,591 (97.3%)** | **20,056** | **4,085** | | |
+| **TOTAL (210)** | | **401,844/434,514 (92.5%)** | **423,078/434,591 (97.4%)** | **20,056** | **4,085** | | |
 
 ### 3b. Traded-minute statistics per symbol (the completeness ruling's liquidity numbers)
 
 The architect's completeness ruling: "NO liquidity filter is invented (the trader specified none; per-symbol traded-minutes statistics are reported for his eyes)". These are those statistics. **Nothing in the code consumes them** -- there is no minimum traded minutes, no minimum volume and no symbol drop anywhere. `Liquidity days` counts days INCLUDED while carrying more than 15 tradeless minutes -- days the pre-ruling gate 2 excluded.
 
-| Symbol | Avg min/day | Median min/day | Min min/day | Liquidity days | Liquidity days as % of stored |
+REVIEW_5B finding C15: the first column is STORED BARS per day (every bar the vendor served for the day, including any stamped outside the session) while the median and minimum are IN-SESSION traded minutes, so the two differ by ~0.2 min/day. Both are named for what they are rather than averaged into one number.
+
+| Symbol | Avg stored bars/day | Median traded min/day | Min traded min/day | Liquidity days | Liquidity days as % of stored |
 |---|---|---|---|---|---|
 | 360ONE | 363.6 | 375 | 0 | 384 | 44.3% |
 | ABB | 350.9 | 374 | 0 | 1270 | 52.2% |
@@ -793,20 +815,20 @@ The architect's completeness ruling: "NO liquidity filter is invented (the trade
 
 ### 3c. Vendor APPLICATION FLOORS (QUESTIONS.md Q-11 addendum 2)
 
-The architect's ruling: "the vendor's back-adjustments have per-event APPLICATION FLOORS -- internal splice dates before which the event was never applied to its archive ... for days < F_e the event is ABSENT from that day's chain". Each floor below was BINARY-SEARCHED, not fitted: the search asks the daily oracle, one probed session at a time, whether that day's fetched bars fit the era's chain WITH the event or WITHOUT it, and bisects the boundary. Price containment (2 paise vs the RAW daily high/low) decides; a day that answers neither is `undecided` and an undecided run abandons the search UNRESOLVED rather than guessing. Budget 16 probes per event.
+The architect's ruling: "the vendor's back-adjustments have per-event APPLICATION FLOORS -- internal splice dates before which the event was never applied to its archive ... for days < F_e the event is ABSENT from that day's chain". Each floor below was BINARY-SEARCHED, not fitted: the search asks the daily oracle, one probed session at a time, whether that day's fetched bars fit the era's chain WITH the event or WITHOUT it, and bisects the boundary. Price containment decides -- and the tolerance is `max(2 paise, 0.100% of the raw price)`, NOT a flat 2 paise (REVIEW_5B finding Q2: every 5B document said "the same 2-paise containment" while the code has carried the relative floor since chunk 5A, decision B92 -- on a Rs 1,000 stock the effective tolerance is 100 paise, and the IOC cascade's "0.3 paise past the band" is only intelligible against it). A day that answers neither hypothesis is `undecided` and an undecided run abandons the search UNRESOLVED rather than guessing. Budget 16 probes per event, and the Q-14 pass spends none at all -- it reads the store (section 3f).
 
 Hunt scope is the ruling's own: every QUARANTINED symbol and every settled symbol below gate-1 98%, plus (Q-11 addendum 4) every symbol carrying a GATE-3 failure, because a symbol can sit above the line while one ex-date of its history is in the wrong price domain -- a correctness question, not a coverage one. Within a symbol an event is searched only when its pre-ex provable-era span actually fails systematically (>= 10% of its days), or -- inside an un-provable era -- only when the signature gate admits it (section 3e). There is no floor to find where nothing fails, and every skip is recorded with its reason.
 
 | Symbol | Gate-1 before the floor pass | Gate-1 after | Floors resolved | Probes | Note |
 |---|---|---|---|---|---|
 | APLAPOLLO | unchanged | 2363/2431 (97.2%) | 0 | 0 | 0 probe(s) spent; no event carries a vendor application floor inside our history, so the map's chain is unchanged |
-| ASTRAL | 1332/2430 (54.8%) | 1699/2430 (69.9%) | 0 | 2 | 2 probe(s) spent; no event carries a vendor application floor inside our history, so the map's chain is unchanged |
+| ASTRAL | 1332/2430 (54.8%) | 1699/2430 (69.9%) | 1 | 2 | 2 probe(s) spent; no event carries a vendor application floor inside our history, so the map's chain is unchanged |
 | BEL | unchanged | 2173/2431 (89.4%) | 0 | 1 | 1 probe(s) spent; no event carries a vendor application floor inside our history, so the map's chain is unchanged |
 | BPCL | unchanged | 2223/2429 (91.5%) | 0 | 2 | 2 probe(s) spent; no event carries a vendor application floor inside our history, so the map's chain is unchanged |
-| BSE | unchanged | 2115/2345 (90.2%) | 0 | 1 | 1 probe(s) spent; no event carries a vendor application floor inside our history, so the map's chain is unchanged |
+| BSE | unchanged | 2115/2345 (90.2%) | 0 | 19 | 1 probe(s) spent; no event carries a vendor application floor inside our history, so the map's chain is unchanged |
 | COCHINSHIP | unchanged | 2198/2215 (99.2%) | 0 | 0 | 0 probe(s) spent; no event carries a vendor application floor inside our history, so the map's chain is unchanged |
 | DIXON | 1925/2192 (87.8%) | 2169/2192 (99.0%) | 1 | 11 | 1 floor(s) resolved over 11 probe(s); 257 day(s) rewritten, 1934 already raw; gate 1 1925/2192 (87.8%) -> 2169/2192 (99.0%) |
-| GAIL | unchanged | 1990/2431 (81.9%) | 0 | 3 | 3 probe(s) spent; no event carries a vendor application floor inside our history, so the map's chain is unchanged |
+| GAIL | unchanged | 2054/2431 (84.5%) | 1 | 32 | 3 probe(s) spent; no event carries a vendor application floor inside our history, so the map's chain is unchanged |
 | HDFCBANK | unchanged | 2373/2429 (97.7%) | 0 | 0 | 0 probe(s) spent; no event carries a vendor application floor inside our history, so the map's chain is unchanged |
 | HINDPETRO | 1766/2429 (72.7%) | 1995/2429 (82.1%) | 1 | 5 | 1 floor(s) resolved over 5 probe(s); 1 era(s) promoted to provable; 238 day(s) rewritten, 1768 already raw; gate 1 1766/2429 (72.7%) -> 1995/2429 (82.1%) |
 | IEX | 1149/2169 (53.0%) | 1149/2169 (53.0%) | 1 | 13 | 1 floor(s) resolved over 13 probe(s); 1 era(s) promoted to provable; 0 day(s) rewritten, 1151 already raw; gate 1 1149/2169 (53.0%) -> 1149/2169 (53.0%) |
@@ -814,8 +836,8 @@ Hunt scope is the ruling's own: every QUARANTINED symbol and every settled symbo
 | IOC | unchanged | 2062/2431 (84.8%) | 0 | 0 | 0 probe(s) spent; no event carries a vendor application floor inside our history, so the map's chain is unchanged |
 | JUBLFOOD | 2094/2431 (86.1%) | 2094/2431 (86.1%) | 1 | 13 | 1 floor(s) resolved over 13 probe(s); 0 day(s) rewritten, 2432 already raw; gate 1 2094/2431 (86.1%) -> 2094/2431 (86.1%) |
 | LODHA | unchanged | 1303/1307 (99.7%) | 0 | 0 | 0 probe(s) spent; no event carries a vendor application floor inside our history, so the map's chain is unchanged |
-| NESTLEIND | 1129/2430 (46.5%) | 1391/2430 (57.2%) | 0 | 0 | 0 probe(s) spent; no event carries a vendor application floor inside our history, so the map's chain is unchanged |
-| NMDC | unchanged | 2053/2431 (84.5%) | 0 | 1 | 1 probe(s) spent; no event carries a vendor application floor inside our history, so the map's chain is unchanged |
+| NESTLEIND | 1129/2430 (46.5%) | 1391/2430 (57.2%) | 1 | 0 | 0 probe(s) spent; no event carries a vendor application floor inside our history, so the map's chain is unchanged |
+| NMDC | unchanged | 2053/2431 (84.5%) | 1 | 18 | 1 probe(s) spent; no event carries a vendor application floor inside our history, so the map's chain is unchanged |
 | NTPC | 1841/2428 (75.8%) | 1841/2428 (75.8%) | 1 | 3 | 1 floor(s) resolved over 3 probe(s); 0 day(s) rewritten, 1847 already raw; gate 1 1841/2428 (75.8%) -> 1841/2428 (75.8%) |
 | OIL | unchanged | 2048/2429 (84.3%) | 0 | 2 | 2 probe(s) spent; no event carries a vendor application floor inside our history, so the map's chain is unchanged |
 | PETRONET | unchanged | 2234/2431 (91.9%) | 0 | 0 | 0 probe(s) spent; no event carries a vendor application floor inside our history, so the map's chain is unchanged |
@@ -868,6 +890,8 @@ Per-event findings (every event the hunt looked at, including the ones it declin
   - 2019-06-27 -> not searched: no day of a provable era carries this event with a factor to drop; and no signature admits an un-provable era's days (Q-11 addendum 4 clause i)
   - 2018-07-25 -> not searched: no day of a provable era carries this event with a factor to drop; and no signature admits an un-provable era's days (Q-11 addendum 4 clause i)
   - 2017-08-24 -> no splice (UNRESOLVED, 1 probe(s)): the newest probed day (2017-08-23) is undecided, not event-in: the event is not applied even beside its own ex-date, so there is no floor to find [admitted by era failure-rate cliff: 137/137 = 100.0% of the gated days below 2017-08-24 fail gate 1 (>= 95%)]
+  - [Q-14] 2025-05-23 -> price no splice (UNRESOLVED, 2 probe(s)) | volume 2017-12-20 (resolved, 13 probe(s)): REJECTED by acceptance: both-gate days would go 2115 -> 2115 (gate 1 2116 -> 2196); the floor is discarded, not applied
+  - [Q-14] 2022-03-21 -> price no splice (UNRESOLVED, 2 probe(s)) | volume no splice (UNRESOLVED, 1 probe(s)): no splice on either side
 - **COCHINSHIP**
   - 2024-01-10 -> not searched: its pre-ex span reconciles (0/740 = 0.0% of days fail gate 1, below the 10% systematic-failure threshold)
   - 2022-02-21 -> not searched: no day of a provable era carries this event with a factor to drop; and no signature admits an un-provable era's days (Q-11 addendum 4 clause i)
@@ -893,6 +917,9 @@ Per-event findings (every event the hunt looked at, including the ones it declin
   - 2017-03-09 -> era pre-2018-03-27: no hypothesis -- ['2018-03-27'] carry no committed source, so the era holds more than one unknown; nothing honest to test a floor against
   - 2017-03-09 -> era pre-2017-03-09: no hypothesis -- ['2018-03-27'] carry no committed source, so the era holds more than one unknown; nothing honest to test a floor against
   - 2017-03-09 -> not searched: no day of a provable era carries this event with a factor to drop
+  - [Q-14] 2022-09-06 -> price 2018-06-28 (resolved, 12 probe(s)) | volume 2018-06-28 (resolved, 12 probe(s)): ACCEPTED: both-gate days 1989 -> 2053 (gate 1P 1998 -> 2062)
+  - [Q-14] 2019-08-08 -> price no splice (UNRESOLVED, 0 probe(s)) | volume no splice (UNRESOLVED, 1 probe(s)): no splice on either side
+  - [Q-14] 2019-07-09 -> price no splice (UNRESOLVED, 2 probe(s)) | volume no splice (UNRESOLVED, 2 probe(s)): no splice on either side
 - **HDFCBANK**
   - 2025-08-26 -> not searched: its pre-ex span reconciles (56/2204 = 2.5% of days fail gate 1, below the 10% systematic-failure threshold)
   - 2019-09-19 -> not searched: its pre-ex span reconciles (12/732 = 1.6% of days fail gate 1, below the 10% systematic-failure threshold)
@@ -1085,6 +1112,8 @@ Per-event findings (every event the hunt looked at, including the ones it declin
   - 2017-03-16 -> era pre-2017-03-16: no hypothesis -- ['2018-03-27'] carry no committed source, so the era holds more than one unknown; nothing honest to test a floor against
   - 2017-03-16 -> not searched: no day of a provable era carries this event with a factor to drop
   - 2016-02-24 -> not searched: no day of a provable era carries this event with a factor to drop; and no signature admits an un-provable era's days (Q-11 addendum 4 clause i)
+  - [Q-14] 2024-12-27 -> price no splice (UNRESOLVED, 2 probe(s)) | volume no splice (resolved, 2 probe(s)): no splice on either side
+  - [Q-14] 2022-10-27 -> price 2018-10-12 (resolved, 12 probe(s)) | volume no splice (UNRESOLVED, 1 probe(s)): ACCEPTED: both-gate days 1917 -> 2050 (gate 1P 1925 -> 2060)
 - **NTPC**
   - 2023-02-03 -> not searched: no day of a provable era carries this event with a factor to drop; and no signature admits an un-provable era's days (Q-11 addendum 4 clause i)
   - 2022-02-03 -> not searched: no day of a provable era carries this event with a factor to drop; and no signature admits an un-provable era's days (Q-11 addendum 4 clause i)
@@ -1270,7 +1299,7 @@ Per-event findings (every event the hunt looked at, including the ones it declin
 
 The architect's ruling: **"the ceiling stays"**. `VOLUME_GAP_MIN_PCT` and `VOLUME_GAP_MAX_PCT` are byte-identical (`[-0.1%, 5.0%]`) and `volume_gate` is untouched. A gate-1 failure ABOVE the ceiling is separately examined and relieved **IFF ALL FOUR** hold: (a) the failure is above the ceiling, never below the floor; (b) the stored 1-min HIGH equals the raw daily HIGH and the 1-min LOW the raw daily LOW, EXACTLY; (c) the first stamp's open equals the raw daily open, exactly; (d) the shortfall is <= 20.0%. Data LOSS clips extremes; a day with intact extremes, a matching opening print and only volume short is a thin day whose pre-open auction exceeds 5% -- a market property.
 
-**435 symbol-day(s) relieved** across 125 symbol(s), out of 420,297 gated days on settled symbols. Relieved days are counted SEPARATELY everywhere in this report -- the strict gate-1 numerator is never overwritten.
+**435 symbol-day(s) relieved** across 125 symbol(s), out of 434,591 gated days on ALL processed symbols. Of those, **432** land on SETTLED symbols (420,297 gated days) and are the only ones the coverage headline counts; the remaining 3 sit on QUARANTINED symbols, whose whole history is excluded anyway. REVIEW_5B finding C9: the two populations are now named apart instead of an all-symbol numerator being printed over a settled-only denominator. Relieved days are counted SEPARATELY everywhere in this report -- the strict gate-1 numerator is never overwritten.
 
 | Symbol | Gate-1 strict | Auction-relief pass | Effective | Median shortfall | Relieved days also carrying tradeless minutes | Status |
 |---|---|---|---|---|---|---|
@@ -1412,11 +1441,15 @@ The architect's ruling: "an un-provable era is a conclusion under the floor-less
 
 | Symbol | Event ex-date | Measured floor | Probes | What the search found |
 |---|---|---|---|---|
+| BSE | 2025-05-23 | price no splice (UNRESOLVED, 2 probe(s)) | volume 2017-12-20 | 13 | REJECTED by acceptance: both-gate days would go 2115 -> 2115 (gate 1 2116 -> 2196); the floor is discarded, not applied |
 | DIXON | 2021-03-18 | 2018-10-01 | 11 | vendor application floor 2018-10-01: the event is absent from every chain before it (2018-09-28 probed event-out) and applied from it on |
+| GAIL | 2022-09-06 | price 2018-06-28 | 12 ) | volume 2018-06-28 (resolved, 12 | ACCEPTED: both-gate days 1989 -> 2053 (gate 1P 1998 -> 2062) |
 | HINDPETRO | 2019-06-06 | 2019-06-06 | 3 | vendor application floor at or above the ex-date 2019-06-06: the event is absent from every chain in our history (3 probed day(s) across 2019-02-14 .. 2019-06-04, all event-out) |
 | IEX | 2021-12-03 | 2019-10-01 | 11 | vendor application floor 2019-10-01: the event is absent from every chain before it (2019-09-30 probed event-out) and applied from it on |
 | INOXWIND | 2024-05-24 | 2022-05-19 | 13 | vendor application floor 2022-05-19: the event is absent from every chain before it (2022-05-18 probed event-out) and applied from it on |
 | JUBLFOOD | 2022-04-19 | 2018-01-18 | 12 | vendor application floor 2018-01-18: the event is absent from every chain before it (2018-01-17 probed event-out) and applied from it on |
+| NMDC | 2024-12-27 | price no splice (UNRESOLVED, 2 probe(s)) | volume no splice | 2 | no splice on either side |
+| NMDC | 2022-10-27 | price 2018-10-12 | 12 ) | volume no splice (UNRESOLVED, 1 | ACCEPTED: both-gate days 1917 -> 2050 (gate 1P 1925 -> 2060) |
 | NTPC | 2019-02-06 | 2019-02-06 | 3 | vendor application floor at or above the ex-date 2019-02-06: the event is absent from every chain in our history (3 probed day(s) across 2016-10-03 .. 2019-02-05, all event-out) |
 | RELIANCE | 2023-07-20 | 2022-01-05 | 11 | vendor application floor 2022-01-05: the event is absent from every chain before it (2022-01-04 probed event-out) and applied from it on |
 | VEDL | 2023-12-27 | 2023-12-27 | 3 | vendor application floor at or above the ex-date 2023-12-27: the event is absent from every chain in our history (3 probed day(s) across 2023-05-30 .. 2023-12-26, all event-out) |
@@ -1473,7 +1506,7 @@ The architect's ruling: "an un-provable era is a conclusion under the floor-less
 | BPCL | 11 | 11 | 0 | unchanged | 2223/2429 (91.5%) |
 | BSE | 6 | 6 | 0 | unchanged | 2115/2345 (90.2%) |
 | COCHINSHIP | 2 | 2 | 0 | unchanged | 2198/2215 (99.2%) |
-| GAIL | 10 | 10 | 0 | unchanged | 1990/2431 (81.9%) |
+| GAIL | 10 | 10 | 0 | unchanged | 2054/2431 (84.5%) |
 | HDFCBANK | 2 | 2 | 0 | unchanged | 2373/2429 (97.7%) |
 | HINDPETRO | 7 | 7 | 1 | 1766/2429 (72.7%) | 1995/2429 (82.1%) |
 | IEX | 0 | 0 | 1 | 1149/2169 (53.0%) | 1149/2169 (53.0%) |
@@ -1491,13 +1524,87 @@ The architect's ruling: "an un-provable era is a conclusion under the floor-less
 | VBL | 3 | 3 | 0 | unchanged | 1270/2407 (52.8%) |
 | VEDL | 4 | 17 | 13 | 2119/2429 (87.2%) | 2119/2429 (87.2%) |
 
+### 3f. GATE 1P and the bounded PRICE-RECOVERY pass (QUESTIONS.md Q-14)
+
+The architect's ruling of 2026-07-28: "gate 1 proves volume; nothing proved price per day ... Therefore GATE 1P joins CONTEXT 4.5's battery permanently: for every stored symbol-day, the un-adjusted 1-minute fold interval [low, high] must sit INSIDE the raw bhavcopy interval [daily_low, daily_high] with tolerance max(2 paise, 0.1% of the raw price) per side; a day with no raw daily row cannot be price-proven and FAILS. A day failing 1P is EXCLUDED and COUNTED under its own reason."
+
+The mechanism the ruling names is a PER-SIDE vendor splice -- price and volume applied back to different dates for the same event -- so the floor model gained `floor_price` and `floor_volume` per event, each measured by the SAME bisection under the SAME guards. The hunt is signature-gated by gate-1P failure CLUSTERS: a contiguous block of price failures at the old end of an era's span, at least 20 days long, failing at >= 95% with a clean remainder above it -- the shape a step leaves, and nothing else.
+
+**No candle was fetched for this pass.** The observable a probe buys is `fetched / raw`, and the store holds it exactly: the ingest wrote `stored = fetched / k_applied`, so `event-in` is "the stored day is contained in raw" (gate 1P itself) and `event-out` is "the stored day multiplied BACK by the event's own factor is contained". Identical oracle, identical tolerance, zero credentialed calls, reproducible offline by anyone holding the two stores (decision B143).
+
+| Symbol | Gate-1P before | Gate-1P after | Events admitted | Floors accepted | Days rewritten | Outcome |
+|---|---|---|---|---|---|---|
+| IOC | 1020/2432 (41.9%) | 1020/2432 (41.9%) | 0 | 0 | 0 | no event admitted by the gate-1P cluster signature; nothing hunted |
+| VBL | 1271/2408 (52.8%) | 1271/2408 (52.8%) | 0 | 0 | 0 | no event admitted by the gate-1P cluster signature; nothing hunted |
+| NESTLEIND | 1421/2431 (58.5%) | 1421/2431 (58.5%) | 0 | 0 | 0 | no event admitted by the gate-1P cluster signature; nothing hunted |
+| TATASTEEL | 1600/2432 (65.8%) | 1600/2432 (65.8%) | 0 | 0 | 0 | no event admitted by the gate-1P cluster signature; nothing hunted |
+| ASTRAL | 1700/2430 (70.0%) | 1700/2430 (70.0%) | 0 | 0 | 0 | no event admitted by the gate-1P cluster signature; nothing hunted |
+| UPL | 1749/2431 (71.9%) | 1749/2431 (71.9%) | 0 | 0 | 0 | no event admitted by the gate-1P cluster signature; nothing hunted |
+| NTPC | 1846/2429 (76.0%) | 1846/2429 (76.0%) | 0 | 0 | 0 | no event admitted by the gate-1P cluster signature; nothing hunted |
+| IEX | 1689/2170 (77.8%) | 1689/2170 (77.8%) | 0 | 0 | 0 | no event admitted by the gate-1P cluster signature; nothing hunted |
+| HINDPETRO | 2002/2430 (82.4%) | 2002/2430 (82.4%) | 0 | 0 | 0 | no event admitted by the gate-1P cluster signature; nothing hunted |
+| NMDC | 1925/2432 (79.2%) | 2060/2432 (84.7%) | 2 | 1 | 135 | 1 per-side floor(s) committed; 135 stored day(s) rewritten, 1928 already correct |
+| GAIL | 1998/2432 (82.2%) | 2062/2432 (84.8%) | 3 | 1 | 64 | 1 per-side floor(s) committed; 64 stored day(s) rewritten, 2000 already correct |
+| OIL | 2060/2430 (84.8%) | 2060/2430 (84.8%) | 0 | 0 | 0 | no event admitted by the gate-1P cluster signature; nothing hunted |
+| VEDL | 2126/2430 (87.5%) | 2126/2430 (87.5%) | 0 | 0 | 0 | no event admitted by the gate-1P cluster signature; nothing hunted |
+| BEL | 2182/2431 (89.8%) | 2182/2431 (89.8%) | 0 | 0 | 0 | no event admitted by the gate-1P cluster signature; nothing hunted |
+| BSE | 2126/2345 (90.7%) | 2126/2345 (90.7%) | 2 | 0 | 0 | 2 event(s) measured, none accepted; the map is untouched and the flagged days stay excluded by gate 1P as disclosed residuals |
+| SRF | 2214/2432 (91.0%) | 2214/2432 (91.0%) | 0 | 0 | 0 | no event admitted by the gate-1P cluster signature; nothing hunted |
+| BPCL | 2233/2429 (91.9%) | 2233/2429 (91.9%) | 0 | 0 | 0 | no event admitted by the gate-1P cluster signature; nothing hunted |
+| PETRONET | 2245/2432 (92.3%) | 2245/2432 (92.3%) | 0 | 0 | 0 | no event admitted by the gate-1P cluster signature; nothing hunted |
+| PGEL | 2350/2430 (96.7%) | 2350/2430 (96.7%) | 0 | 0 | 0 | no event admitted by the gate-1P cluster signature; nothing hunted |
+| RECLTD | 2364/2432 (97.2%) | 2364/2432 (97.2%) | 0 | 0 | 0 | no event admitted by the gate-1P cluster signature; nothing hunted |
+| APLAPOLLO | 2386/2433 (98.1%) | 2386/2433 (98.1%) | 0 | 0 | 0 | no event admitted by the gate-1P cluster signature; nothing hunted |
+
+**Every per-side floor the pass MEASURED**, accepted or not. A floor is accepted only when the dry run says the store would end with MORE days passing BOTH per-day gates and no fewer passing gate 1 -- the ruling's own acceptance. A rejected measurement is printed here and discarded; it is never written to the store.
+
+| Symbol | Event ex-date | PRICE floor (probes) | VOLUME floor (probes) | Verdict |
+|---|---|---|---|---|
+| BSE | 2025-05-23 | price - (unresolved, 2p) | volume 2017-12-20 (resolved, 13p) | REJECTED by acceptance: both-gate days would go 2115 -> 2115 (gate 1 2116 -> 2196); the floor is discarded, not applied |
+| BSE | 2022-03-21 | price - (unresolved, 2p) | volume - (unresolved, 1p) | no splice on either side |
+| GAIL | 2022-09-06 | price 2018-06-28 (resolved, 12p) | volume 2018-06-28 (resolved, 12p) | ACCEPTED: both-gate days 1989 -> 2053 (gate 1P 1998 -> 2062) |
+| GAIL | 2019-08-08 | price - (unresolved, 0p) | volume - (unresolved, 1p) | no splice on either side |
+| GAIL | 2019-07-09 | price - (unresolved, 2p) | volume - (unresolved, 2p) | no splice on either side |
+| NMDC | 2024-12-27 | price - (unresolved, 2p) | volume - (resolved, 2p) | no splice on either side |
+| NMDC | 2022-10-27 | price 2018-10-12 (resolved, 12p) | volume - (unresolved, 1p) | ACCEPTED: both-gate days 1917 -> 2050 (gate 1P 1925 -> 2060) |
+
+**The DISCLOSED-RESIDUAL register for gate 1P.** The ruling freezes the data era after this one pass: "anything still flagged is a disclosed residual, not chased." Every symbol below still carries price-unproven days; they are EXCLUDED and COUNTED under gate 1P's own reason, and this table is what chunk 9 carries forward.
+
+| Symbol | Days failing gate 1P | above / below / no-oracle | Worst excess (paise) | Status | Why it is residual |
+|---|---|---|---|---|---|
+| IOC | 1,412 | 1 / 1410 / 1 | 47,823 | settled | the failing days sit inside UN-PROVABLE eras (1,761 un-provable stored days, 3/17 eras provable). An un-provable era commits no chain, so there is no factor for a floor to drop and no floor could change one stored price -- the Q-11 addendum-2 ruling's own fallback: un-provable remains the honest answer |
+| VBL | 1,137 | 1136 / 0 / 1 | 265,509 | quarantined | the failing days sit inside UN-PROVABLE eras (1,136 un-provable stored days, 3/5 eras provable). An un-provable era commits no chain, so there is no factor for a floor to drop and no floor could change one stored price -- the Q-11 addendum-2 ruling's own fallback: un-provable remains the honest answer |
+| NESTLEIND | 1,010 | 1009 / 0 / 1 | 16,531,068 | quarantined | the failing days sit inside UN-PROVABLE eras (1,009 un-provable stored days, 2/3 eras provable). An un-provable era commits no chain, so there is no factor for a floor to drop and no floor could change one stored price -- the Q-11 addendum-2 ruling's own fallback: un-provable remains the honest answer |
+| TATASTEEL | 832 | 0 / 831 / 1 | 134,107 | settled | the failing days sit inside UN-PROVABLE eras (1,443 un-provable stored days, 3/9 eras provable). An un-provable era commits no chain, so there is no factor for a floor to drop and no floor could change one stored price -- the Q-11 addendum-2 ruling's own fallback: un-provable remains the honest answer |
+| ASTRAL | 730 | 0 / 730 / 0 | 53,270 | quarantined | no event showed a gate-1P failure CLUSTER -- the failures are not a contiguous step, so no vendor application floor explains them and none was hunted ("never blanket") |
+| UPL | 682 | 0 / 681 / 1 | 36,570 | quarantined | no event showed a gate-1P failure CLUSTER -- the failures are not a contiguous step, so no vendor application floor explains them and none was hunted ("never blanket") |
+| NTPC | 583 | 0 / 582 / 1 | 3,023 | quarantined | the failing days sit inside UN-PROVABLE eras (582 un-provable stored days, 7/8 eras provable). An un-provable era commits no chain, so there is no factor for a floor to drop and no floor could change one stored price -- the Q-11 addendum-2 ruling's own fallback: un-provable remains the honest answer |
+| IEX | 481 | 480 / 0 / 1 | 355,822 | quarantined | the failing days sit inside UN-PROVABLE eras (1,019 un-provable stored days, 0/2 eras provable). An un-provable era commits no chain, so there is no factor for a floor to drop and no floor could change one stored price -- the Q-11 addendum-2 ruling's own fallback: un-provable remains the honest answer |
+| HINDPETRO | 428 | 1 / 426 / 1 | 31,742 | settled | the failing days sit inside UN-PROVABLE eras (661 un-provable stored days, 7/12 eras provable). An un-provable era commits no chain, so there is no factor for a floor to drop and no floor could change one stored price -- the Q-11 addendum-2 ruling's own fallback: un-provable remains the honest answer |
+| NMDC | 372 | 2 / 369 / 1 | 10,537 | settled | 372 day(s) still fail after 1 accepted per-side floor(s) -- the residue is not a step the floor model can express |
+| GAIL | 370 | 0 / 369 / 1 | 37,329 | settled | 370 day(s) still fail after 1 accepted per-side floor(s) -- the residue is not a step the floor model can express |
+| OIL | 370 | 1 / 368 / 1 | 31,908 | settled | no event showed a gate-1P failure CLUSTER -- the failures are not a contiguous step, so no vendor application floor explains them and none was hunted ("never blanket") |
+| VEDL | 304 | 0 / 303 / 1 | 18,993 | settled | no event showed a gate-1P failure CLUSTER -- the failures are not a contiguous step, so no vendor application floor explains them and none was hunted ("never blanket") |
+| BEL | 249 | 0 / 249 / 0 | 143,107 | settled | no event showed a gate-1P failure CLUSTER -- the failures are not a contiguous step, so no vendor application floor explains them and none was hunted ("never blanket") |
+| BSE | 219 | 81 / 138 / 0 | 2,701,269 | settled | 2 event(s) admitted and searched; no per-side floor both resolved and improved the per-day gates, so nothing was committed |
+| SRF | 218 | 216 / 1 / 1 | 787,803 | settled | no event showed a gate-1P failure CLUSTER -- the failures are not a contiguous step, so no vendor application floor explains them and none was hunted ("never blanket") |
+| BPCL | 196 | 0 / 196 / 0 | 49,725 | settled | no event showed a gate-1P failure CLUSTER -- the failures are not a contiguous step, so no vendor application floor explains them and none was hunted ("never blanket") |
+| PETRONET | 187 | 0 / 186 / 1 | 22,260 | settled | the failing days sit inside UN-PROVABLE eras (1,761 un-provable stored days, 2/10 eras provable). An un-provable era commits no chain, so there is no factor for a floor to drop and no floor could change one stored price -- the Q-11 addendum-2 ruling's own fallback: un-provable remains the honest answer |
+| PGEL | 80 | 77 / 2 / 1 | 670 | settled | no event showed a gate-1P failure CLUSTER -- the failures are not a contiguous step, so no vendor application floor explains them and none was hunted ("never blanket") |
+| RECLTD | 68 | 1 / 66 / 1 | 2,818 | settled | the failing days sit inside UN-PROVABLE eras (1,020 un-provable stored days, 7/12 eras provable). An un-provable era commits no chain, so there is no factor for a floor to drop and no floor could change one stored price -- the Q-11 addendum-2 ruling's own fallback: un-provable remains the honest answer |
+| APLAPOLLO | 47 | 45 / 0 / 2 | 1,454,531 | settled | no event showed a gate-1P failure CLUSTER -- the failures are not a contiguous step, so no vendor application floor explains them and none was hunted ("never blanket") |
+| **182 further symbol(s)**, aggregated | **424** | | | settled / quarantined | fewer than 20 price-unproven days each -- below a cluster's minimum length, so no vendor application floor could be measured for them and none was hunted. 160 of these days have no raw daily row at all |
+
+Read the register this way: an **above** failure means the stored 1-minute high sits ABOVE the exchange's own daily high, which is impossible on raw prices and means the day is stored too HIGH; a **below** failure means the fold low sits below the daily low, i.e. the day is stored too LOW; **no-oracle** means the day has no bhavcopy row at all and cannot be price-proven either way (the ruling's own words). The worst excess is how far past the tolerated bound the worse side sits, in paise -- a few paise is microstructure, a few thousand is a wrong price scale.
+
 ## 4. Exclusions by reason
 
 | Reason | Symbol-days | Note |
 |---|---|---|
-| gate-1 (volume reconciliation outside [-0.1%, +5.0%], UNRELIEVED) | 6,383 | CONTEXT 4.5 gate 1; excluded + counted per CONTEXT 7-E3. 432 further above-ceiling failures were relieved as a thin day's auction share (section 3d) and are NOT excluded |
+| gate-1 (volume reconciliation outside [-0.1%, +5.0%], UNRELIEVED) | 6,319 | CONTEXT 4.5 gate 1; excluded + counted per CONTEXT 7-E3. 432 further above-ceiling failures were relieved as a thin day's auction share (section 3d) and are NOT excluded |
+| **gate-1P (per-day PRICE containment, QUESTIONS.md Q-14)** | **5,776** | the stored 1-minute fold does not sit inside the raw bhavcopy high/low within max(2 paise, 0.1%). Its own reason, never folded into gate 1's count. Of these, 178 have no raw daily row at all and cannot be price-proven (the ruling's own words; REVIEW_5B finding Q4) |
 | gate-2 (candle integrity) | 1,191 | duplicates, impossible OHLC, negative values, or missing minutes ON A DAY WHERE GATE 1 ALSO FAILS (the completeness ruling) |
-| un-provable (no map era / unknown factor in (D, F]) | 300 | the Q-11 surgical clamp -- stored so the day is visible, failed by gate 1 |
+| un-provable (no map era / unknown factor in (D, F]) | 20,212 | the Q-11 surgical clamp -- stored so the day is visible, failed by gate 1 |
 | stored days LEFT UNTOUCHED (baseline unidentified) | 4,526 | not an exclusion reason and mostly not damage: the map application declined to correct these days because their stored bars match neither raw nor the map's chain nor a one-too-many division. Declining is the conservative action -- a day that already needed no correction is unaffected, and gate 1 decides either way. The count measures how often the classifier refuses, not how many days are wrong |
 | quarantined symbols (whole history) | 14,294 | 6 symbol(s) below the 80% gate-1 floor |
 
@@ -1568,12 +1675,12 @@ Every failure, with its numbers. `raw gap` is the two stored closes with NO fact
 
 | Symbol | Event(s) | Ex-date | k | Pre-ex day | Ex day | Raw gap | Adjusted gap | Classification |
 |---|---|---|---|---|---|---|---|---|
-| ASTRAL | bonus | 2019-09-16 | 0.8 | 2019-09-13 | 2019-09-16 | 38.49% | 73.11% | hunted, no floor needed; residual |
+| ASTRAL | bonus | 2019-09-16 | 0.8 | 2019-09-13 | 2019-09-16 | 38.49% | 73.11% | hunted; a floor was measured for another event of this symbol but not for this one -- residual |
 | BEL | split | 2017-03-16 | 0.1 | 2017-03-15 | 2017-03-16 | 5.22% | 952.21% | unresolved-floor span -- hunted, no floor fitted; residual |
 | BPCL | bonus | 2017-07-13 | 0.6666666666666666666666666667 | 2017-07-12 | 2017-07-13 | 101.21% | 201.81% | hunted, no floor needed; residual |
 | COCHINSHIP | split | 2024-01-10 | 0.5 | 2024-01-09 | 2024-01-10 | -40.00% | 20.00% | hunted, no floor needed; residual |
-| GAIL | bonus | 2017-03-09 | 0.75 | 2017-03-08 | 2017-03-09 | -2.52% | 29.97% | unresolved-floor span -- hunted, no floor fitted; residual |
-| GAIL | bonus | 2018-03-27 | 0.75 | 2018-03-26 | 2018-03-27 | 201.98% | 302.63% | hunted, no floor needed; residual |
+| GAIL | bonus | 2017-03-09 | 0.75 | 2017-03-08 | 2017-03-09 | -2.52% | 29.97% | hunted; a floor was measured for another event of this symbol but not for this one -- residual |
+| GAIL | bonus | 2018-03-27 | 0.75 | 2018-03-26 | 2018-03-27 | 101.32% | 168.42% | hunted; a floor was measured for another event of this symbol but not for this one -- residual |
 | HINDPETRO | bonus | 2017-07-11 | 0.6666666666666666666666666667 | 2017-07-10 | 2017-07-11 | -0.35% | 49.47% | hunted; a floor was measured for another event of this symbol but not for this one -- residual |
 | IOC | bonus | 2016-10-18 | 0.5 | 2016-10-17 | 2016-10-18 | 0.17% | 100.34% | unresolved-floor span -- hunted, no floor fitted; residual |
 | IOC | bonus | 2018-03-15 | 0.5 | 2018-03-14 | 2018-03-15 | -2.77% | 94.45% | unresolved-floor span -- hunted, no floor fitted; residual |
@@ -1590,12 +1697,12 @@ The final ruling closes the data era: "residuals after this pass are disclosed, 
 
 | Symbol | Ex-date | k | Raw gap | Adjusted gap | Signature? | Symbol-days failing gate 1 | Why it is residual |
 |---|---|---|---|---|---|---|---|
-| ASTRAL | 2019-09-16 | 0.8 | 38.49% | 73.11% | no -- raw gap 38.49% is nearer the healthy k-1 than 0, so the raw-gap-near-zero signature does not admit it | 731 | hunted, no floor needed; residual |
+| ASTRAL | 2019-09-16 | 0.8 | 38.49% | 73.11% | no -- raw gap 38.49% is nearer the healthy k-1 than 0, so the raw-gap-near-zero signature does not admit it | 731 | hunted; a floor was measured for another event of this symbol but not for this one -- residual |
 | BEL | 2017-03-16 | 0.1 | 5.22% | 952.21% | gate-3 raw-gap-near-zero: \|raw gap\| 5.22% is nearer 0 than the event's own step 90.00% (k=0.1), adjusted gap 952.21% -- both closes are already in the same price domain | 258 | unresolved-floor span -- hunted, no floor fitted; residual |
 | BPCL | 2017-07-13 | 0.6666666666666666666666666667 | 101.21% | 201.81% | no -- raw gap 101.21% is nearer the healthy k-1 than 0, so the raw-gap-near-zero signature does not admit it | 206 | hunted, no floor needed; residual |
 | COCHINSHIP | 2024-01-10 | 0.5 | -40.00% | 20.00% | no -- raw gap -40.00% is nearer the healthy k-1 than 0, so the raw-gap-near-zero signature does not admit it | 17 | hunted, no floor needed; residual |
-| GAIL | 2017-03-09 | 0.75 | -2.52% | 29.97% | gate-3 raw-gap-near-zero: \|raw gap\| 2.52% is nearer 0 than the event's own step 25.00% (k=0.75), adjusted gap 29.97% -- both closes are already in the same price domain | 441 | unresolved-floor span -- hunted, no floor fitted; residual |
-| GAIL | 2018-03-27 | 0.75 | 201.98% | 302.63% | no -- raw gap 201.98% is nearer the healthy k-1 than 0, so the raw-gap-near-zero signature does not admit it | 441 | hunted, no floor needed; residual |
+| GAIL | 2017-03-09 | 0.75 | -2.52% | 29.97% | gate-3 raw-gap-near-zero: \|raw gap\| 2.52% is nearer 0 than the event's own step 25.00% (k=0.75), adjusted gap 29.97% -- both closes are already in the same price domain | 377 | hunted; a floor was measured for another event of this symbol but not for this one -- residual |
+| GAIL | 2018-03-27 | 0.75 | 101.32% | 168.42% | no -- raw gap 101.32% is nearer the healthy k-1 than 0, so the raw-gap-near-zero signature does not admit it | 377 | hunted; a floor was measured for another event of this symbol but not for this one -- residual |
 | HINDPETRO | 2017-07-11 | 0.6666666666666666666666666667 | -0.35% | 49.47% | gate-3 raw-gap-near-zero: \|raw gap\| 0.35% is nearer 0 than the event's own step 33.33% (k=0.6666666666666666666666666667), adjusted gap 49.47% -- both closes are already in the same price domain | 434 | hunted; a floor was measured for another event of this symbol but not for this one -- residual |
 | IOC | 2016-10-18 | 0.5 | 0.17% | 100.34% | gate-3 raw-gap-near-zero: \|raw gap\| 0.17% is nearer 0 than the event's own step 50.00% (k=0.5), adjusted gap 100.34% -- both closes are already in the same price domain | 369 | unresolved-floor span -- hunted, no floor fitted; residual |
 | IOC | 2018-03-15 | 0.5 | -2.77% | 94.45% | gate-3 raw-gap-near-zero: \|raw gap\| 2.77% is nearer 0 than the event's own step 50.00% (k=0.5), adjusted gap 94.45% -- both closes are already in the same price domain | 369 | unresolved-floor span -- hunted, no floor fitted; residual |

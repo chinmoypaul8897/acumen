@@ -124,7 +124,29 @@ def run(args: argparse.Namespace) -> int:
     finally:
         client.logout()
 
-    amap = va.build_map(symbol, fetch_date, events, eras, tick_paise=tick_paise)
+    # REVIEW_5B finding C6: this is the runbook command the refusal path prints to the operator, and
+    # it used to overwrite the committed map from scratch -- silently discarding every measured
+    # vendor APPLICATION FLOOR the symbol held. Floors are a property of the vendor's archive, not
+    # of when we last looked at it, so they are ARBITRATED WITH (handed to the builder) and then
+    # CARRIED FORWARD, exactly as the universe runner does it.
+    try:
+        previous = va.load_map(symbol, data_dir=data_dir)
+    except va.VendorAdjustmentError:
+        previous = None
+    in_force = (
+        [f for f in previous.floors if f.resolved or f.volume_resolved] if previous else []
+    )
+    if in_force:
+        print(f"\ncarrying {len(in_force)} already-measured vendor application floor(s) into the "
+              "rebuild: " + ", ".join(
+                  f"{f.ex_date} -> price {f.floor_date or '-'} / volume {f.floor_volume or '-'}"
+                  for f in in_force
+              ))
+    amap = va.build_map(symbol, fetch_date, events, eras, tick_paise=tick_paise, floors=in_force)
+    amap, dropped = va.carry_floors_forward(previous, amap)
+    for floor in dropped:
+        print(f"   DROPPED floor {floor.ex_date} -> {floor.floor_date}: its event no longer "
+              "resolves to the factor the probes were classified under; re-run the floor hunt")
     _print_map(amap)
     _print_acceptance(amap, eras, tick_paise)
 

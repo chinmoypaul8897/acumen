@@ -1266,6 +1266,33 @@ it, in `src/acumen/vendor_adjustment.py` (the model, the hypothesis, the extende
 - **B123 is superseded, not deleted.** Floors still apply to provable eras by the same arithmetic;
   what changed is that an un-provable era is no longer a wall the hunt cannot see through.
 
+### EXECUTION-NOTE CORRECTIONS to the Q-11 chain (chunk 5B FIX-5, 2026-07-28) -- APPEND-ONLY
+
+REVIEW_5B findings C7 and C8: two `EXECUTED by ...` notes above describe a narrower scope than the
+code they document. **The rulings themselves are untouched and the code is correct; only these
+session-written notes were stale.** They are corrected here rather than rewritten in place, so the
+record of what each session believed at the time survives -- the same discipline ADDENDUM 4 used
+when it superseded B123 without deleting it.
+
+- **ADDENDUM 2's "the hunt scope is the ruling's own" (finding C7).** The note states the scope as
+  "QUARANTINED or gate-1 rate below 98%". The code (`universe_backfill.floor_hunt_in_scope`) also
+  admits a symbol carrying a GATE-3 failure. That third arm was added by the FIX-4 session under
+  ADDENDUM 4 -- the raw-gap-near-zero signature is read off exactly those rows, and a symbol can sit
+  above the 98% line while one ex-date of its history is in the wrong price domain, which is a
+  correctness question and not a coverage one. It is explained in the function's own docstring and
+  in report section 3c; it is the addendum-2 note that was never updated. **FIX-5 adds a fourth
+  arm** under the Q-14 ruling: a symbol below 98% on GATE 1P is in scope whatever its volume rate
+  says, which is the whole point of finding Q1 (SRF sits at 99.5% on gate 1 and stored 216 days at
+  five times the traded price).
+- **ADDENDUM 4's "admitted only by one of the two signatures" (finding C8).** There is a third
+  admission route, and it is correct: `force_ex_dates` re-admits an event a PREVIOUS pass already
+  resolved a floor for, because the repair that floor made is exactly what erases the failure
+  signature that admitted it -- requiring the signature again would make re-measurement impossible
+  after the first success. It is recorded as decision B138 and is populated only from previously
+  RESOLVED floors, so it cannot admit an event that was never floored. **FIX-5 adds a fourth**: the
+  Q-14 gate-1P failure CLUSTER. The addendum's prose said "two"; the code has always carried the
+  `force_ex_dates` route as well.
+
 ---
 
 ## Q-12 · chunk 5B · class A · **RESOLVED -- executed chunk 5B FIX-2 (2026-07-26)** · was costing COVERAGE, not correctness
@@ -1758,4 +1785,84 @@ excludes them by name.
 
 Both sides of the check are LOCAL -- the minute store and the daily store -- so any ruling is
 applied to the already-fetched store with **no candle re-downloaded**.
+
+**ARCHITECT'S RULING (the per-day PRICE gate), relayed to the chunk-5B FIX-5 session
+(2026-07-28), verbatim:**
+
+> "ARCHITECT'S RULING (the per-day PRICE gate): gate 1 proves volume; nothing
+> proved price per day -- 1,963 stored days at 0.1x-5x the traded price passed the
+> battery (REVIEW_5B Q1). Therefore GATE 1P joins CONTEXT 4.5's battery
+> permanently: for every stored symbol-day, the un-adjusted 1-minute fold interval
+> [low, high] must sit INSIDE the raw bhavcopy interval [daily_low, daily_high]
+> with tolerance max(2 paise, 0.1% of the raw price) per side; a day with no raw
+> daily row cannot be price-proven and FAILS (closes REVIEW_5B Q4's 178 days). A
+> day failing 1P is EXCLUDED and COUNTED under its own reason. Second: the
+> mechanism is per-side vendor splices -- price and volume applied back to
+> DIFFERENT dates for the same event. The floor model gains per-side floors
+> (floor_price, floor_volume per event), measured by the same bisection under the
+> same guards, hunts SIGNATURE-GATED by gate-1P failure clusters at era/event
+> boundaries. ONE bounded recovery pass is licensed for the flagged days;
+> acceptance = the era's days pass BOTH per-day gates; after this pass the data
+> era FREEZES -- anything still flagged is a disclosed residual, not chased."
+
+**EXECUTED by the chunk-5B FIX-5 session (2026-07-28).** Every clause is code with a test behind
+it, in `src/acumen/quality_gates.py` (the gate itself, PURE), `src/acumen/vendor_adjustment.py`
+(the per-side floor model + the store-backed classifier) and `src/acumen/universe_backfill.py`
+(the wiring, the signature and the recovery pass).
+
+- **GATE 1P, in the battery permanently** (`quality_gates.price_containment_gate`). For one stored
+  symbol-day it takes the 1-minute fold `[low, high]` and the RAW bhavcopy `[daily_low,
+  daily_high]` and requires the fold interval to sit INSIDE the raw interval, per side, within
+  `max(2 paise, 0.1% x raw)` -- the SAME oracle `vendor_adjustment._day_price_contained` already
+  applies to a probe day, with the same two constants, re-expressed for a stored day. It is
+  INSIDE, not "equal": a fold high ABOVE the daily high is impossible (the exchange's high is the
+  maximum of every trade, including the ones the continuous 1-minute series omits) while a fold
+  high BELOW it is ordinary -- an auction or block print the bhavcopy counts and the continuous
+  series never held. That asymmetry is why the gate is a containment and not a two-sided equality,
+  and it is what lets a legitimate auction-print day PASS.
+- **No raw daily row -> FAIL, under its own reason.** The ruling's own words, and it closes
+  REVIEW_5B's finding Q4: the 178 stored days with no bhavcopy row were in neither the numerator
+  nor the denominator. They are now GATED (`gate1p_total` counts them) and FAIL, so every stored
+  symbol-day sits in exactly one bucket.
+- **EXCLUDED and COUNTED under its own reason** (CONTEXT 7-E3). `REASON_GATE1P` is a distinct
+  exclusion reason in the run's tally, the ledger row, the report's exclusion table and the
+  coverage arithmetic; a gate-1P failure is never folded into gate 1's count.
+- **PER-SIDE FLOORS** (`EventFloor.floor_price` / `floor_volume`). One event now carries two
+  measured splice dates instead of one, because the vendor's archive was spliced per side: below
+  `floor_price` the event is absent from the day's PRICE chain, below `floor_volume` from its
+  VOLUME chain, and the two are independent. `AdjustmentMap.factors_for_day` drops each side
+  separately. A pre-FIX-5 floor read back from disk sets BOTH sides to its single `floor_date`,
+  so every map committed before this ruling behaves exactly as it did.
+- **The same bisection, under the same guards.** `binary_search_floor` is untouched; each side
+  gets its own run of it with its own classifier -- price containment for the price side, gate-1's
+  unwidened band for the volume side -- and the same `MAX_FLOOR_PROBES`, the same
+  `MAX_UNDECIDED_STEPS`, the same three-probe `absent_throughout` rule, the same "one `event-in`
+  or one `undecided` leaves it UNRESOLVED".
+- **The classifier reads the STORE, and spends no probe.** Recorded as decision B143 rather than
+  assumed: the ruling's own closing sentence is that both sides of the check are LOCAL, and the
+  observable a probe buys is `fetched/raw`, which the store already holds exactly --
+  `stored = fetched / k_applied`, so `event-in` is "the stored day is contained in raw" (gate 1P
+  itself) and `event-out` is "the stored day multiplied BACK by the event's own factor is
+  contained in raw". Identical arithmetic, identical tolerance, zero credentialed calls, and it is
+  reproducible offline by anyone holding the two stores.
+- **SIGNATURE-GATED by gate-1P failure clusters** (`cluster_prefix` + `gate1p_cluster_events`,
+  PURE). A third admitting signature beside the gate-3 raw-gap and the era cliff, using the same
+  two constants (`FLOOR_HUNT_ERA_CLIFF_RATE` 95% over at least `MIN_CLIFF_DAYS` 20 days) on the
+  PRICE gate instead of the volume one -- and measured as a STEP rather than as a whole-span rate,
+  because a splice sitting INSIDE an era leaves a contiguous BLOCK of failures at the old end of
+  the span with a clean remainder above it, not a uniformly failing span. NMDC is why: its
+  clustered era fails 135 of 244 days, which is 55% on a whole-span reading and a perfect step at
+  133. A block that covers the whole span is exactly the FIX-4 cliff, so the two signatures agree
+  where they overlap. Never blanket: an event with no cluster is not hunted for a per-side floor,
+  and an UN-PROVABLE era admits nothing at all -- it commits no chain, so there is no factor to
+  drop and no floor could change one stored price.
+- **ONE bounded recovery pass, then the FREEZE.** The pass ran once, offline, over the flagged
+  population; its results are in the CHUNK 5B FIX-5 REPORT and `docs/backfill_minute_report.md`
+  section 3f. Acceptance is the ruling's own -- the days must pass BOTH per-day gates -- and it is
+  evaluated as a DRY RUN before anything is written: the stored days are rescaled arithmetically
+  by `k_before / k_after` and re-gated, and a floor is committed only if MORE days then pass both
+  gates and no fewer pass gate 1. A floor that does not earn its keep is recorded with its full
+  measurement and DISCARDED; it never reaches the store, so there is nothing to revert. Everything
+  still flagged after the pass is in the disclosed-residual register and is not chased. **The data
+  era is FROZEN.**
 

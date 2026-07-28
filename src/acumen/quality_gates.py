@@ -16,6 +16,18 @@ excludes a flagged day and counts it (CONTEXT 7-E3).
   shortfall <= 20% is a thin day whose pre-open auction exceeds 5% -- a market property, not data
   loss. Such a day is an ``auction-relief pass``, counted SEPARATELY and disclosed
   (:func:`auction_relief`). Below-floor failures are NEVER relieved.
+* **Gate 1P -- per-day PRICE containment** (the architect's ruling of 2026-07-28, QUESTIONS.md
+  Q-14; CONTEXT v1.3 will carry it, effective now by that record). Gate 1 proves a day's VOLUME
+  and the Q-11 oracle proves an ERA's price over its probe days; 1,963 stored symbol-days fell
+  between the two at 0.1x-5x the traded price and passed the whole battery (REVIEW_5B finding
+  Q1). Gate 1P closes that: **the stored day's 1-minute fold interval ``[low, high]`` must sit
+  INSIDE the raw bhavcopy interval ``[daily_low, daily_high]``**, within
+  ``max(2 paise, 0.1% x raw)`` per side (:func:`price_containment_gate`). It is a CONTAINMENT and
+  not an equality on purpose: the exchange's daily high is the maximum of every trade, including
+  auction and block prints the continuous 1-minute series never held, so a fold high BELOW the
+  daily high is ordinary while one ABOVE it is impossible. A day with no raw daily row cannot be
+  price-proven and FAILS. A failing day is EXCLUDED and COUNTED under its own reason
+  (:data:`REASON_GATE1P`), never folded into gate 1's count.
 * **Gate 2 -- candle integrity** (REDEFINED by the architect's completeness ruling, 2026-07-26 --
   QUESTIONS.md "CONTEXT 4.5 / 7-E4 AMENDMENT"; CONTEXT v1.3 will carry it). Completeness is
   measured by gate 1, not by a minute count: **the vendor omits minutes in which nothing traded**,
@@ -201,6 +213,171 @@ def auction_relief(
             "and opening print match the exchange's own daily record exactly -- a thin day whose "
             "pre-open call auction exceeds 5% of its volume, not data loss"
         ),
+    )
+
+
+# --- Gate 1P: per-day PRICE containment (QUESTIONS.md Q-14) -----------------------------
+
+#: Gate 1P's absolute tolerance floor, in paise. The Q-11 ruling's "within 2 paise (scaled)": the
+#: vendor's cumulative rounding of a multi-factor chain leaves a recovered raw price a hair off.
+#: This is the SINGLE definition of that constant -- :mod:`acumen.vendor_adjustment` imports it, so
+#: the era oracle and the per-day gate can never drift apart.
+PRICE_CONTAINMENT_MIN_PAISE: int = 2
+
+#: Gate 1P's RELATIVE tolerance floor: a price is contained within ``max(2 paise, this x raw)``.
+#: 0.1% absorbs market microstructure (the 1-minute fold high/low can differ from the official
+#: daily high/low by a few paise -- an odd-lot or block print the bhavcopy counts and the continuous
+#: series does not) while staying far below the smallest WRONG-factor residual (the rights
+#: ours-vs-vendor gap, ~0.33%); every other wrong chain (rights not-applied ~1.3%, demerger ~9%,
+#: bonus ~50%, a 5:1 split 400%) is orders of magnitude larger.
+PRICE_CONTAINMENT_REL: Decimal = Decimal("0.001")
+
+#: The exclusion reason a gate-1P failure is counted under (CONTEXT 7-E3: excluded AND counted).
+#: Distinct from gate 1's, per the Q-14 ruling -- a price failure is never folded into the volume
+#: count, and the two numerators are printed side by side everywhere.
+REASON_GATE1P: str = "gate-1P (per-day price containment)"
+
+#: Why a day failed gate 1P, so the run can count the two causes apart.
+GATE1P_NO_ORACLE: str = "no-raw-daily-row"
+GATE1P_ABOVE: str = "fold-high-above-daily-high"
+GATE1P_BELOW: str = "fold-low-below-daily-low"
+
+
+def price_containment_limit(
+    raw_paise: int, min_paise: int = PRICE_CONTAINMENT_MIN_PAISE
+) -> Decimal:
+    """``max(min_paise, PRICE_CONTAINMENT_REL x raw)`` -- gate 1P's per-side tolerance. PURE.
+
+    One definition, used by the per-day gate here AND by the era oracle in
+    :mod:`acumen.vendor_adjustment` (which imports it), so the two can never drift.
+    """
+    return max(Decimal(min_paise), Decimal(raw_paise) * PRICE_CONTAINMENT_REL)
+
+
+@dataclass(frozen=True)
+class PriceContainmentResult:
+    """Gate-1P outcome for one stored symbol-day.
+
+    ``high_excess_paise`` is how far the fold HIGH sits ABOVE the tolerated daily high (0 when
+    inside), ``low_excess_paise`` how far the fold LOW sits BELOW the tolerated daily low. Both are
+    ``None`` when the day had no raw daily row to test against -- which is itself a FAIL.
+    """
+
+    minute_high_paise: int
+    minute_low_paise: int
+    raw_high_paise: int | None
+    raw_low_paise: int | None
+    high_excess_paise: Decimal | None
+    low_excess_paise: Decimal | None
+    passed: bool
+    reason: str
+    #: :data:`GATE1P_NO_ORACLE` / :data:`GATE1P_ABOVE` / :data:`GATE1P_BELOW`, or "" on a pass.
+    cause: str = ""
+
+
+def price_containment_gate(
+    minute_high_paise: int,
+    minute_low_paise: int,
+    raw_high_paise: int | None,
+    raw_low_paise: int | None,
+    *,
+    min_tol_paise: int = PRICE_CONTAINMENT_MIN_PAISE,
+) -> PriceContainmentResult:
+    """CONTEXT 4.5 gate 1P (QUESTIONS.md Q-14): is this stored day's PRICE proven? PURE.
+
+    The architect's ruling of 2026-07-28, verbatim in QUESTIONS.md: "for every stored symbol-day,
+    the un-adjusted 1-minute fold interval ``[low, high]`` must sit INSIDE the raw bhavcopy interval
+    ``[daily_low, daily_high]`` with tolerance ``max(2 paise, 0.1% of the raw price)`` per side; a
+    day with no raw daily row cannot be price-proven and FAILS."
+
+    **Containment, not equality.** The exchange's daily high is the maximum over every trade of the
+    session, including the pre-open auction and block prints the continuous 1-minute series never
+    carries; the daily low is the minimum over the same set. So a fold interval strictly INSIDE the
+    daily interval is ordinary market microstructure, while a fold high ABOVE the daily high (or a
+    fold low BELOW the daily low) is impossible on raw prices and means the day is on the wrong
+    price scale. A wrong scale moves BOTH ends the same way, so one of them always escapes:
+    ``0.1x`` drops the fold low below the daily low, ``5x`` lifts the fold high above the daily
+    high, and neither can hide inside the interval.
+
+    Args:
+        minute_high_paise: max HIGH over the day's stored 1-minute bars.
+        minute_low_paise: min LOW over the same bars.
+        raw_high_paise: the RAW bhavcopy daily high, or ``None`` when the day has no daily row.
+        raw_low_paise: the RAW bhavcopy daily low, or ``None``.
+        min_tol_paise: the absolute floor of the per-side tolerance.
+
+    A day that fails is EXCLUDED and COUNTED under :data:`REASON_GATE1P` (CONTEXT 7-E3).
+    """
+    if raw_high_paise is None or raw_low_paise is None:
+        return PriceContainmentResult(
+            minute_high_paise=minute_high_paise,
+            minute_low_paise=minute_low_paise,
+            raw_high_paise=raw_high_paise,
+            raw_low_paise=raw_low_paise,
+            high_excess_paise=None,
+            low_excess_paise=None,
+            passed=False,
+            reason=(
+                "no raw daily row for this day, so the stored prices can be compared with nothing "
+                "-- the day is not price-proven (Q-14 ruling)"
+            ),
+            cause=GATE1P_NO_ORACLE,
+        )
+    if raw_high_paise <= 0 or raw_low_paise <= 0:
+        return PriceContainmentResult(
+            minute_high_paise=minute_high_paise,
+            minute_low_paise=minute_low_paise,
+            raw_high_paise=raw_high_paise,
+            raw_low_paise=raw_low_paise,
+            high_excess_paise=None,
+            low_excess_paise=None,
+            passed=False,
+            reason="the raw daily high/low is not positive; there is no interval to contain",
+            cause=GATE1P_NO_ORACLE,
+        )
+    high_limit = price_containment_limit(raw_high_paise, min_tol_paise)
+    low_limit = price_containment_limit(raw_low_paise, min_tol_paise)
+    high_excess = Decimal(minute_high_paise - raw_high_paise) - high_limit
+    low_excess = Decimal(raw_low_paise - minute_low_paise) - low_limit
+    high_excess = max(high_excess, Decimal(0))
+    low_excess = max(low_excess, Decimal(0))
+    if high_excess == 0 and low_excess == 0:
+        return PriceContainmentResult(
+            minute_high_paise=minute_high_paise,
+            minute_low_paise=minute_low_paise,
+            raw_high_paise=raw_high_paise,
+            raw_low_paise=raw_low_paise,
+            high_excess_paise=high_excess,
+            low_excess_paise=low_excess,
+            passed=True,
+            reason=(
+                f"fold [{minute_low_paise}, {minute_high_paise}] sits inside the raw daily "
+                f"[{raw_low_paise}, {raw_high_paise}] within "
+                f"max({min_tol_paise} paise, {PRICE_CONTAINMENT_REL * 100}%)"
+            ),
+        )
+    cause = GATE1P_ABOVE if high_excess > 0 else GATE1P_BELOW
+    sides = []
+    if high_excess > 0:
+        sides.append(
+            f"fold HIGH {minute_high_paise} is {high_excess} paise past the tolerated daily high "
+            f"({raw_high_paise} + {high_limit})"
+        )
+    if low_excess > 0:
+        sides.append(
+            f"fold LOW {minute_low_paise} is {low_excess} paise past the tolerated daily low "
+            f"({raw_low_paise} - {low_limit})"
+        )
+    return PriceContainmentResult(
+        minute_high_paise=minute_high_paise,
+        minute_low_paise=minute_low_paise,
+        raw_high_paise=raw_high_paise,
+        raw_low_paise=raw_low_paise,
+        high_excess_paise=high_excess,
+        low_excess_paise=low_excess,
+        passed=False,
+        reason="not price-proven: " + "; ".join(sides),
+        cause=cause,
     )
 
 
