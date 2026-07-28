@@ -1866,3 +1866,16 @@ it, in `src/acumen/quality_gates.py` (the gate itself, PURE), `src/acumen/vendor
   still flagged after the pass is in the disclosed-residual register and is not chased. **The data
   era is FROZEN.**
 
+**ARCHITECT'S RULING (chunk 5B definition of done), relayed to the chunk-5B RE-REVIEW session
+(2026-07-29), verbatim as a closing addendum to Q-14:**
+
+> "ARCHITECT'S RULING (chunk 5B definition of done): the DoD is judged against the
+> gate battery AS IT NOW STANDS (gate 1 + gate 2 + gate 1P): reading G, 411,690 /
+> 434,769 = 94.6917% — NOT MET by 1,341 days. The shortfall is formally ACCEPTED and
+> the chunk closes with it: (i) under the battery the target was written against,
+> coverage is 95.2162% (reading C) — the miss is created by the battery's
+> strengthening, not by data regression; (ii) the freeze holds — recovering 0.31pp
+> would mean chasing un-provable eras the final ruling licensed as disclosed
+> residuals; (iii) every excluded day is categorized in the residual register chunk 9
+> carries. The 95% line itself is unchanged for any future data work."
+
