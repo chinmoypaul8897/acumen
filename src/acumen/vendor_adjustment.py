@@ -139,8 +139,11 @@ MAP_VOLUME_ESTIMATOR: str = "min-over-price-passing-days-v2"
 #: rulings has no compound/unparsed nodes and no floor field at all, so its era keys can differ
 #: from the ones this builder would produce -- it must be REBUILT (probe windows only; no stored
 #: candle is refetched), never consumed. Bump this whenever the node model or the chain model
-#: changes; :func:`map_is_current` makes the rebuild automatic and auditable.
-MAP_MODEL: str = "compound-unparsed-nodes+application-floors-v3"
+#: changes; :func:`map_is_current` makes the rebuild automatic and auditable. v4: the builder is
+#: FLOOR-AWARE (Q-11 addendum 4 -- a floored event is forced absent in the eras it does not reach)
+#: and probe days are restricted to TRADING sessions (the Q-5 ruling), so a map measured under v3
+#: can carry an era whose factor was measured on a weekend session the spec excludes.
+MAP_MODEL: str = "floor-aware-build+trading-day-probes-v4"
 
 _ONE: Decimal = Decimal(1)
 #: Ratio tolerance for calling a solved/measured value "actually ours" or "actually absent".
@@ -579,12 +582,26 @@ class EventFloor:
     resolved: bool
     probes: tuple[FloorProbe, ...] = ()
     note: str = ""
+    #: The event's PRICE factor the probes were classified under -- provenance the Q-11 addendum-4
+    #: ruling asks be committed, and what :func:`carry_floors_forward` re-validates a carry against.
+    #: ``None`` on a floor measured before FIX-4 (the carry then falls back to the previous map's own
+    #: canonical factor, exactly as it did then).
+    event_price_factor: Decimal | None = None
 
     def applies_on(self, day: date) -> bool:
         """Did the vendor apply this event to a bar stamped ``day``? PURE."""
         if self.floor_date is None:
             return True
         return day >= self.floor_date
+
+    @property
+    def absent_throughout(self) -> bool:
+        """Is the floor at or above the ex-date -- i.e. absent from EVERY chain we can form? PURE.
+
+        A chain only ever contains events with ``day < ex_date``, so a floor at the ex-date means the
+        vendor's back-adjustment never reached one day of our history (Q-11 addendum 4).
+        """
+        return self.floor_date is not None and self.floor_date >= self.ex_date
 
 
 def classify_floor_day(
@@ -629,6 +646,7 @@ def binary_search_floor(
     *,
     max_probes: int = MAX_FLOOR_PROBES,
     max_undecided_steps: int = MAX_UNDECIDED_STEPS,
+    absent_floor_date: date | None = None,
 ) -> FloorSearch:
     """Binary-search the vendor's application floor over ``days``. PURE control flow.
 
@@ -649,6 +667,14 @@ def binary_search_floor(
     An :data:`FLOOR_UNDECIDED` day steps to at most ``max_undecided_steps`` neighbours before the
     search abandons UNRESOLVED. Running out of ``max_probes`` also abandons. Neither ever guesses a
     boundary: an unresolved search leaves the map's chain exactly as it was.
+
+    ``absent_floor_date`` (Q-11 addendum 4) admits the one outcome step (1) otherwise discards: a
+    floor sitting ABOVE our whole history, where the vendor never applied the event to one day we
+    can probe. That is exactly the case the un-provable-era deadlock is made of, so it may not stay
+    an abandoned search -- but neither may it be assumed from one probe. Given the date, the search
+    probes the newest, the OLDEST and a MIDPOINT day, and resolves the floor AT ``absent_floor_date``
+    only when all three answer :data:`FLOOR_OUT`. One ``event-in`` or one ``undecided`` among them
+    and it stays UNRESOLVED. Left ``None`` the search behaves exactly as it did before the ruling.
     """
     ordered = sorted(set(days))
     if not ordered:
@@ -693,6 +719,10 @@ def binary_search_floor(
     newest = look(len(ordered) - 1)
     if newest is None or newest.verdict != FLOOR_IN:
         verdict = "budget spent" if newest is None else newest.verdict
+        if absent_floor_date is not None and verdict == FLOOR_OUT:
+            return _search_absent_throughout(
+                ordered, look, probes, absent_floor_date, newest_index=len(ordered) - 1
+            )
         return FloorSearch(
             None, False, tuple(probes),
             f"the newest probed day ({ordered[-1].isoformat()}) is {verdict}, not {FLOOR_IN}: the "
@@ -740,6 +770,50 @@ def binary_search_floor(
         ordered[high], True, tuple(probes),
         f"vendor application floor {ordered[high].isoformat()}: the event is absent from every "
         f"chain before it ({ordered[low].isoformat()} probed {FLOOR_OUT}) and applied from it on",
+    )
+
+
+def _search_absent_throughout(
+    ordered: Sequence[date],
+    look: Callable[[int], FloorProbe | None],
+    probes: Sequence[FloorProbe],
+    absent_floor_date: date,
+    *,
+    newest_index: int,
+) -> FloorSearch:
+    """Confirm (or refuse) a floor sitting ABOVE the whole searched span. PURE control flow.
+
+    The newest day already answered :data:`FLOOR_OUT`. Under the step model that alone would put the
+    floor above every day here, but one probe is not a measurement of a whole span -- a damaged day
+    or a mis-hypothesised chain looks exactly the same. So the OLDEST day and a MIDPOINT are probed
+    too, and the floor is resolved AT ``absent_floor_date`` only if all three are ``event-out``.
+    """
+    checked = [(newest_index, "newest")]
+    if len(ordered) > 1:
+        checked.append((0, "oldest"))
+    if len(ordered) > 2:
+        checked.append((len(ordered) // 2, "midpoint"))
+    for index, which in checked:
+        probe = look(index)
+        if probe is None:
+            return FloorSearch(
+                None, False, tuple(probes),
+                f"probe budget spent before the {which} day could confirm the event is absent "
+                "throughout; no boundary is guessed",
+            )
+        if probe.verdict != FLOOR_OUT:
+            return FloorSearch(
+                None, False, tuple(probes),
+                f"the {which} probed day ({ordered[index].isoformat()}) answers {probe.verdict}, "
+                f"not {FLOOR_OUT}: the event is not absent throughout and no boundary is inside the "
+                "searched span; nothing is guessed",
+            )
+    span = f"{ordered[0].isoformat()} .. {ordered[-1].isoformat()}"
+    return FloorSearch(
+        absent_floor_date, True, tuple(probes),
+        f"vendor application floor at or above the ex-date {absent_floor_date.isoformat()}: the "
+        f"event is absent from every chain in our history ({len(checked)} probed day(s) across "
+        f"{span}, all {FLOOR_OUT})",
     )
 
 
@@ -855,20 +929,40 @@ def carry_floors_forward(
     "does this day fit with this factor in the chain, or out of it?" -- so a changed factor
     invalidates the measurement and the floor is DROPPED rather than reused. Dropped floors are
     returned so the caller can re-open the hunt instead of quietly losing one.
+
+    A floor MEASURED under Q-11 addendum 4 also carries the factor its probes were classified under
+    (``event_price_factor``), and the fresh map may legitimately resolve that event to ABSENT
+    precisely BECAUSE the floor is in force -- a floor that forces an event out of every era makes
+    its canonical factor 1, which the "same factor" test would read as a change and drop, re-opening
+    a hunt that would measure the same floor again, forever. So a carry is also kept when the fresh
+    map commits nothing for the event (no provable era resolved it) or commits exactly ABSENT: in
+    both cases dropping the event from a day's chain is the identity, so the carry cannot alter one
+    stored price and the committed evidence survives.
+
+    A floor the FRESH map was already built WITH (the Q-11 addendum-4 rebuild passes its measured
+    floors INTO the builder) is kept as it stands and never re-derived from the previous map.
     """
     if previous is None or not previous.floors:
         return fresh, ()
+    own = {floor.ex_date for floor in fresh.floors}
     was = canonical_event_factors(previous)
     now = canonical_event_factors(fresh)
-    kept: list[EventFloor] = []
+    kept: list[EventFloor] = list(fresh.floors)
     dropped: list[EventFloor] = []
     for floor in previous.floors:
+        if floor.ex_date in own:
+            continue  # the rebuild already carries a fresher measurement for this event
         before, after = was.get(floor.ex_date), now.get(floor.ex_date)
-        if before is not None and after is not None and before[0] == after[0]:
+        classified_under = floor.event_price_factor if floor.event_price_factor is not None else (
+            None if before is None else before[0]
+        )
+        if after is None or after[0] == _ONE:
+            kept.append(floor)  # nothing committed, or committed absent -- the floor is an identity
+        elif classified_under is not None and classified_under == after[0]:
             kept.append(floor)
         else:
             dropped.append(floor)
-    return with_floors(fresh, kept), tuple(dropped)
+    return with_floors(fresh, sorted(kept, key=lambda f: f.ex_date)), tuple(dropped)
 
 
 def canonical_event_factors(
@@ -892,6 +986,72 @@ def canonical_event_factors(
     return committed
 
 
+def era_hypothesis(
+    adjustment_map: AdjustmentMap,
+    era: EraResolution,
+    events: Mapping[date, EventSpec],
+    *,
+    target_ex_date: date | None = None,
+    committed: Mapping[date, tuple[Decimal, Decimal, str, str]] | None = None,
+) -> tuple[EventChoice, ...] | None:
+    """The chain an UN-PROVABLE era would carry, for a floor search to test against. PURE.
+
+    Q-11 addendum 4 clause (ii): "the one-fresh-unknown-per-era discipline holds -- a floor being
+    measured is that era's fresh unknown; previously committed sources may combine with it." An
+    un-provable era committed nothing, so a floor search inside it needs a chain to form its two
+    hypotheses from. This builds one WITHOUT fitting anything, and the rule is exactly the ruling's:
+
+    * every event OTHER than the one being floored must carry a PREVIOUSLY COMMITTED source -- the
+      factor the newest era that resolved it committed (:func:`canonical_event_factors`, the same
+      "decided at its newest appearance and carried older" discipline the builder uses). An era
+      holding a second uncommitted event has TWO unknowns, not one, so it returns ``None`` and the
+      caller records the refusal. Filling that slot with our own factor would be assuming the vendor
+      used it -- a policy guess of exactly the kind measurement replaced (measured live: on IOC the
+      vendor applies NO special dividend, so `ours` there would put both hypotheses off by ~3% and
+      turn every decisive probe into an `undecided` one);
+    * ``target_ex_date`` -- the event whose floor is being measured -- may instead take our exact
+      CONTEXT 4.2 factor when nothing committed it. That is not an assumption about the vendor: it
+      is the very quantity the two hypotheses test the presence of, and the oracle answers.
+
+    Only the FLOOR is left unknown, and the daily oracle decides it. The volume side is filled in
+    the same order so the hypothesis is a complete audit row, but a floor search reads the PRICE
+    side alone.
+    """
+    known = canonical_event_factors(adjustment_map) if committed is None else committed
+    choices: list[EventChoice] = []
+    for ex_date in era.ex_dates:
+        event = events.get(ex_date)
+        if ex_date != target_ex_date and ex_date not in known:
+            return None  # a second unknown -- refuse rather than guess
+        if ex_date in known:
+            price, volume, price_source, volume_source = known[ex_date]
+            choices.append(
+                EventChoice(
+                    kind=event.kind if event is not None else KIND_UNPARSED,
+                    ex_date=ex_date,
+                    price_factor=price,
+                    price_source=price_source,
+                    volume_factor=volume,
+                    volume_source=volume_source,
+                )
+            )
+            continue
+        if event is None or event.our_price_factor is None:
+            return None
+        our_volume = event.our_volume_factor()
+        choices.append(
+            EventChoice(
+                kind=event.kind,
+                ex_date=ex_date,
+                price_factor=event.our_price_factor,
+                price_source=SOURCE_OURS,
+                volume_factor=our_volume if our_volume is not None else event.our_price_factor,
+                volume_source=SOURCE_OURS if our_volume is not None else SOURCE_PRICE_FACTOR,
+            )
+        )
+    return tuple(choices)
+
+
 # --- the pure builder ------------------------------------------------------------------
 
 
@@ -903,6 +1063,7 @@ def build_map(
     *,
     tick_paise: int | None = None,
     price_tol_paise: int = DEFAULT_PRICE_CONTAINMENT_PAISE,
+    floors: Sequence[EventFloor] = (),
 ) -> AdjustmentMap:
     """Build the adjustment map from measured eras + the event list. PURE, deterministic.
 
@@ -917,6 +1078,15 @@ def build_map(
     be reconciled by the factor the price oracle already pinned to 2 paise per probe day. The
     measured volume candidate is :func:`volume_estimator` (the minimum over price-passing days),
     not a median (clause i).
+
+    ``floors`` (Q-11 addendum 4) are already-MEASURED vendor application floors, and they take part
+    in the build rather than being layered on afterwards. For an era whose probe days ALL sit below
+    an event's floor the event is forced ABSENT -- the vendor demonstrably did not apply it there --
+    and it stops counting as a fresh unknown for the probe-gap guard, which is what lets a cascade
+    of under-determined older eras unwind. An era whose probe window STRADDLES a floor is marked
+    un-provable and says so: its measured cumulative ratio mixes two different chains, so no single
+    era factor describes it. Acceptance is otherwise untouched -- a floored era still has to satisfy
+    2-paise per-day price containment AND gate-1's unwidened band, exactly like every other era.
     """
     sym = symbol.strip().upper()
     by_ex: dict[date, EventSpec] = {e.ex_date: e for e in events}
@@ -932,6 +1102,7 @@ def build_map(
         )
     all_ex = tuple(sorted(by_ex))
     ordered_eras = sorted(era_measurements, key=lambda m: (len(m.ex_dates), m.ex_dates))
+    floor_index = {f.ex_date: f for f in floors if f.resolved}
 
     # --- Phase 1: backward pass -- decide each event's SOURCE per era (the audit labels) -------
     price_canon: dict[date, tuple[str, Decimal]] = {}
@@ -948,13 +1119,27 @@ def build_map(
                 f"{sym} era {era.label!r} names ex-dates not in the event list: "
                 f"{sorted(set(era.ex_dates) - set(by_ex))}"
             )
+        # Q-11 addendum 4: an event whose MEASURED floor sits above this era's probe days was not
+        # applied by the vendor here at all. That is a measurement, not a candidate, so the event is
+        # FORCED absent -- and a straddled probe window is refused rather than averaged.
+        forced, straddled = _floored_events(win, era, floor_index)
+        if straddled:
+            decided[era.ex_dates] = None
+            reasons[era.ex_dates] = (
+                "probe window straddles a measured vendor application floor "
+                f"({[ex.isoformat() for ex in straddled]}); one era factor cannot describe two "
+                "different chains -- probe a window wholly on one side of the floor"
+            )
+            continue
         # PROBE-GAP guard: working backwards, a consecutively-probed era adds exactly ONE older
         # event. If an era introduces >1 event not already resolved by a newer era, an inter-event
         # era was NOT probed, so the residual cannot be attributed per event (>1 unknown from one
         # observable) -- committing a decomposition would be free fitting, not measurement. Mark the
         # era un-provable (its days are excluded + counted, the ruling's surgical clamp); probing
         # the missing intermediate era rescues it. The gap propagates to older eras by construction.
-        new_events = [e for e in win if e.ex_date not in price_canon]
+        # A FORCED-absent event is not an unknown -- its factor was measured by the floor search --
+        # so it does not consume the era's one degree of freedom (Q-11 addendum 4 clause ii).
+        new_events = [e for e in win if e.ex_date not in price_canon and e.ex_date not in forced]
         if len(new_events) > 1:
             decided[era.ex_dates] = None
             reasons[era.ex_dates] = (
@@ -967,6 +1152,7 @@ def build_map(
             win, era.price_cumulative, price_canon,
             get_ours=lambda e: e.our_price_factor,
             oracle=lambda k_chain, per: _price_contained(era, k_chain, price_tol_paise),
+            forced=forced,
         )
         # Q-12 clause (ii): the volume pass sees the price pass's OWN result -- each event's chosen
         # price factor becomes a volume candidate, and the era's chosen price chain is what the
@@ -985,6 +1171,7 @@ def build_map(
                 oracle=lambda k_chain, per: _volume_reconciled(era, k_chain),
                 costs=_VOLUME_COST,
                 price_factors=chosen_price,
+                forced=forced,
             )
         if price is None or volume is None:
             decided[era.ex_dates] = None
@@ -1084,7 +1271,39 @@ def build_map(
         all_event_ex_dates=all_ex,
         eras=tuple(resolutions),
         tick_paise=tick_paise,
+        # The floors the build was arbitrated UNDER are committed with it: a map whose eras were
+        # resolved with an event forced absent must carry the evidence for that, or a consumer would
+        # read a chain it cannot justify (Q-11 addendum 4 clause iv).
+        floors=tuple(floors),
     )
+
+
+def _floored_events(
+    win: Sequence[EventSpec],
+    era: EraMeasurement,
+    floor_index: Mapping[date, EventFloor],
+) -> tuple[dict[date, tuple[str, Decimal]], list[date]]:
+    """Which of this era's events a MEASURED floor forces ABSENT, and which straddle it. PURE.
+
+    Q-11 addendum 4: a floor is a measured property of the vendor's archive, so where it lies above
+    an era's probe days the event is not a candidate to arbitrate -- it is known absent. Where the
+    probe window sits astride the floor (some days below, some above) the era's single cumulative
+    ratio mixes two chains and no era factor can describe it; the caller marks that era un-provable
+    rather than averaging the two.
+    """
+    forced: dict[date, tuple[str, Decimal]] = {}
+    straddled: list[date] = []
+    days = [p.day for p in era.probe_days]
+    for event in win:
+        floor = floor_index.get(event.ex_date)
+        if floor is None or not days:
+            continue
+        applies = {floor.applies_on(day) for day in days}
+        if applies == {False}:
+            forced[event.ex_date] = (SOURCE_ABSENT, _ONE)
+        elif len(applies) > 1:
+            straddled.append(event.ex_date)
+    return forced, straddled
 
 
 def _resolve_pass(
@@ -1096,6 +1315,7 @@ def _resolve_pass(
     oracle,
     costs: Mapping[str, int] = _COST,
     price_factors: Mapping[date, Decimal] | None = None,
+    forced: Mapping[date, tuple[str, Decimal]] | None = None,
 ) -> dict[date, tuple[str, Decimal]] | None:
     """Resolve one era for ONE pass (price or volume). Returns per-event (source, factor) or None.
 
@@ -1114,12 +1334,20 @@ def _resolve_pass(
             :data:`SOURCE_PRICE_FACTOR` candidate. A price factor of exactly 1 is NOT offered: that
             is what ``absent`` means, and relabelling a vendor omission as a measurement would make
             the audit row lie.
+        forced: events a MEASURED vendor application floor puts below the vendor's splice for this
+            whole era (Q-11 addendum 4). They get exactly ONE option -- the measurement -- so the
+            arbitration cannot re-open a question the probes already answered.
     """
+    fixed = forced or {}
     option_lists: list[list[tuple[str, object, int]]] = []
     for e in win:
         ours = get_ours(e)
         from_price = None if price_factors is None else price_factors.get(e.ex_date)
         opts: list[tuple[str, object, int]] = []
+        if e.ex_date in fixed:
+            source, value = fixed[e.ex_date]
+            option_lists.append([(source, value, costs.get(source, 0))])
+            continue
         if e.ex_date in canonical:
             csrc, cval = canonical[e.ex_date]
             if csrc == SOURCE_OURS:
@@ -1508,6 +1736,10 @@ def to_dict(adjustment_map: AdjustmentMap) -> dict:
                 "ex_date": floor.ex_date.isoformat(),
                 "floor_date": None if floor.floor_date is None else floor.floor_date.isoformat(),
                 "resolved": floor.resolved,
+                "absent_throughout": floor.absent_throughout,
+                "event_price_factor": (
+                    None if floor.event_price_factor is None else str(floor.event_price_factor)
+                ),
                 "note": floor.note,
                 "probes": [
                     {
@@ -1602,6 +1834,10 @@ def from_dict(payload: Mapping) -> AdjustmentMap:
                     for p in f.get("probes", ())
                 ),
                 note=str(f.get("note", "")),
+                event_price_factor=(
+                    None if f.get("event_price_factor") is None
+                    else Decimal(str(f["event_price_factor"]))
+                ),
             )
             for f in payload.get("floors", ())
         )
@@ -1669,6 +1905,29 @@ class WindowSpec:
     end: date
 
 
+def is_measurable_session(day: date) -> bool:
+    """May a vendor factor be MEASURED on this session? PURE.
+
+    The Q-5 ruling: "weekend-dated sessions are EXCLUDED from trading days, bias pairs, and
+    trading, even when a bhavcopy exists" -- :meth:`acumen.calendar.TradingCalendar.is_trading_day`
+    answers False for one. A day that is not a trading day must not be a measurement day either.
+
+    This is enforced at BOTH ends, which is not belt-and-braces: a probe WINDOW is a date RANGE
+    (one call for four pre-ex sessions), so dropping the weekend from the chosen days still leaves
+    the vendor free to return it inside the range. It is therefore filtered again when the fetched
+    bars are folded into an era, and once more per single-day probe.
+
+    Measured live, and this is why it matters: NSE's Saturday 2024-05-18 special session lands
+    inside BDL's and INOXWIND's pre-ex probe windows, and the vendor's 1-minute volume for it
+    recovers only 0.259 / 0.196 of the raw daily against 0.500 / 0.246 on the real sessions beside
+    it. Gate-1 reconciliation must hold on EVERY probe day, so that one session made the only
+    correct chain un-provable and cost those two symbols 2,391 stored days. No oracle is widened
+    here -- the band, the containment and the candidate sets are untouched; an excluded session
+    simply stops being used as evidence.
+    """
+    return day.weekday() < 5
+
+
 def fold_bars(bars: Sequence[OneMinuteBar]) -> dict[date, dict[str, int]]:
     """Fold fetched 1-minute bars into per-day daily OHLC + summed volume (integer paise). PURE."""
     by_day: dict[date, list[OneMinuteBar]] = {}
@@ -1718,6 +1977,8 @@ def measure_symbol_live(
         if on_window is not None:
             on_window(w, len(folds))
         for day, m in folds.items():
+            if not is_measurable_session(day):
+                continue  # Q-5: a weekend-dated session is not a trading day, so not evidence
             frame = daily_store.daily(symbol, day, day)
             if frame.empty:
                 continue
@@ -1744,9 +2005,12 @@ def probe_one_day(client, daily_store, symbol: str, token: str, day: date) -> Pr
     The unit of a floor binary search (Q-11 addendum 2): one credentialed ONE_MINUTE call for a
     single session, folded to a daily OHLC and compared against the chunk-2 raw daily store --
     exactly the observable :func:`measure_symbol_live` builds an era from, for one day. Returns
-    ``None`` when the vendor served nothing for that day or the daily store has no row for it (a
-    day that answers nothing, which the classifier then reports as undecided).
+    ``None`` when the vendor served nothing for that day, when the daily store has no row for it,
+    or when the day is not a trading session at all (Q-5) -- each of which is a day that answers
+    nothing, which the classifier then reports as undecided.
     """
+    if not is_measurable_session(day):
+        return None
     bars = client.get_candles(
         token,
         INTERVAL_ONE_MINUTE,
@@ -1771,7 +2035,11 @@ def probe_one_day(client, daily_store, symbol: str, token: str, day: date) -> Pr
 
 
 def era_chain_without(
-    era: EraResolution, day_map: AdjustmentMap, day: date, *, drop_ex_date: date | None
+    era: EraResolution | Sequence[EventChoice],
+    day_map: AdjustmentMap,
+    day: date,
+    *,
+    drop_ex_date: date | None,
 ) -> Decimal:
     """The era's PRICE chain at ``day``, with ``drop_ex_date``'s event removed. PURE.
 
@@ -1779,9 +2047,14 @@ def era_chain_without(
     floor sits above ``day`` -- so a second event's floor, once found, is honoured while a third
     event's floor is searched. This is the arithmetic the floor classifier's two hypotheses are
     built from.
+
+    Accepts an :class:`EraResolution` (the committed case) or a bare sequence of
+    :class:`EventChoice` (Q-11 addendum 4: an UN-PROVABLE era's :func:`era_hypothesis`, which has no
+    committed resolution to read).
     """
     chain = _ONE
-    for choice in era.choices:
+    choices = era.choices if isinstance(era, EraResolution) else era
+    for choice in choices:
         if choice.ex_date == drop_ex_date:
             continue
         if not day_map.event_applies_on(choice.ex_date, day):
@@ -1799,25 +2072,40 @@ def search_event_floor_live(
     tol_paise: int = DEFAULT_PRICE_CONTAINMENT_PAISE,
     max_probes: int = MAX_FLOOR_PROBES,
     on_probe: Callable[[FloorProbe], None] | None = None,
+    hypotheses: Mapping[tuple[date, ...], tuple[EventChoice, ...]] | None = None,
+    allow_absent_throughout: bool = False,
 ) -> EventFloor:
-    """Measure ONE event's vendor application floor (Q-11 addendum 2). I/O via ``probe``.
+    """Measure ONE event's vendor application floor (Q-11 addendum 2 / 4). I/O via ``probe``.
 
-    ``days`` are candidate trading days strictly before ``ex_date``, each inside a PROVABLE era of
-    ``adjustment_map`` -- provability is what makes the two hypotheses exact, and the ruling's own
-    closing sentence keeps un-provable eras un-provable. The event's factor is read from the era
-    covering each probed day, so a symbol whose event resolved differently in different eras is
-    still classified against the chain that era actually committed.
+    ``days`` are candidate trading days strictly before ``ex_date``. A day inside a PROVABLE era is
+    classified against the chain that era actually committed -- so a symbol whose event resolved
+    differently in different eras is still tested honestly.
+
+    ``hypotheses`` (Q-11 addendum 4) maps an UN-PROVABLE era's key to the chain
+    :func:`era_hypothesis` built for it from previously committed sources; without an entry such a
+    day answers nothing, exactly as before the ruling. ``allow_absent_throughout`` passes the
+    ex-date to :func:`binary_search_floor` as its ``absent_floor_date``, admitting the "the vendor
+    never applied this event to one day of our history" outcome -- which requires three ``event-out``
+    probes, not one.
     """
+    chains = hypotheses or {}
+    event_factor: Decimal | None = None
+
     def classify(day: date) -> FloorProbe:
+        nonlocal event_factor
         era = adjustment_map.era_for_day(day)
-        if era is None or not era.provable:
+        if era is None:
             return FloorProbe(day=day, verdict=FLOOR_UNDECIDED)
-        factor = next((c.price_factor for c in era.choices if c.ex_date == ex_date), None)
+        choices = era.choices if era.provable else chains.get(era.ex_dates)
+        if not choices:
+            return FloorProbe(day=day, verdict=FLOOR_UNDECIDED)
+        factor = next((c.price_factor for c in choices if c.ex_date == ex_date), None)
         if factor is None or factor == _ONE:
             # Nothing to test: this era does not carry the event, or carries it as ABSENT (factor
             # 1), in which case "in" and "out" are the same chain and the day answers nothing.
             return FloorProbe(day=day, verdict=FLOOR_UNDECIDED)
-        k_out = era_chain_without(era, adjustment_map, day, drop_ex_date=ex_date)
+        event_factor = factor
+        k_out = era_chain_without(choices, adjustment_map, day, drop_ex_date=ex_date)
         k_in = k_out * factor
         measured = probe(day)
         if measured is None:
@@ -1835,13 +2123,17 @@ def search_event_floor_live(
             on_probe(result)
         return result
 
-    search = binary_search_floor(days, classify_and_report, max_probes=max_probes)
+    search = binary_search_floor(
+        days, classify_and_report, max_probes=max_probes,
+        absent_floor_date=ex_date if allow_absent_throughout else None,
+    )
     return EventFloor(
         ex_date=ex_date,
         floor_date=search.floor_date,
         resolved=search.resolved,
         probes=search.probes,
         note=search.note,
+        event_price_factor=event_factor,
     )
 
 
@@ -1857,9 +2149,13 @@ def build_symbol_map_live(
     tick_paise: int | None = None,
     price_tol_paise: int = DEFAULT_PRICE_CONTAINMENT_PAISE,
     on_window: Callable[[WindowSpec, int], None] | None = None,
+    floors: Sequence[EventFloor] = (),
 ) -> AdjustmentMap:
     """Measure the probe windows live and build the map. I/O (the fetch), then PURE (the build)."""
     eras = measure_symbol_live(
         client, daily_store, symbol, token, events, windows, fetch_date, on_window=on_window
     )
-    return build_map(symbol, fetch_date, events, eras, tick_paise=tick_paise, price_tol_paise=price_tol_paise)
+    return build_map(
+        symbol, fetch_date, events, eras,
+        tick_paise=tick_paise, price_tol_paise=price_tol_paise, floors=floors,
+    )

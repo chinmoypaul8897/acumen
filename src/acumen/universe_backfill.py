@@ -118,7 +118,29 @@ _RECOVERY_REASON: str = "quarantine-recovery (Q-12 addendum ruling)"
 #: classification (:func:`acumen.minute_backfill.stored_day_baseline`), which both prevents that and
 #: REPAIRS a doubly-divided day by multiplying it back. A row stamped with anything else is
 #: re-processed so the repair reaches it; bump this whenever that discipline changes.
-REBUILD_DISCIPLINE: str = "baseline-classification+floor-provenances-2026-07-27"
+REBUILD_DISCIPLINE: str = "baseline-classification+as-fetched-floored-2026-07-28"
+
+#: QUESTIONS.md Q-11 addendum 4 (floors in un-provable eras): the SIGNATURE GATE's second
+#: signature -- "an era failure-rate cliff (>=95% failing) at an event boundary". Measured on the
+#: gated days of the span immediately BELOW an event's ex-date.
+FLOOR_HUNT_ERA_CLIFF_RATE: Decimal = Decimal("0.95")
+
+#: ... over at least this many gated days. A cliff is a property of a SPAN; a handful of days at
+#: 100% is a coincidence, and admitting one would turn the signature gate into a blanket hunt --
+#: which is exactly what the ruling forbids. 20 sessions is about a trading month.
+MIN_CLIFF_DAYS: int = 20
+
+#: The two admitting signatures, recorded per event so the report can say WHY a hunt was allowed
+#: into an un-provable era (Q-11 addendum 4 clause i).
+SIGNATURE_GATE3: str = "gate-3 raw-gap-near-zero"
+SIGNATURE_CLIFF: str = "era failure-rate cliff"
+
+#: Identity of the FLOOR-HUNT discipline a ledger row's floors were measured under. The Q-11
+#: addendum-4 ruling widened the hunt from provable eras only (decision B123) to signature-gated
+#: hypotheses inside UN-PROVABLE eras, so a row hunted under the older discipline has not been
+#: asked the new question. Bumping this re-opens the hunt for in-scope symbols only -- a symbol
+#: above the hunt line is not re-probed, because the ruling changed what may be hunted, not who.
+FLOOR_DISCIPLINE: str = "signature-gated-unprovable-era-floors-2026-07-28"
 
 #: Per-symbol terminal states in this run's ledger.
 STATUS_SETTLED: str = "settled"
@@ -260,6 +282,12 @@ class CachedDailyStore:
 # --- era probing (PURE) ----------------------------------------------------------------
 
 
+#: The Q-5 ruling reaching the MEASUREMENT days -- one definition, used when the probe days are
+#: CHOSEN here and again when the fetched bars are folded into an era (a probe window is a date
+#: range, so the vendor can return an excluded session inside one).
+is_measurable_session = va.is_measurable_session
+
+
 def era_intervals(
     ex_dates: Sequence[date], clamp: date, end: date
 ) -> list[tuple[tuple[date, ...], date, date]]:
@@ -304,10 +332,16 @@ def era_probe_windows(
     one window. An era with no trading day at or after the 1-minute floor cannot be probed; it
     is reported, and by the probe-gap guard every OLDER era becomes un-provable too, so those
     spans are excluded and counted rather than guessed (the disclosed surgical clamp).
+
+    A weekend-dated session is never probed (:func:`is_measurable_session`): the Q-5 ruling makes
+    it not a trading day at all, so measuring an era's factor on one measures a session the spec
+    excludes.
     """
     windows: list[va.WindowSpec] = []
     unprobeable: list[tuple[date, ...]] = []
-    usable = sorted(day for day in trading_days if day >= max(clamp, floor))
+    usable = sorted(
+        day for day in trading_days if day >= max(clamp, floor) and is_measurable_session(day)
+    )
     for key, low, high in era_intervals([e.ex_date for e in events], clamp, end):
         inside = [day for day in usable if low <= day <= high]
         if len(inside) < MIN_PROBE_DAYS_PER_ERA:
@@ -426,6 +460,18 @@ class SymbolRecord:
     #: The gate-1 numbers immediately BEFORE the floor pass, so its effect is auditable alone.
     pre_floor_gate1_pass: int = -1
     pre_floor_gate1_total: int = -1
+    # --- floors in UN-PROVABLE eras (Q-11 addendum 4) --------------------------------------
+    #: Which floor-hunt discipline measured this row's floors (:data:`FLOOR_DISCIPLINE`).
+    floor_discipline: str = ""
+    #: Rendered "ex-date: signature" strings -- why each event was ADMITTED into an un-provable
+    #: era's hunt. An empty list on a hunted symbol means no event showed either signature.
+    floor_signatures: list[str] = field(default_factory=list)
+    #: Provable-era counts either side of the floor pass, so a PROMOTION is visible as a number.
+    pre_floor_eras_provable: int = -1
+    eras_promoted: int = 0
+    #: Unknown-baseline days that ALSO fail gate 1 -- the only ones that cost coverage. The rest are
+    #: days the classifier declined to touch that reconcile anyway (the conservative refusal).
+    unknown_baseline_failing: int = 0
     # --- gate 3, kept per failure so the report can print the numbers ---------------------
     gate3_failure_rows: list[str] = field(default_factory=list)
 
@@ -533,6 +579,10 @@ class SymbolRecord:
         self.floor_note = previous.floor_note
         self.pre_floor_gate1_pass = previous.pre_floor_gate1_pass
         self.pre_floor_gate1_total = previous.pre_floor_gate1_total
+        self.floor_discipline = previous.floor_discipline
+        self.floor_signatures = list(previous.floor_signatures)
+        self.pre_floor_eras_provable = previous.pre_floor_eras_provable
+        self.eras_promoted = previous.eras_promoted
         if self.map_required_by_recovery:
             self.route = ROUTE_MAP_REQUIRED
             self.route_reasons = [*self.route_reasons, _RECOVERY_REASON]
@@ -942,6 +992,109 @@ def gate3_over_events(
             )))
 
 
+# --- the SIGNATURE GATE (Q-11 addendum 4 clause i; PURE) ----------------------------------
+
+
+def gate3_signature_events(gate3_failure_rows: Sequence[str]) -> dict[date, str]:
+    """Ex-dates whose gate-3 failure shows the RAW-GAP-NEAR-ZERO signature. PURE.
+
+    The ruling admits an event into an un-provable era's floor hunt when "it shows the
+    raw-gap-near-zero gate-3 signature". The rows already carry both numbers
+    (``symbol|events|ex_date|k|pre|ex|raw_gap%|adjusted_gap%|reason``), so the test is a
+    NEAREST-HYPOTHESIS one rather than an invented threshold -- there are exactly two models for a
+    gate-3 failure's raw gap and the measurement picks one:
+
+    * a HEALTHY event predicts a raw gap of size ``|k - 1|`` (the price step the event itself makes);
+    * a pre-ex side that was never un-adjusted predicts a raw gap of size 0 (both closes already in
+      the same price domain), which is what a vendor application floor above the pre-ex day leaves.
+
+    The event qualifies when the SIZE of the measured raw gap is nearer 0 than the size of the
+    event's own step -- ``|raw_gap| < |k - 1| / 2``. Magnitudes, not signed values: a raw gap of
+    +38% against a step of -20% is not "the same price domain" by any reading, and a signed nearest
+    test would admit it. Scale-free by construction, so a 5:1 split and a 5% special dividend are
+    judged on the same footing rather than against an invented percentage.
+
+    On the FIX-3 residual table this admits exactly the ELEVEN rows the architect named (raw gaps
+    -4.63%..+10.98% against steps of 12.5%..45% half-width) and rejects the six that are a
+    different defect: ASTRAL +38.49% (step 10%), BPCL +101.21%, GAIL 2018 +201.98%, OIL 2018
+    +42.44%, VBL -65.70% and COCHINSHIP -40.00% (step 25%, and its raw gap is nearly the healthy
+    -50%).
+    """
+    admitted: dict[date, str] = {}
+    for row in gate3_failure_rows:
+        parts = row.split("|")
+        if len(parts) < 8:
+            continue
+        try:
+            ex_date = date.fromisoformat(parts[2])
+            k = Decimal(parts[3])
+            raw_gap = Decimal(parts[6]) / Decimal(100)
+            adjusted_gap = Decimal(parts[7]) / Decimal(100)
+        except (ValueError, ArithmeticError):
+            continue
+        step = abs(k - _ONE)
+        if step > 0 and abs(raw_gap) < step / Decimal(2):
+            admitted[ex_date] = (
+                f"{SIGNATURE_GATE3}: |raw gap| {abs(raw_gap) * 100:.2f}% is nearer 0 than the "
+                f"event's own step {step * 100:.2f}% (k={k}), adjusted gap "
+                f"{adjusted_gap * 100:.2f}% -- both closes are already in the same price domain"
+            )
+    return admitted
+
+
+def era_cliff_events(
+    tally: GateTally,
+    ex_dates: Sequence[date],
+    *,
+    min_rate: Decimal = FLOOR_HUNT_ERA_CLIFF_RATE,
+    min_days: int = MIN_CLIFF_DAYS,
+) -> dict[date, str]:
+    """Ex-dates whose immediately-below span fails gate 1 at ``min_rate`` or more. PURE.
+
+    The ruling's second signature: "an era failure-rate cliff (>=95% failing) at an event boundary".
+    The span measured is the gated days from the previous event's ex-date up to (not including) this
+    one -- the days whose chain that event is the newest member of. ``min_days`` keeps a week-long
+    bucket from manufacturing a cliff out of a handful of days.
+    """
+    failing = {day for day, _gap, _volume in tally.gate1_failures}
+    gated = sorted(tally.gate1_days)
+    bounds = sorted({ex for ex in ex_dates})
+    admitted: dict[date, str] = {}
+    low = date.min
+    for ex_date in bounds:
+        span = [d for d in gated if low <= d < ex_date]
+        low = ex_date
+        if len(span) < min_days:
+            continue
+        failures = sum(1 for d in span if d in failing)
+        rate = Decimal(failures) / Decimal(len(span))
+        if rate >= min_rate:
+            admitted[ex_date] = (
+                f"{SIGNATURE_CLIFF}: {failures}/{len(span)} = {rate:.1%} of the gated days below "
+                f"{ex_date.isoformat()} fail gate 1 (>= {min_rate:.0%})"
+            )
+    return admitted
+
+
+def signature_gated_events(
+    tally: GateTally, ex_dates: Sequence[date], gate3_failure_rows: Sequence[str]
+) -> dict[date, str]:
+    """Every event admitted into an UN-PROVABLE era's floor hunt, with its reason. PURE.
+
+    Q-11 addendum 4 clause (i): "hunting is SIGNATURE-GATED, never blanket". This is the whole gate;
+    an event absent from the result is never hunted inside an un-provable era, however badly that
+    era fails. Both signatures are reported when both fire, because the report should show all the
+    evidence the hunt acted on.
+    """
+    gate3 = gate3_signature_events(gate3_failure_rows)
+    cliff = era_cliff_events(tally, ex_dates)
+    admitted: dict[date, str] = {}
+    for ex_date in sorted({*gate3, *cliff}):
+        reasons = [r for r in (gate3.get(ex_date), cliff.get(ex_date)) if r]
+        admitted[ex_date] = " AND ".join(reasons)
+    return admitted
+
+
 # --- the run ----------------------------------------------------------------------------
 
 
@@ -1064,6 +1217,7 @@ def build_map_for(
     config: RunConfig,
     tick_paise: int | None,
     *,
+    floors: Sequence["va.EventFloor"] = (),
     log: Callable[[str], None] = print,
 ) -> tuple["va.AdjustmentMap | None", int, int]:
     """Probe every era of ``symbol``'s ingest span and build + persist its map.
@@ -1078,6 +1232,11 @@ def build_map_for(
     probe evidence the Q-11 addendum-2 ruling requires, and would leave the next fresh fetch of
     those days dividing by a chain the vendor never applied. A floor whose event no longer resolves
     to the same factor is DROPPED and counted, so the caller can re-open the hunt.
+
+    ``floors`` are floors measured by THIS run's hunt, handed to the builder so the arbitration
+    happens WITH them in force (Q-11 addendum 4 clause iii): a floored event is absent from the eras
+    it does not reach, stops consuming the probe-gap guard's one degree of freedom, and the era then
+    stands or falls on the same oracle as every other era. That is how a promotion is earned.
     """
     events = va.events_from_factor_table(
         view.factors, view.suppressions, view.pending_rights_ex_dates, symbol=symbol,
@@ -1099,7 +1258,7 @@ def build_map_for(
     )
     if not eras:
         return None, len(unprobeable), 0
-    amap = va.build_map(symbol, config.end, events, eras, tick_paise=tick_paise)
+    amap = va.build_map(symbol, config.end, events, eras, tick_paise=tick_paise, floors=floors)
     try:
         previous = mb.load_adjustment_map_for(symbol, data_dir=config.map_data_dir)
     except va.VendorAdjustmentError:
@@ -1157,8 +1316,9 @@ def process_symbol(
             # Built under the SUPERSEDED median volume estimator (Q-12). Its committed volume factors
             # came from a biased estimator and its un-provable eras may be provable under the ruled
             # one, so it is rebuilt from probe windows -- never consumed.
-            log(f"    map was built under estimator {adjustment_map.volume_estimator_id or '(none)'}"
-                f" -> stale under Q-12 ({va.MAP_VOLUME_ESTIMATOR}); rebuilding")
+            log("    map is STALE -- estimator "
+                f"{adjustment_map.volume_estimator_id or '(none)'} vs {va.MAP_VOLUME_ESTIMATOR}, "
+                f"model {adjustment_map.map_model_id or '(none)'} vs {va.MAP_MODEL}; rebuilding")
             adjustment_map = None
         if adjustment_map is None or adjustment_map.fetch_date != config.end:
             try:
@@ -1238,6 +1398,13 @@ def process_symbol(
     tally = gate_symbol(config.minute_store, cache, symbol, since=clamp)
     gate3_over_events(tally, symbol, view.factors)
     record.apply_tally(tally)
+    if adjustment_map is not None:
+        # Of the days the baseline classifier declined to touch, how many actually COST anything --
+        # i.e. also fail gate 1. The rest reconcile as they stand, which is why declining is the
+        # conservative action rather than a loss (Q-11 addendum 4's re-classification duty).
+        record.unknown_baseline_failing = len(
+            set(applied.unknown_baseline_days) & {d for d, _g, _v in tally.gate1_failures}
+        )
     _settle(record, tally, view.factors)
 
     if reroute_owed(record):
@@ -1397,37 +1564,100 @@ def reroute_quarantined_to_map(
 # --- the vendor application-floor hunt (Q-11 addendum 2) ---------------------------------
 
 
-def floor_hunt_owed(record: SymbolRecord) -> bool:
-    """Is this symbol inside the ruling's hunt scope, and not yet hunted? PURE.
+def floor_hunt_in_scope(record: SymbolRecord) -> bool:
+    """Is this symbol inside the ruling's hunt SCOPE at all? PURE.
 
     "Floors are hunted ONLY where failure is systematic: every quarantined symbol and every settled
-    symbol with gate-1 < 98%." A symbol with no gated day at all has no failure to explain.
+    symbol with gate-1 < 98%." A symbol with no gated day at all has no failure to explain. A symbol
+    carrying a GATE-3 failure is in scope too (Q-11 addendum 4): the raw-gap-near-zero signature is
+    read off exactly those rows, and a symbol can sit above the 98% line while one ex-date of its
+    history is in the wrong price domain -- which is a correctness question, not a coverage one.
     """
-    if record.floors_hunted or not record.gate1_total:
+    if not record.gate1_total:
         return False
-    if record.status == STATUS_QUARANTINED:
+    if record.status == STATUS_QUARANTINED or record.gate3_failed:
         return True
     return record.gate1_rate < FLOOR_HUNT_GATE1_MAX_RATE
 
 
+def floor_hunt_owed(record: SymbolRecord) -> bool:
+    """Is this symbol in scope, and does it owe a hunt under the CURRENT discipline? PURE.
+
+    A hunt is one-shot per discipline: ``floors_hunted`` stops a resumed run re-spending ~11 probes
+    per event on a settled answer, and :data:`FLOOR_DISCIPLINE` re-opens it exactly once when the
+    architect widens what may be hunted (Q-11 addendum 4 -- signature-gated hypotheses inside
+    un-provable eras, a question the FIX-3 hunt never asked).
+    """
+    if not floor_hunt_in_scope(record):
+        return False
+    return not record.floors_hunted or record.floor_discipline != FLOOR_DISCIPLINE
+
+
+def era_hypotheses_for(
+    adjustment_map: "va.AdjustmentMap",
+    events: Sequence["va.EventSpec"],
+    target_ex_date: date | None = None,
+) -> tuple[dict[tuple[date, ...], tuple["va.EventChoice", ...]], list[str]]:
+    """A hypothesised chain for every UN-PROVABLE era the map holds. PURE.
+
+    Q-11 addendum 4 clause (ii). Returns ``(hypotheses, refusals)``: the chains
+    :func:`acumen.vendor_adjustment.era_hypothesis` could build from previously committed sources
+    (plus, for ``target_ex_date`` alone, our own CONTEXT 4.2 factor), and a recorded reason for
+    every era it could not. An era holding a SECOND uncommitted event has two unknowns and is
+    refused -- the honest outcome, and the one that keeps a floor search a measurement.
+    """
+    by_ex = {e.ex_date: e for e in events}
+    committed = va.canonical_event_factors(adjustment_map)
+    hypotheses: dict[tuple[date, ...], tuple["va.EventChoice", ...]] = {}
+    refusals: list[str] = []
+    for era in adjustment_map.eras:
+        if era.provable:
+            continue
+        choices = va.era_hypothesis(
+            adjustment_map, era, by_ex, target_ex_date=target_ex_date, committed=committed
+        )
+        if choices is None:
+            missing = [
+                ex.isoformat() for ex in era.ex_dates
+                if ex not in committed and ex != target_ex_date
+            ] or [
+                ex.isoformat() for ex in era.ex_dates
+                if ex not in committed and (ex not in by_ex or by_ex[ex].our_price_factor is None)
+            ]
+            refusals.append(
+                f"era {era.label}: no hypothesis -- {missing} carry no committed source, so the era "
+                "holds more than one unknown; nothing honest to test a floor against"
+            )
+            continue
+        hypotheses[era.ex_dates] = choices
+    return hypotheses, refusals
+
+
 def floor_candidate_days(
-    adjustment_map: "va.AdjustmentMap", days: Sequence[date], ex_date: date
+    adjustment_map: "va.AdjustmentMap",
+    days: Sequence[date],
+    ex_date: date,
+    hypotheses: Mapping[tuple[date, ...], tuple["va.EventChoice", ...]] | None = None,
 ) -> list[date]:
     """The trading days a floor search for ``ex_date`` may probe. PURE.
 
-    Strictly before the ex-date, and only days whose era the map RESOLVED: an un-provable era has
-    no committed per-event chain to drop the event from, so its days answer neither hypothesis --
-    and the ruling's own closing sentence keeps them un-provable. Restricting the domain is what
-    makes the classifier's two hypotheses exact rather than speculative.
+    Strictly before the ex-date, and only days whose era carries the event with a factor to drop.
+    A PROVABLE era supplies that factor from its committed chain. An UN-PROVABLE era supplies it
+    from ``hypotheses`` -- the Q-11 addendum-4 ruling's own widening, and the ONLY way its days
+    enter the domain: without an entry the era is skipped exactly as decision B123 skipped it.
     """
+    chains = hypotheses or {}
     inside: list[date] = []
     for day in days:
-        if day >= ex_date:
+        if day >= ex_date or not is_measurable_session(day):
             continue
         era = adjustment_map.era_for_day(day)
-        if era is None or not era.provable:
+        if era is None:
             continue
-        if any(c.ex_date == ex_date and c.price_factor != _ONE for c in era.choices):
+        choices = era.choices if era.provable else chains.get(era.ex_dates)
+        if not choices:
+            continue
+        if any(c.ex_date == ex_date and c.price_factor != _ONE for c in choices):
             inside.append(day)
     return sorted(inside)
 
@@ -1441,6 +1671,10 @@ def hunt_symbol_floors(
     tally: GateTally,
     *,
     force_ex_dates: frozenset[date] = frozenset(),
+    events: Sequence["va.EventSpec"] = (),
+    signatures: Mapping[date, str] | None = None,
+    skip_ex_dates: frozenset[date] = frozenset(),
+    probe_cache: dict[date, "va.ProbeDay | None"] | None = None,
     log: Callable[[str], None] = print,
 ) -> tuple[list["va.EventFloor"], list[str], int]:
     """Binary-search a vendor application floor for each systematically-failing event. I/O (probes).
@@ -1458,10 +1692,22 @@ def hunt_symbol_floors(
     decide whether an event is worth ~11 probes -- which is right the first time and exactly wrong
     afterwards, because a span repaired BY a floor no longer fails. Without this, a map that lost
     its floors could never get them back: the repair would hide its own justification.
+
+    ``events`` + ``signatures`` are the Q-11 addendum-4 widening, and they work together: an
+    un-provable era's days enter the search domain ONLY for an event the signature gate admitted
+    (clause i), and only where a hypothesis chain could be built for that era FROM PREVIOUSLY
+    COMMITTED SOURCES plus the event being floored (clause ii -- rebuilt per target event, because
+    the second-unknown test depends on which event is the target). An event with neither keeps
+    exactly its FIX-3 domain -- the provable-era days -- so a non-qualifying event is never hunted
+    anywhere it was not hunted before.
+
+    ``skip_ex_dates`` are events already floored by an earlier ROUND of this symbol's hunt, and
+    ``probe_cache`` is shared across rounds so a day probed once is never paid for twice.
     """
     failing = {day for day, _gap, _volume in tally.gate1_failures}
     gated = sorted(tally.gate1_days)
-    cache: dict[date, "va.ProbeDay | None"] = {}
+    admitted = dict(signatures or {})
+    cache: dict[date, "va.ProbeDay | None"] = probe_cache if probe_cache is not None else {}
     spent = 0
 
     def probe(day: date) -> "va.ProbeDay | None":
@@ -1475,13 +1721,32 @@ def hunt_symbol_floors(
     findings: list[str] = []
     current = adjustment_map
     for ex_date in sorted(adjustment_map.all_event_ex_dates, reverse=True):
-        if ex_date > adjustment_map.fetch_date:
+        if ex_date > adjustment_map.fetch_date or ex_date in skip_ex_dates:
             continue
-        days = floor_candidate_days(current, gated, ex_date)
+        # A floor a PREVIOUS pass already measured for this event is its own admission: the repair
+        # it made is exactly what erases the failure signature that admitted it, so requiring the
+        # signature again would make a re-measurement impossible after the first success (the same
+        # trap decision B125 caught on the failure-rate gate, one level up).
+        signature = admitted.get(ex_date) or (
+            "previously measured floor, re-measured (its own repair erased the signature)"
+            if ex_date in force_ex_dates else None
+        )
+        # Clause (i): un-provable-era days are in the domain ONLY for a signature-admitted event.
+        # Clause (ii): and only where THIS target leaves the era exactly one unknown.
+        era_chains: dict[tuple[date, ...], tuple["va.EventChoice", ...]] = {}
+        if signature:
+            era_chains, era_refusals = era_hypotheses_for(current, events, ex_date)
+            for refusal in era_refusals:
+                findings.append(f"{ex_date.isoformat()} -> {refusal}")
+        days = floor_candidate_days(current, gated, ex_date, era_chains)
+        provable_days = floor_candidate_days(current, gated, ex_date)
+        unprovable_days = len(days) - len(provable_days)
         if not days:
             findings.append(
                 f"{ex_date.isoformat()} -> not searched: no day of a provable era carries this "
                 "event with a factor to drop"
+                + ("" if signature else "; and no signature admits an un-provable era's days "
+                   "(Q-11 addendum 4 clause i)")
             )
             continue
         failures = sum(1 for day in days if day in failing)
@@ -1498,8 +1763,17 @@ def hunt_symbol_floors(
                 f"({failures}/{len(days)} = {rate:.1%} fail): a previous pass resolved a floor "
                 "here, and the repair is why the span no longer fails")
         log(f"      floor search {ex_date} over {len(days)} day(s) "
-            f"({failures} failing, {rate:.1%})")
-        floor = va.search_event_floor_live(probe, current, ex_date, days)
+            f"({failures} failing, {rate:.1%})"
+            + (f"  [+{unprovable_days} un-provable-era day(s): {signature}]"
+               if unprovable_days else ""))
+        floor = va.search_event_floor_live(
+            probe, current, ex_date, days,
+            hypotheses=era_chains,
+            # The "absent from every chain in our history" outcome is only reachable, and only
+            # meaningful, where the search may look inside un-provable eras -- it is the shape of
+            # the deadlock the ruling exists to break.
+            allow_absent_throughout=bool(signature),
+        )
         floors.append(floor)
         current = va.with_floors(current, floors)
         findings.append(
@@ -1507,9 +1781,93 @@ def hunt_symbol_floors(
             + (floor.floor_date.isoformat() if floor.floor_date else "no splice")
             + f" ({'resolved' if floor.resolved else 'UNRESOLVED'}, "
             f"{len(floor.probes)} probe(s)): {floor.note}"
+            + (f" [admitted by {signature}]" if signature and unprovable_days else "")
         )
         log(f"        {findings[-1]}")
     return floors, findings, spent
+
+
+#: How many times a symbol's hunt may compose with its own results before it stops. Each round's
+#: PROMOTED eras become the next round's committed sources (Q-11 addendum 4 clause ii), so an older
+#: era that held two unknowns can hold one after a newer era resolves -- which is exactly how a
+#: cascade of "under-determined" eras unwinds. Bounded and deterministic: a round that resolves no
+#: new floor, or promotes no era, is the last.
+MAX_FLOOR_HUNT_ROUNDS: int = 3
+
+
+def _hunt_rounds(
+    client,
+    master: InstrumentMaster,
+    cached_store: CachedDailyStore,
+    cache: DailyCache,
+    record: SymbolRecord,
+    view: mb.SymbolCorpActions,
+    clamp: date,
+    config: RunConfig,
+    tick_paise: int | None,
+    adjustment_map: "va.AdjustmentMap",
+    tally: GateTally,
+    events: Sequence["va.EventSpec"],
+    signatures: Mapping[date, str],
+    forced: frozenset[date],
+    *,
+    log: Callable[[str], None] = print,
+) -> tuple[list["va.EventFloor"], list[str], int, "va.AdjustmentMap | None"]:
+    """Hunt, rebuild with what was found, hunt again on what that unlocked. Returns the union.
+
+    The composition the ruling's clause (ii) implies: a floor measured in a newer era makes that
+    era's events committed sources, which can leave an OLDER era with exactly one unknown where it
+    had two. Rounds are capped at :data:`MAX_FLOOR_HUNT_ROUNDS` and stop as soon as a round adds no
+    floor, so the cost stays a handful of probe days. The probe cache is shared across rounds, so
+    a day is fetched at most once for the whole symbol.
+    """
+    all_floors: list["va.EventFloor"] = []
+    all_findings: list[str] = []
+    probe_cache: dict[date, "va.ProbeDay | None"] = {}
+    current = adjustment_map
+    rebuilt_with: frozenset[date] = frozenset()
+    latest: "va.AdjustmentMap | None" = None
+    spent = 0
+    for round_index in range(1, MAX_FLOOR_HUNT_ROUNDS + 1):
+        floors, findings, round_spent = hunt_symbol_floors(
+            client, cached_store, record.symbol, master.token(record.symbol),
+            current, tally, force_ex_dates=forced, events=events, signatures=signatures,
+            skip_ex_dates=frozenset(f.ex_date for f in all_floors if f.resolved),
+            probe_cache=probe_cache, log=log,
+        )
+        spent += round_spent
+        all_findings.extend(
+            f if round_index == 1 else f"[round {round_index}] {f}" for f in findings
+        )
+        fresh = [f for f in floors if f.resolved and f.floor_date is not None]
+        all_floors.extend(floors)
+        if not fresh or round_index == MAX_FLOOR_HUNT_ROUNDS:
+            break
+        # Re-arbitrate with the floors in force. Only a PROMOTION can unlock another round, so a
+        # rebuild that promotes nothing ends the composition instead of paying for another pass.
+        before = sum(1 for era in current.eras if era.provable)
+        rebuilt, _unprobed, _dropped = build_map_for(
+            client, cached_store, cache, record.symbol, master.token(record.symbol),
+            view, clamp, config, tick_paise,
+            floors=[f for f in all_floors if f.resolved], log=log,
+        )
+        if rebuilt is None:
+            break
+        after = sum(1 for era in rebuilt.eras if era.provable)
+        log(f"      round {round_index}: {after - before} era(s) promoted "
+            f"({before} -> {after} provable)")
+        current = rebuilt
+        rebuilt_with = frozenset(f.ex_date for f in all_floors if f.resolved)
+        latest = rebuilt
+        if after <= before:
+            break
+    # Only hand the map back if it was built with EVERY floor now in hand; a later round that found
+    # one more floor leaves it stale, and a stale map must be re-measured, not reused.
+    if latest is not None and rebuilt_with != frozenset(
+        f.ex_date for f in all_floors if f.resolved
+    ):
+        latest = None
+    return all_floors, all_findings, spent, latest
 
 
 def run_floor_pass(
@@ -1545,16 +1903,34 @@ def run_floor_pass(
         # No price oracle to arbitrate "event-in vs event-out" against, so there is nothing to
         # search. The symbol keeps its numbers; the reason is recorded rather than silently skipped.
         record.floors_hunted = True
+        record.floor_discipline = FLOOR_DISCIPLINE
         record.floor_note = "no adjustment map on disk to hunt floors against"
         log(f"    floor hunt skipped for {record.symbol}: {record.floor_note}")
         return
     log(f"    FLOOR HUNT: {record.symbol} at gate-1 {record.gate1_rate:.1%} "
         f"(< {FLOOR_HUNT_GATE1_MAX_RATE:.0%} or quarantined)")
     forced = frozenset(date.fromisoformat(d) for d in record.floor_ex_dates)
+    # Q-11 addendum 4: which events may be hunted INSIDE an un-provable era, and what chain their
+    # two hypotheses are formed from. Both are recorded on the row so the report can show the
+    # evidence the hunt acted on -- and an empty signature set means the widening changed nothing
+    # for this symbol, which is itself a finding.
+    events = va.events_from_factor_table(
+        view.factors, view.suppressions, view.pending_rights_ex_dates, symbol=record.symbol,
+        unparsed_ex_dates=unparsed_ex_dates(view, record.symbol),
+    )
+    signatures = signature_gated_events(
+        tally,
+        [e.ex_date for e in events],
+        record.gate3_failure_rows,
+    )
+    record.floor_signatures = [f"{ex.isoformat()}: {why}" for ex, why in sorted(signatures.items())]
+    record.pre_floor_eras_provable = record.map_eras_provable
+    for line in record.floor_signatures:
+        log(f"      SIGNATURE {line}")
     try:
-        floors, findings, spent = hunt_symbol_floors(
-            client, cached_store, record.symbol, master.token(record.symbol),
-            adjustment_map, tally, force_ex_dates=forced, log=log,
+        floors, findings, spent, already_rebuilt = _hunt_rounds(
+            client, master, cached_store, cache, record, view, clamp, config, tick_paise,
+            adjustment_map, tally, events, signatures, forced, log=log,
         )
     except sac.SmartApiError as exc:
         # CONTEXT 4.3: a transient "access denied" burst is NORMAL and is retried, never treated as
@@ -1567,11 +1943,13 @@ def run_floor_pass(
         return
     except (va.VendorAdjustmentError, DailyStoreError, InstrumentMasterError) as exc:
         record.floors_hunted = True  # deterministic: retrying would fail identically forever
+        record.floor_discipline = FLOOR_DISCIPLINE
         record.floor_note = f"floor hunt failed: {type(exc).__name__}: {exc}"
         log(f"      floor hunt FAILED: {exc} -- the map is left exactly as it was")
         return
 
     record.floors_hunted = True
+    record.floor_discipline = FLOOR_DISCIPLINE
     record.floor_findings = findings
     record.floor_probes_spent = spent
     resolved = [f for f in floors if f.resolved and f.floor_date is not None]
@@ -1585,8 +1963,41 @@ def run_floor_pass(
         log(f"      {record.floor_note}")
         return
 
-    adjustment_map = va.with_floors(adjustment_map, floors)
-    va.persist_map(adjustment_map, data_dir=config.map_data_dir)
+    # ACCEPTANCE (Q-11 addendum 4 clause iii) -- the measured floors go back through the MAP BUILDER
+    # rather than being layered onto the committed map by hand, so every era they touch has to
+    # satisfy the same oracle as every other era: 2-paise per-day price containment plus gate-1's
+    # unwidened band. An era that does becomes provable (a PROMOTION, counted below); one that does
+    # not stays un-provable, and its days stay excluded + counted. Probe windows are the only
+    # download; no stored candle is refetched.
+    promoted_from = sum(1 for era in adjustment_map.eras if era.provable)
+    rebuilt = already_rebuilt  # a hunt round may already hold the map built with every floor
+    try:
+        if rebuilt is None:
+            rebuilt, unprobed, dropped = build_map_for(
+                client, cached_store, cache, record.symbol, master.token(record.symbol),
+                view, clamp, config, tick_paise, floors=floors, log=log,
+            )
+            record.map_unprobed_eras = unprobed
+    except (sac.SmartApiError, va.VendorAdjustmentError, DailyStoreError,
+            InstrumentMasterError) as exc:
+        log(f"      floor-aware rebuild FAILED ({type(exc).__name__}: {exc}); committing the "
+            "floors onto the existing map instead -- the chain drop still applies, no era is "
+            "promoted")
+    if rebuilt is not None:
+        adjustment_map = rebuilt
+        record.map_eras = len(adjustment_map.eras)
+        record.map_eras_provable = sum(1 for era in adjustment_map.eras if era.provable)
+        record.map_events = [
+            MapEvent(kind=c.kind, ex_date=c.ex_date.isoformat(),
+                     price_source=c.price_source, volume_source=c.volume_source)
+            for era in adjustment_map.eras for c in era.choices
+        ]
+        record.eras_promoted = max(0, record.map_eras_provable - promoted_from)
+        log(f"      floor-aware rebuild: {record.map_eras_provable}/{record.map_eras} eras "
+            f"provable (was {promoted_from}) -> {record.eras_promoted} era(s) PROMOTED")
+    else:
+        adjustment_map = va.with_floors(adjustment_map, floors)
+        va.persist_map(adjustment_map, data_dir=config.map_data_dir)
     applied = mb.rebuild_symbol_raw_with_map(
         config.minute_store, cached_store, record.symbol, adjustment_map, tick_paise=tick_paise,
     )
@@ -1598,10 +2009,15 @@ def run_floor_pass(
     record.snapshot_prior()
     record.apply_tally(new_tally)
     record.unknown_baseline_days = len(applied.unknown_baseline_days)
+    record.unknown_baseline_failing = len(
+        set(applied.unknown_baseline_days) & {d for d, _g, _v in new_tally.gate1_failures}
+    )
+    record.unprovable_days = len(applied.unprovable_days)
     _settle(record, new_tally, view.factors)
     record.floor_note = (
         f"{len(resolved)} floor(s) resolved over {spent} probe(s); "
-        f"{applied.days_rewritten} day(s) rewritten, {applied.identity_days} already raw; "
+        + (f"{record.eras_promoted} era(s) promoted to provable; " if record.eras_promoted else "")
+        + f"{applied.days_rewritten} day(s) rewritten, {applied.identity_days} already raw; "
         f"gate 1 {before} -> {record.gate1_effective_pass}/{record.gate1_total} "
         f"({record.gate1_rate:.1%})"
     )
@@ -1658,6 +2074,11 @@ def needs_reprocessing(record: SymbolRecord, config: RunConfig) -> str | None:
     if reroute_owed(record):
         return "map-path recovery pass owed (Q-12 addendum / Q-11 addendum-2 hunt scope)"
     if floor_hunt_owed(record):
+        if record.floors_hunted and record.floor_discipline != FLOOR_DISCIPLINE:
+            return (
+                f"floor-hunt discipline {record.floor_discipline or '(provable eras only, B123)'} "
+                f"-> {FLOOR_DISCIPLINE}"
+            )
         return "vendor application-floor hunt owed (Q-11 addendum 2)"
     return None
 
@@ -1740,7 +2161,11 @@ def run_universe(
             log("\ninterrupted -- ledger saved; the same command resumes at window granularity")
             raise
         ledger.record(record)
-        quarantined = ledger.quarantined()
+        # Same scoping as the pre-flight check above (decision B131): the ceiling is a fraction of
+        # THIS run's symbols, so a `--symbols` subset is judged on its own outcomes. Counting the
+        # whole ledger here made a subset run abort after its first symbol on quarantines that had
+        # nothing to do with it -- while a full-universe run is unaffected either way.
+        quarantined = [s for s in ledger.quarantined() if s in in_scope]
         if len(quarantined) > ceiling:
             ledger.halted = (
                 f"{len(quarantined)} symbols quarantined (> {HALT_QUARANTINE_FRACTION:.0%} of "
@@ -1805,6 +2230,16 @@ def unknown_series_sweep(
 
 def _pct(numerator: int, denominator: int) -> str:
     return "-" if not denominator else f"{100.0 * numerator / denominator:.1f}%"
+
+
+def _cell(text: str) -> str:
+    """Make ``text`` safe inside a markdown table cell. PURE.
+
+    A pipe is the column separator, and the signature strings legitimately contain one -- the
+    gate-3 reason quotes ``|raw gap|``. Unescaped, that silently splits the row into extra columns
+    and the evidence is misread rather than missing, which is worse.
+    """
+    return text.replace("|", "\\|").replace("\n", " ").strip()
 
 
 def build_report(
@@ -1880,6 +2315,15 @@ def build_report(
         f"with every failure categorized in section 4. Without the auction relief the same store "
         f"measures {_pct(gate1_pass, all_days)}; the two numbers are printed side by side "
         "everywhere in this report, and the relief count is never folded into the strict one.")
+    add("")
+    met = all_days > 0 and Decimal(gate1_effective) / Decimal(all_days) >= Decimal("0.95")
+    shortfall = max(0, -(-(all_days * 95) // 100) - gate1_effective)
+    add(f"> **DoD VERDICT: {'MET' if met else 'NOT MET'}** -- "
+        + (f"{gate1_effective:,} of {all_days:,} symbol-days pass, at or above the 95% line."
+           if met else
+           f"{gate1_effective:,} of {all_days:,} symbol-days pass; {shortfall:,} more passing "
+           f"symbol-days would be needed to reach 95%. Every remaining failure is disclosed in "
+           f"section 4 and in the residual register of section 5."))
     if ledger.halted:
         add("")
         add(f"> **RUN HALTED.** {ledger.halted}")
@@ -2005,6 +2449,7 @@ def build_report(
 
     _add_floor_section(add, records)
     _add_relief_section(add, records, gate1_total)
+    _add_unprovable_floor_section(add, [r for r in records if r.floors_hunted])
 
     add("## 4. Exclusions by reason")
     add("")
@@ -2026,6 +2471,21 @@ def build_report(
         "way. The count measures how often the classifier refuses, not how many days are wrong |")
     add(f"| quarantined symbols (whole history) | {quarantined_days:,} | "
         f"{len(quarantined)} symbol(s) below the {QUARANTINE_GATE1_MIN_PASS_RATE:.0%} gate-1 floor |")
+    add("")
+    unknown_days = sum(r.unknown_baseline_days for r in records)
+    unknown_failing = sum(r.unknown_baseline_failing for r in records)
+    add("**The unknown-baseline days, re-classified against the ENRICHED hypothesis set (Q-11 "
+        "addendum 4).** The set is now `1 / k_era / 1/k_era / 1/k_era^2` plus, wherever a measured "
+        "floor makes the day's own chain differ from its era chain, `k_target/k_era` "
+        "(pre-floor-divided), `k_era/k_target` (floor-overreached) and `k_target` itself "
+        "(as-fetched-floored -- the vendor's own untouched bars on a floored day, which is what "
+        f"every day of a newly PROMOTED era looks like). Of the {unknown_days:,} days still "
+        f"unidentified, **{unknown_failing:,} also fail gate 1** -- those are the only ones that "
+        "cost coverage. The remainder reconcile exactly as they stand, which is why declining to "
+        "touch them is the conservative action and not a loss. A day is never corrected by a "
+        "guessed factor: the tolerance is derived from the candidate set itself (half the closest "
+        "relative gap, capped at 2%), so extending the set can never let two hypotheses claim one "
+        "ratio.")
     add("")
     add("### Gate 2 redefined: completeness is volume reconciliation, not a minute count")
     add("")
@@ -2159,7 +2619,41 @@ def build_report(
         by_symbol = {r.symbol: r for r in records}
         for symbol, kinds, ex_date, k, pre_day, ex_day, raw_gap, adj_gap in failures:
             add(f"| {symbol} | {kinds} | {ex_date} | {k} | {pre_day} | {ex_day} | {raw_gap}% | "
-                f"{adj_gap}% | {_gate3_classification(by_symbol.get(symbol), raw_gap, k)} |")
+                f"{adj_gap}% | {_gate3_classification(by_symbol.get(symbol), raw_gap, k, ex_date)} |")
+        add("")
+    if failures:
+        add("### The DISCLOSED RESIDUAL register (QUESTIONS.md Q-11 addendum 4)")
+        add("")
+        add("The final ruling closes the data era: \"residuals after this pass are disclosed, not "
+            "chased.\" This is that register -- every gate-3 failure that survived the "
+            "signature-gated hunt, with the numbers, the symbol's coverage cost, and why the hunt "
+            "did not resolve it. Chunk 9's report carries this table forward.")
+        add("")
+        add("| Symbol | Ex-date | k | Raw gap | Adjusted gap | Signature? | Symbol-days failing "
+            "gate 1 | Why it is residual |")
+        add("|---|---|---|---|---|---|---|---|")
+        for symbol, _kinds, ex_date, k, _pre, _ex, raw_gap, adj_gap in failures:
+            record = by_symbol.get(symbol)
+            # The signature is re-derived from the ROW rather than read only off the ledger, so the
+            # register says what the gate would say about this failure whether or not the symbol was
+            # in the hunt scope this run.
+            row = "|".join((symbol, _kinds, ex_date, k, _pre, _ex, raw_gap, adj_gap))
+            derived = gate3_signature_events([row])
+            signature = derived.get(date.fromisoformat(ex_date))
+            if signature is None:
+                signature = (
+                    f"no -- raw gap {raw_gap}% is nearer the healthy k-1 than 0, so the "
+                    "raw-gap-near-zero signature does not admit it"
+                )
+            elif record is not None and not any(
+                line.startswith(ex_date) for line in record.floor_signatures
+            ):
+                signature += " (admitted; the hunt still found no fitting floor)"
+            failing = (
+                record.gate1_total - record.gate1_effective_pass if record is not None else 0
+            )
+            add(f"| {symbol} | {ex_date} | {k} | {raw_gap}% | {adj_gap}% | {_cell(signature)} | "
+                f"{failing:,} | {_cell(_gate3_classification(record, raw_gap, k, ex_date))} |")
         add("")
     add("**Classification key.** `pre-floor span` -- the pre-ex close sits below a vendor "
         "application floor this run MEASURED for that very event, so the two closes were never in "
@@ -2236,7 +2730,9 @@ def build_report(
     return "\n".join(lines) + "\n"
 
 
-def _gate3_classification(record: SymbolRecord | None, raw_gap: str, k: str) -> str:
+def _gate3_classification(
+    record: SymbolRecord | None, raw_gap: str, k: str, ex_date: str = ""
+) -> str:
     """Classify one gate-3 failure against this run's floor findings. PURE.
 
     A gate-3 comparison is only meaningful when the two closes are in the SAME price domain. A raw
@@ -2256,8 +2752,16 @@ def _gate3_classification(record: SymbolRecord | None, raw_gap: str, k: str) -> 
             "not hunted -- residual, and the raw gap says the closes are in the SAME price domain"
             if same_domain else "not hunted -- residual"
         )
+    if ex_date and ex_date in record.floor_ex_dates:
+        # THIS event's own floor was measured, so the row is the post-fix recheck. A floor measured
+        # for a DIFFERENT event of the same symbol says nothing about this comparison, and claiming
+        # it would be the report flattering itself.
+        return "pre-floor span, floor MEASURED for this event -- this row is the post-fix recheck"
     if record.floors_resolved:
-        return "pre-floor span, floor MEASURED -- this row is the post-fix recheck"
+        return (
+            "hunted; a floor was measured for another event of this symbol but not for this one -- "
+            "residual"
+        )
     return (
         "unresolved-floor span -- hunted, no floor fitted; residual"
         if same_domain else "hunted, no floor needed; residual"
@@ -2281,10 +2785,13 @@ def _add_floor_section(add: Callable[[str], None], records: Sequence[SymbolRecor
         f"UNRESOLVED rather than guessing. Budget {va.MAX_FLOOR_PROBES} probes per event.")
     add("")
     add("Hunt scope is the ruling's own: every QUARANTINED symbol and every settled symbol below "
-        f"gate-1 {FLOOR_HUNT_GATE1_MAX_RATE:.0%}. Within a symbol an event is searched only when "
-        f"its pre-ex provable-era span actually fails systematically (>= "
-        f"{FLOOR_HUNT_MIN_FAILURE_RATE:.0%} of its days) -- there is no floor to find where "
-        "nothing fails, and every skip is recorded with its reason.")
+        f"gate-1 {FLOOR_HUNT_GATE1_MAX_RATE:.0%}, plus (Q-11 addendum 4) every symbol carrying a "
+        "GATE-3 failure, because a symbol can sit above the line while one ex-date of its history "
+        "is in the wrong price domain -- a correctness question, not a coverage one. Within a "
+        "symbol an event is searched only when its pre-ex provable-era span actually fails "
+        f"systematically (>= {FLOOR_HUNT_MIN_FAILURE_RATE:.0%} of its days), or -- inside an "
+        "un-provable era -- only when the signature gate admits it (section 3e). There is no floor "
+        "to find where nothing fails, and every skip is recorded with its reason.")
     add("")
     add("| Symbol | Gate-1 before the floor pass | Gate-1 after | Floors resolved | Probes | Note |")
     add("|---|---|---|---|---|---|")
@@ -2309,6 +2816,112 @@ def _add_floor_section(add: Callable[[str], None], records: Sequence[SymbolRecor
         for finding in record.floor_findings:
             add(f"  - {finding}")
     add("")
+
+
+def _parse_floor_findings(findings: Sequence[str]) -> list[tuple[str, str, str, str]]:
+    """``(ex_date, floor_date, probes, note)`` for each RESOLVED floor in a row's findings. PURE.
+
+    The findings are the hunt's own audit lines (``<ex> -> <floor> (resolved, N probe(s)): why``);
+    reading them back is what lets the report print one floors table without re-opening the maps.
+    Anything that is not a resolved floor with a date -- a skip, an UNRESOLVED search, a "no splice"
+    -- is not a measured floor and is left to the per-event findings list below.
+    """
+    rows: list[tuple[str, str, str, str]] = []
+    for finding in findings:
+        head, sep, tail = finding.partition(" -> ")
+        if not sep or "(resolved," not in tail:
+            continue
+        floor_date, _, rest = tail.partition(" (resolved,")
+        if floor_date.strip() in ("", "no splice"):
+            continue
+        probes, _, note = rest.partition("): ")
+        rows.append((
+            head.strip().lstrip("[").split("] ")[-1],
+            floor_date.strip(),
+            probes.replace("probe(s)", "").strip(),
+            note.split(" [admitted by")[0].strip(),
+        ))
+    return rows
+
+
+def _add_unprovable_floor_section(
+    add: Callable[[str], None], hunted: Sequence[SymbolRecord]
+) -> None:
+    """Section 3e: the FIX-4 widening -- floors hunted INSIDE un-provable eras (Q-11 addendum 4)."""
+    add("### 3e. Floors in UN-PROVABLE eras -- the FINAL data ruling (QUESTIONS.md Q-11 addendum 4)")
+    add("")
+    add("The architect's ruling: \"an un-provable era is a conclusion under the floor-less model; "
+        "where the floor itself caused unprovability, the hunt was locked out of exactly the eras "
+        "needing it.\" Floor hypotheses may now be tested inside un-provable eras under four "
+        "guards: (i) hunting is SIGNATURE-GATED, never blanket; (ii) the one-fresh-unknown-per-era "
+        "discipline holds -- the floor is the fresh unknown and previously committed sources "
+        "combine with it; (iii) acceptance is unchanged -- the era stands only if it becomes "
+        "provable under normal per-day price containment and gate-1 re-gating; (iv) full "
+        "provenance in the map.")
+    add("")
+    add("**Clause (i) -- what the signature gate admitted.** An event qualifies only by the "
+        "gate-3 raw-gap-near-zero signature (the measured raw gap is strictly nearer 0 than the "
+        "healthy `k - 1`) or by an era failure-rate cliff (>= "
+        f"{FLOOR_HUNT_ERA_CLIFF_RATE:.0%} of the gated days below the ex-date fail gate 1, over at "
+        f"least {MIN_CLIFF_DAYS} days). Everything else keeps exactly its pre-ruling domain.")
+    add("")
+    measured = [
+        (record, parsed)
+        for record in sorted(hunted, key=lambda r: r.symbol)
+        for parsed in (_parse_floor_findings(record.floor_findings),)
+        if parsed
+    ]
+    if measured:
+        add("**Every floor this run MEASURED** -- event, the splice date the bisection returned, and"
+            " what it cost. A floor AT the ex-date means the vendor never applied that event to one "
+            "day of our history; a floor inside the span means it applied it from that date on.")
+        add("")
+        add("| Symbol | Event ex-date | Measured floor | Probes | What the search found |")
+        add("|---|---|---|---|---|")
+        for record, rows in measured:
+            for ex_date, floor_date, probes, note in rows:
+                add(f"| {record.symbol} | {ex_date} | {floor_date} | {probes} | {note} |")
+        add("")
+    admitted = [r for r in hunted if r.floor_signatures]
+    if admitted:
+        add("**Every event the gate ADMITTED into an un-provable era**, with the measurement that "
+            "admitted it. An event absent from this table was never hunted there, however badly "
+            "its span fails -- that is the ruling's \"never blanket\".")
+        add("")
+    if not admitted:
+        add("No event in the hunt scope showed either signature, so the widening changed nothing "
+            "this run -- which is itself the gate working: no era was entered on a hunch.")
+        add("")
+        return
+    add("| Symbol | Event | Admitting signature |")
+    add("|---|---|---|")
+    for record in sorted(admitted, key=lambda r: r.symbol):
+        for line in record.floor_signatures:
+            ex_date, _, why = line.partition(": ")
+            add(f"| {record.symbol} | {ex_date} | {_cell(why)} |")
+    add("")
+    promoted = [r for r in hunted if r.eras_promoted or r.pre_floor_eras_provable >= 0]
+    if promoted:
+        add("**Clause (iii) -- acceptance, era by era.** A measured floor is handed back to the MAP "
+            "BUILDER, not layered onto the committed map: every era it touches must satisfy the same "
+            "2-paise per-day price containment and the same unwidened gate-1 band as any other era. "
+            "An era that does is PROMOTED to provable; one that does not stays un-provable and its "
+            "days stay excluded + counted.")
+        add("")
+        add("| Symbol | Eras provable before | after | Promoted | Gate-1 before | Gate-1 after |")
+        add("|---|---|---|---|---|---|")
+        for record in sorted(promoted, key=lambda r: r.symbol):
+            before_rate = (
+                f"{record.pre_floor_gate1_pass}/{record.pre_floor_gate1_total} "
+                f"({_pct(max(record.pre_floor_gate1_pass, 0), max(record.pre_floor_gate1_total, 0))})"
+                if record.pre_floor_gate1_total >= 0 else "unchanged"
+            )
+            add(f"| {record.symbol} | "
+                f"{record.pre_floor_eras_provable if record.pre_floor_eras_provable >= 0 else '-'} | "
+                f"{record.map_eras_provable} | {record.eras_promoted} | {before_rate} | "
+                f"{record.gate1_effective_pass}/{record.gate1_total} "
+                f"({_pct(record.gate1_effective_pass, record.gate1_total)}) |")
+        add("")
 
 
 def _add_relief_section(

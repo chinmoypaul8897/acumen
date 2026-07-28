@@ -689,6 +689,13 @@ BASELINE_PRE_FLOOR_DIVIDED: str = "pre-floor-divided"
 #: ``k_era / k_target``. Kept as a hypothesis precisely so a wrong floor still lands on raw instead
 #: of quietly storing a scaled price.
 BASELINE_FLOOR_OVERREACHED: str = "floor-overreached"
+#: stored == raw x k_target -- the vendor's OWN bars, still untouched, on a day whose chain a floor
+#: has reduced. This is the shape of every day of an era that was un-provable until a floor made it
+#: provable (QUESTIONS.md Q-11 addendum 4): nothing ever corrected those days, so they sit at the
+#: chain the VENDOR applied, which is no longer the era chain the hypotheses are generated from.
+#: Correction: divide by ``k_target``, exactly like :data:`BASELINE_AS_FETCHED`. Without this
+#: hypothesis a promoted era classifies UNKNOWN and the floor repairs nothing.
+BASELINE_AS_FETCHED_FLOORED: str = "as-fetched-floored"
 BASELINE_UNKNOWN: str = "unknown"            # matches no hypothesis; NEVER touched, gate 1 decides
 
 
@@ -732,7 +739,9 @@ def stored_day_baseline(
       ``k_price / k_target``;
     * ``k_price / k_target`` -> :data:`BASELINE_FLOOR_OVERREACHED` -- the vendor DID apply the full
       chain here, so the floor does not hold for this day; divide by ``k_price / k_target``. Keeping
-      this hypothesis is what stops a wrong floor from quietly storing a scaled price.
+      this hypothesis is what stops a wrong floor from quietly storing a scaled price;
+    * ``k_target`` -> :data:`BASELINE_AS_FETCHED_FLOORED` -- the vendor's own untouched bars on a
+      floored day (every day of an era a floor just made provable); divide by ``k_target``.
 
     The winner is the nearest hypothesis in RELATIVE terms, and it must sit within
     ``min(2%, half the closest gap between any two hypotheses)`` -- so no two can ever both claim a
@@ -796,6 +805,12 @@ def _nearest_baseline(ratio: Decimal, k: Decimal, k_target: Decimal | None = Non
     if k_target is not None and k_target != k:
         candidates.append((k_target / k, BASELINE_PRE_FLOOR_DIVIDED))
         candidates.append((k / k_target, BASELINE_FLOOR_OVERREACHED))
+        candidates.append((k_target, BASELINE_AS_FETCHED_FLOORED))
+    # A hypothesis that COINCIDES with an earlier one is dropped rather than allowed to shrink the
+    # derived tolerance to zero: two names for one ratio are not two hypotheses, and the first name
+    # is the older, better-evidenced provenance.
+    seen: set[Decimal] = set()
+    candidates = [c for c in candidates if not (c[0] in seen or seen.add(c[0]))]
     values = [value for value, _name in candidates]
     gaps = [
         abs(a / b - Decimal(1))
@@ -808,6 +823,50 @@ def _nearest_baseline(ratio: Decimal, k: Decimal, k_target: Decimal | None = Non
         key=lambda item: item[0],
     )
     return verdict if distance <= tol else BASELINE_UNKNOWN
+
+
+def baseline_correction(
+    baseline: str,
+    net_price: Decimal,
+    net_volume: Decimal,
+    target_price: Decimal,
+    target_volume: Decimal,
+) -> tuple[Decimal, Decimal] | None:
+    """The multiple a classified day is currently stored at -- divide by it to reach RAW. PURE.
+
+    One rule, applied to every provenance: a hypothesis NAMES the multiple of raw the stored bars sit
+    at, so the repair is to divide by exactly that multiple (and to scale volume by its counterpart).
+    That is what makes the rebuild idempotent by construction and what keeps a wrong floor from
+    quietly storing a scaled price -- every branch lands on raw, or the day is left alone.
+
+    ``net_*`` is the day's ERA chain (the hypotheses were generated from it) and ``target_*`` the
+    day's own floor-reduced chain; on a map with no floors the two are equal and every branch below
+    collapses to the pre-floor arithmetic exactly. Returns ``None`` for a baseline that must not be
+    touched (:data:`BASELINE_RAW`, :data:`BASELINE_UNKNOWN`).
+    """
+    one = Decimal(1)
+    if baseline == BASELINE_AS_FETCHED:
+        return net_price, net_volume
+    if baseline == BASELINE_AS_FETCHED_FLOORED:
+        # The vendor's own bars on a floored day: what came out is what the vendor put in, which is
+        # the day's OWN chain, not the era's.
+        return target_price, target_volume
+    if baseline == BASELINE_OVER_DIVIDED:
+        # Divided one time too many by exactly this chain: multiply back. The ratios 1 / k / 1/k are
+        # far enough apart that the classification is a measurement, not a fit.
+        return one / net_price, one / net_volume
+    if baseline == BASELINE_OVER_DIVIDED_TWICE:
+        # Divided by the same chain twice (the superseded one-way rebuild, on a span the vendor had
+        # never adjusted at all): the same repair, one power further out.
+        return one / (net_price * net_price), one / (net_volume * net_volume)
+    if baseline == BASELINE_PRE_FLOOR_DIVIDED:
+        # Un-adjusted by the PRE-floor chain while the vendor had only applied the post-floor one:
+        # multiply back by the part the floor removed.
+        return target_price / net_price, target_volume / net_volume
+    if baseline == BASELINE_FLOOR_OVERREACHED:
+        # The vendor DID apply the full era chain here, so the floor does not hold for this day.
+        return net_price / target_price, net_volume / target_volume
+    return None
 
 
 def _stored_day_is_raw(stored: Sequence[StoredBar], daily_row) -> bool:
@@ -956,31 +1015,13 @@ def rebuild_symbol_raw_with_map(
         if baseline == BASELINE_UNKNOWN:
             result.unknown_baseline_days.append(day)
             continue
-        if baseline == BASELINE_AS_FETCHED:
-            # The store holds the vendor's own bars. What the vendor actually applied is the day's
-            # own chain, so THAT is what comes back out -- not the era chain the hypothesis was
-            # generated from (they differ exactly when a floor is committed for this day).
-            net_price, net_volume = target_price, target_volume
-        elif baseline == BASELINE_OVER_DIVIDED:
-            # Divided one time too many by exactly this chain: multiply back. Inverting the net
-            # factors is the exact repair, and the ratios 1 / k / 1/k are far enough apart that the
-            # classification is a measurement, not a fit.
-            net_price, net_volume = Decimal(1) / net_price, Decimal(1) / net_volume
-        elif baseline == BASELINE_OVER_DIVIDED_TWICE:
-            # Divided by the same chain twice (the superseded one-way rebuild, on a span the vendor
-            # had never adjusted at all): multiply back by k^2. Same repair, one power further out.
-            net_price = Decimal(1) / (net_price * net_price)
-            net_volume = Decimal(1) / (net_volume * net_volume)
-        elif baseline == BASELINE_PRE_FLOOR_DIVIDED:
-            # Un-adjusted by the PRE-floor chain while the vendor had only applied the post-floor
-            # one: multiply back by the part the floor removed.
-            net_price = target_price / net_price
-            net_volume = target_volume / net_volume
-        elif baseline == BASELINE_FLOOR_OVERREACHED:
-            # The vendor DID apply the full era chain here, so the floor does not hold for this day.
-            # Divide out what is left rather than store a scaled price.
-            net_price = net_price / target_price
-            net_volume = net_volume / target_volume
+        correction = baseline_correction(
+            baseline, net_price, net_volume, target_price, target_volume
+        )
+        if correction is None:
+            result.unknown_baseline_days.append(day)
+            continue
+        net_price, net_volume = correction
         if net_price == Decimal(1) and net_volume == Decimal(1):
             # The map agrees with whatever was already applied -- the exact identity. Nothing to do,
             # and nothing rewritten (which is also what makes the reroute cheap and re-runnable).

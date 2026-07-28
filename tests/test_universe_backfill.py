@@ -838,7 +838,10 @@ def test_a_map_built_under_the_superseded_estimator_is_rebuilt_not_consumed(
     resumed = SyntheticVendor(cache, tokens, adjusted={"TTT": (VARIANT_EX, VENDOR_VARIANT_FACTOR)})
     ledger = ub.run_universe(resumed, FakeMaster(tokens), ["TTT"], actions, cache, config,
                              log=logged.append)
-    assert any("stale under Q-12" in line for line in logged)
+    assert any("map is STALE" in line and va.MAP_VOLUME_ESTIMATOR in line for line in logged), (
+        "the log must name BOTH markers -- a map can be stale on the model alone (Q-11 addendum 4)"
+        " and the old message always blamed the estimator"
+    )
     assert va.map_is_current(va.load_map("TTT", data_dir=config.map_data_dir))
     assert ledger.records["TTT"].status == ub.STATUS_SETTLED
     assert ledger.records["TTT"].gate1_pass == len(DAYS), "still raw after the rebuild"

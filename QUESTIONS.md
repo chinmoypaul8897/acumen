@@ -1186,6 +1186,85 @@ event by EX-DATE and composes one node per date.
 - **Unparsed events therefore never block a map.** They now BUILD one instead: see the COLPAL
   diagnosis in the CHUNK 5B FIX-3 REPORT and `docs/backfill_minute_report.md`.
 
+### Q-11 ADDENDUM 4 (chunk 5B FIX-4, 2026-07-28) -- FLOORS IN UN-PROVABLE ERAS · the FINAL data ruling
+
+The FIX-3 report's residual gate-3 rows carried a numbers-backed signature the floor ruling did not
+reach: eleven of the seventeen failures show a RAW gap near zero against an ADJUSTED gap of
+50-950%, i.e. the two closes are already in the same price domain -- the pre-ex side was never
+un-adjusted -- which is exactly a vendor application floor sitting inside an era that decision
+B123 kept the hunt OUT of. The architect ruled.
+
+**ARCHITECT'S RULING (floors in un-provable eras -- supersedes B123's restriction), verbatim:**
+
+> "ARCHITECT'S RULING (floors in un-provable eras — supersedes B123's restriction):
+> an un-provable era is a conclusion under the floor-less model; where the floor
+> itself caused unprovability, the hunt was locked out of exactly the eras needing
+> it. Floor hypotheses MAY therefore be tested inside un-provable eras, under these
+> guards: (i) hunting is SIGNATURE-GATED, never blanket — an event qualifies only if
+> it shows the raw-gap-near-zero gate-3 signature, or an era failure-rate cliff
+> (>=95% failing) at an event boundary; (ii) the one-fresh-unknown-per-era discipline
+> holds — a floor being measured is that era's fresh unknown; previously committed
+> sources may combine with it; (iii) acceptance is unchanged: the era stands ONLY if
+> it becomes provable under normal per-day price containment and gate-1 re-gating —
+> no fit, no floor, era stays un-provable; (iv) full provenance (probe days,
+> verdicts, bisection path) in the map. This is the FINAL data ruling; residuals
+> after this pass are disclosed, not chased."
+
+**EXECUTED by the chunk-5B FIX-4 session (2026-07-28).** Every clause is code with a test behind
+it, in `src/acumen/vendor_adjustment.py` (the model, the hypothesis, the extended search) and
+`src/acumen/universe_backfill.py` (the signature gate, the hunt, the acceptance pass).
+
+- **(i) the SIGNATURE GATE** (`signature_gated_events`, PURE, `universe_backfill`). An event is
+  admitted into an un-provable era's hunt only by one of the two signatures the ruling names, and
+  the admitting reason is recorded per event:
+  - **the gate-3 raw-gap-near-zero signature.** Read off the symbol's own gate-3 failure rows,
+    which already carry `raw gap` and `adjusted gap` as numbers. The test is the NEAREST-HYPOTHESIS
+    one rather than an invented threshold: a healthy event predicts a raw gap of size `|k - 1|`
+    (its own price step), a pre-ex side that was never un-adjusted predicts a raw gap of size 0,
+    and the event qualifies when `|raw gap| < |k - 1| / 2`. Magnitudes, not signed values -- a
+    +38% raw gap against a -20% step is not "the same price domain" by any reading. Scale-free, so
+    a 5:1 split and a 5% special dividend are judged on the same footing. On the FIX-3 residual
+    table this admits EXACTLY the eleven rows the architect named (raw gaps -4.63%..+10.98%) and
+    rejects the six that are a different defect (ASTRAL +38.49% against a 10% half-step, BPCL
+    +101.21%, GAIL 2018 +201.98%, OIL 2018 +42.44%, VBL -65.70%, COCHINSHIP -40.00% which is
+    nearly its own healthy -50%).
+  - **the era failure-rate cliff.** The gated days in the span immediately below the event's
+    ex-date fail gate 1 at >= 95% (`FLOOR_HUNT_ERA_CLIFF_RATE`), measured over at least
+    `MIN_CLIFF_DAYS = 20` gated days so a one-week bucket cannot manufacture a cliff.
+  A provable-era search keeps its FIX-3 scope gate untouched (systematic failure >= 10%); the
+  signature gate is what the ruling adds, and it governs the UN-PROVABLE domain alone.
+- **(ii) the hypothesis, one fresh unknown per era** (`era_hypothesis`, PURE, `vendor_adjustment`).
+  An un-provable era has no committed chain, so the search builds one from PREVIOUSLY COMMITTED
+  sources exactly as the ruling allows: per event, the factor committed in the newest era that
+  resolved it (`canonical_event_factors`), else our exact CONTEXT 4.2 factor, else -- if the event
+  has neither -- the era is REFUSED and recorded (`no committed source and no ours factor`).
+  Nothing is fitted: the only fresh unknown is the floor itself, and the oracle decides it.
+- **the missing outcome the deadlock needed.** Where the floor sits ABOVE our whole history the
+  binary search's first probe (the newest day, beside the ex-date) answers `event-out`, and the
+  FIX-3 search correctly abandoned ("no floor to find"). That verdict is now itself a measurement:
+  with `absent_floor_date` given, the search probes the newest, the oldest AND a midpoint, and only
+  if ALL THREE answer `event-out` does it resolve a floor AT the ex-date -- the event is absent
+  from every chain we can form. One `event-in` or one `undecided` and it stays UNRESOLVED.
+- **(iii) ACCEPTANCE IS UNCHANGED, and it is the map builder's own.** A measured floor is not
+  applied to an era by hand. The map is REBUILT with the floors in force (`build_map(...,
+  floors=...)`): an event whose floor lies above an era's probe days is forced ABSENT for that era,
+  and the era then has to satisfy the SAME oracle every other era does -- 2-paise per-day price
+  containment against the raw daily high/low AND gate-1's unwidened `[-0.1%, +5.0%]` band. It also
+  stops being a fresh unknown for the probe-gap guard, which is what lets a cascade of
+  "under-determined" older eras unwind. No fit, no floor, era stays un-provable: the refusal path is
+  the builder returning `provable=False` exactly as before, and the store is left untouched.
+- **(iv) FULL PROVENANCE in the map.** `EventFloor` now also carries the price factor its probes
+  were classified under, so a rebuilt map can re-validate the carry; every probe day, its verdict,
+  both hypothesised chains and the measured fetched/raw ratios were already persisted and still
+  are. The report prints the admitting signature, the bisection path and the era promotions.
+- **the enriched baseline classifier** (`minute_backfill.stored_day_baseline`). A promoted era's
+  days had never been touched, so they sit at the vendor's OWN chain -- which, once a floor drops an
+  event, is no longer the era chain the hypotheses were generated from. `as-fetched-floored` names
+  that ratio, and every hypothesis is now corrected by the multiple it actually matched rather than
+  by the day's target chain (identical arithmetic on a floorless map; the two differ only where a
+  floor is committed). Without it a promoted era would be classified UNKNOWN and left uncorrected.
+- **B123 is superseded, not deleted.** Floors still apply to provable eras by the same arithmetic;
+  what changed is that an un-provable era is no longer a wall the hunt cannot see through.
 
 ---
 

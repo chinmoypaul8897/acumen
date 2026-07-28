@@ -9,6 +9,7 @@ is counted SEPARATELY from a gate-1 pass everywhere the tally is read.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -61,8 +62,20 @@ def test_relief_can_lift_a_symbol_out_of_the_hunt_scope_and_that_is_deliberate()
 
 
 def test_a_hunt_is_one_shot_across_a_resume() -> None:
-    record = _record(status=ub.STATUS_QUARANTINED, gate1_pass=1, gate1_total=1000, floors_hunted=True)
+    """One-shot PER DISCIPLINE. The row must carry the discipline it was hunted under: Q-11
+    addendum 4 widened WHAT may be hunted, so a row hunted under the older one is owed exactly one
+    more pass (pinned by the next test) and a row already on this one is never re-probed."""
+    record = _record(status=ub.STATUS_QUARANTINED, gate1_pass=1, gate1_total=1000,
+                     floors_hunted=True, floor_discipline=ub.FLOOR_DISCIPLINE)
     assert not ub.floor_hunt_owed(record)
+
+
+def test_a_stale_floor_discipline_reopens_the_hunt_exactly_once() -> None:
+    record = _record(status=ub.STATUS_QUARANTINED, gate1_pass=1, gate1_total=1000,
+                     floors_hunted=True, floor_discipline="")
+    assert ub.floor_hunt_owed(record), "the FIX-3 hunt never asked the addendum-4 question"
+    record.floor_discipline = ub.FLOOR_DISCIPLINE
+    assert not ub.floor_hunt_owed(record), "and it is not asked twice"
 
 
 def test_a_symbol_with_no_gated_day_is_never_hunted() -> None:
@@ -148,7 +161,10 @@ def test_a_record_claiming_a_floor_its_map_no_longer_carries_is_re_processed(tmp
                      gate1_pass=2319, gate1_total=2429,
                      gate_definition=ub.GATE_DEFINITION,
                      rebuild_discipline=ub.REBUILD_DISCIPLINE,
-                     floors_hunted=True, floors_resolved=1)
+                     floors_hunted=True, floors_resolved=1,
+                     # already hunted under the CURRENT discipline, so the only thing that can
+                     # re-open this row is the claim/evidence invariant this test is about
+                     floor_discipline=ub.FLOOR_DISCIPLINE)
     why = ub.needs_reprocessing(record, config)
     assert why is not None and "carries none" in why
 
@@ -190,13 +206,22 @@ def test_a_transient_vendor_error_leaves_the_floor_hunt_OPEN_for_the_next_run(tm
     class _Master:
         def token(self, symbol): return "1234"
 
+    class _View:
+        """The CA view the signature gate reads its events off (Q-11 addendum 4); empty here --
+        this test is about what happens when the vendor errors, not about the signatures."""
+
+        factors: tuple = ()
+        suppressions: tuple = ()
+        pending_rights_ex_dates: tuple = ()
+        parse_exceptions: tuple = ()
+
     def _boom(*args, **kwargs):
         raise sac.SmartApiError("Access denied because of exceeding access rate")
 
     original = ub.hunt_symbol_floors
     ub.hunt_symbol_floors = _boom
     try:
-        ub.run_floor_pass(None, _Master(), None, None, record, None, date(2016, 10, 1),
+        ub.run_floor_pass(None, _Master(), None, None, record, _View(), date(2016, 10, 1),
                           config, None, ub.GateTally(), log=lambda _m: None)
     finally:
         ub.hunt_symbol_floors = original
@@ -223,7 +248,16 @@ def test_a_deterministic_hunt_failure_does_close_the_hunt(tmp_path: Path) -> Non
 
 def test_the_gate_definition_marker_moved_so_every_row_is_re_gated_under_relief() -> None:
     assert "auction-relief" in ub.GATE_DEFINITION
-    assert "application-floors" in va.MAP_MODEL
+    assert "floor" in va.MAP_MODEL
+    # ... and the invariant the marker exists FOR: a map written under the superseded FIX-3 model
+    # is not current, so it is rebuilt from probe windows rather than consumed (Q-11 addendum 4
+    # made the builder floor-aware and restricted probe days to trading sessions).
+    stale = va.AdjustmentMap(
+        symbol="ACME", fetch_date=date(2026, 7, 27), all_event_ex_dates=(), eras=(),
+        map_model_id="compound-unparsed-nodes+application-floors-v3",
+    )
+    assert not va.map_is_current(stale)
+    assert va.map_is_current(replace(stale, map_model_id=va.MAP_MODEL))
 
 
 # --- relief inside the tally --------------------------------------------------------------
