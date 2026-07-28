@@ -1681,3 +1681,81 @@ so it cannot flip silently either. **The architect may want to fold it into Q-13
 Q-10/Q-11/Q-12 and the completeness amendment. The chunk-6 review was told an architect interim
 confirmation exists; it is not in this file. It should be recorded here in the same verbatim form,
 so a later session reads it from the repo instead of from a conversation.
+
+---
+
+## Q-14 · chunk 5B REVIEW · class A · **OPEN -- STOP** · BLOCKS chunk 9 (the backtest run)
+
+**Question.** CONTEXT 4.5's gate 1 proves a stored day's **VOLUME** against the bhavcopy. The Q-11
+ruling's price oracle proves an **ERA's price**, over that era's probe days. 1,963 stored symbol-days
+fall between the two: their 1-minute prices sit at 0.1x-5x the price the exchange printed, and every
+one of them PASSES the gate battery and is counted in the run's 413,914-day usable headline. Should a
+per-day PRICE containment check -- the existing `max(2 paise, 0.1% x raw)` oracle applied to each
+stored day against the raw daily high/low -- join the gate battery? And are the days it flags
+EXCLUDED (CONTEXT 7-E3), RE-MEASURED (a floor hunt admission signature), or DISCLOSED?
+
+**Why it is a hole.** CONTEXT 4.5 defines the gate battery. Adding to it is a spec change, not an
+implementation choice, so the review did not decide it. Nothing in Q-10, Q-11 (or its four addenda),
+Q-12 (or its two) or the completeness amendment asks for a per-day price test; each ruling states that
+"gate 1 remains the per-day proof", which is true of volume and, as measured below, not of price.
+
+**The mechanism, measured not inferred.** Price and volume factors are arbitrated INDEPENDENTLY --
+Q-11's own words, "for price and (independently) for volume" -- and `_price_contained`
+(`src/acumen/vendor_adjustment.py:1548-1566`) quantifies over `era.probe_days`, typically the four
+sessions before the era's next ex-date. When the vendor's internal splice sits inside an era but
+OLDER than its probe window, and the committed `k_volume` happens to match what the vendor did to
+volume while `k_price` does not, the day's price is wrong and no gate can see it.
+
+NMDC is the clean case. Its era `pre-2019-03-22` is **provable**, with `k_price = 0.235189` against
+`k_volume = 0.333337` -- two different factors -- and `probe_days = ['2019-03-15', '2019-03-18',
+'2019-03-19', '2019-03-20']`, four days at the top of an era spanning roughly 600. The vendor applied
+1/3 to the 2018 days; dividing them by 0.235189 leaves them at 1.4173x raw, while the volume, scaled
+by the matching 0.333337, reconciles at +0.107%. Every gate passes.
+
+**Measured over all 433,065 stored symbol-days** (read-only fold of the parquet minute store against
+the raw bhavcopy; days that PASS gate 1 whose fold high differs from the bhavcopy high by >5%):
+
+| Symbol | Days | Factor | Example |
+|---|---|---|---|
+| IOC | 1,042 | 0.667x | 2018-04-05: stored high Rs 116.10 vs bhavcopy Rs 174.15, gate-1 gap +0.222% |
+| TATASTEEL | 498 | 0.100x | 2020-07-28: stored high **Rs 36.00** vs bhavcopy **Rs 360.00**, gap +0.071% |
+| SRF | 216 | 5.000x | 2016-10-03: stored high Rs 9,625.00 vs bhavcopy Rs 1,925.00, gap -0.002% |
+| NMDC | 134 | 1.417x | 2018-03-27: stored high Rs 173.26 vs bhavcopy Rs 122.25, gap +0.107% |
+| RECLTD | 65 | 0.750x | 2020-08-13: stored high Rs 83.25 vs bhavcopy Rs 111.00, gap +0.066% |
+| APLAPOLLO | 3 | 2.000x | 2018-10-01: stored high Rs 2,566.70 vs bhavcopy Rs 1,283.35, gap +0.000% |
+| ASIANPAINT / BIOCON / PNB / SUZLON / TATAPOWER | 5 | one day each | isolated |
+| **TOTAL** | **1,963** | | every one on a **SETTLED** symbol |
+
+At the containment oracle's own 0.5% tolerance the count is 2,651 gate-1-passing days off scale,
+2,640 of them on settled symbols. The 1,963 above is the conservative reading.
+
+**Why it matters.** All of these symbols are SETTLED, so their days are inside the usable headline and
+reachable by chunk 9. A POC built on TATASTEEL 2020-07-28 would be computed on a Rs 36 price grid; the
+stop-loss distance would be a tenth of reality and `floor(risk / (entry - SL))` would size the
+position ten times too large. The resulting trade record would look entirely ordinary. This violates
+CONTEXT 7-E11 ("intraday engines run on RAW same-day 1-min prices ... PnL in that day's real rupees")
+in the data the chunk exists to produce.
+
+**Why it is not already licensed.** Q-11 ADDENDUM 4's closing sentence licenses residuals that are
+**DISCLOSED**, not chased. These days are disclosed nowhere: they are counted as PASSES, and the
+report's own un-provable-day count (300) is a different quantity entirely (see REVIEW_5B finding Q6).
+
+**What the review did meanwhile (STOP, no silent decision).** Nothing. No file under review was
+modified, no test was added to pin a gate the architect has not ruled should exist, and no store was
+touched. The finding is recorded in `docs/reviews/REVIEW_5B.md` (finding Q1) with the full
+measurement, and the chunk is FAILED so that chunk 9 cannot start on this lake.
+
+**Options for the architect (not decided here):**
+(a) **Add a per-day price containment gate** using the existing oracle, and EXCLUDE + COUNT what it
+flags (CONTEXT 7-E3's own treatment) -- cheapest, needs no re-download, and would have caught all
+1,963 days;
+(b) **Add the same check as a floor-hunt admission SIGNATURE** (a third signature beside the gate-3
+raw-gap and the era cliff), so the splice is measured and the days repaired rather than discarded;
+(c) **Tighten the era oracle** so containment is quantified over the era's whole span rather than its
+probe days -- correct but expensive, since it needs a probe per span rather than per era;
+(d) **Accept and DISCLOSE**, listing the affected symbol-days in the residual register so chunk 9
+excludes them by name.
+
+Both sides of the check are LOCAL -- the minute store and the daily store -- so any ruling is
+applied to the already-fetched store with **no candle re-downloaded**.
+
