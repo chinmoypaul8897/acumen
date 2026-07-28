@@ -10,6 +10,12 @@ excludes a flagged day and counts it (CONTEXT 7-E3).
   the small positive shortfall being the pre-open call-auction volume the exchange counts in
   the daily total but not in continuous-session 1-min candles). Outside the band -> flag,
   exclude, log. The daily figure is the RAW daily store (chunk 2) bhavcopy volume.
+  **AUCTION RELIEF** (the architect's ruling of 2026-07-26, QUESTIONS.md Q-12 addendum 2): the
+  ceiling STAYS and the band is untouched, but an ABOVE-ceiling failure whose day carries intact
+  extremes (1-min high/low == the raw daily high/low exactly), a matching opening print and a
+  shortfall <= 20% is a thin day whose pre-open auction exceeds 5% -- a market property, not data
+  loss. Such a day is an ``auction-relief pass``, counted SEPARATELY and disclosed
+  (:func:`auction_relief`). Below-floor failures are NEVER relieved.
 * **Gate 2 -- candle integrity** (REDEFINED by the architect's completeness ruling, 2026-07-26 --
   QUESTIONS.md "CONTEXT 4.5 / 7-E4 AMENDMENT"; CONTEXT v1.3 will carry it). Completeness is
   measured by gate 1, not by a minute count: **the vendor omits minutes in which nothing traded**,
@@ -102,6 +108,99 @@ def volume_gate(daily_volume: int, minute_volume_sum: int) -> VolumeGateResult:
         gap_pct=gap,
         passed=passed,
         reason=reason,
+    )
+
+
+# --- Gate 1 relief: the auction share of a thin day (Q-12 addendum 2) -------------------
+
+#: The architect's auction-relief ruling (2026-07-26) condition (d): a sanity cap on how large a
+#: shortfall may be and still be called "the pre-open auction on a thin day". Beyond this the day
+#: is not relieved whatever else holds.
+AUCTION_RELIEF_MAX_SHORTFALL_PCT: Decimal = Decimal("20.0")
+
+
+@dataclass(frozen=True)
+class AuctionReliefResult:
+    """Whether a gate-1 ABOVE-CEILING failure is relieved as a thin day's auction share.
+
+    ``conditions`` names each of the ruling's four tests and whether it held, in the ruling's own
+    order, so a refusal always says which condition refused it. ``relieved`` is True only when ALL
+    four hold -- the ruling's "IFF ALL hold".
+    """
+
+    relieved: bool
+    conditions: tuple[tuple[str, bool], ...]
+    reason: str
+
+
+def auction_relief(
+    gate1: VolumeGateResult,
+    *,
+    minute_open_paise: int,
+    minute_high_paise: int,
+    minute_low_paise: int,
+    raw_open_paise: int,
+    raw_high_paise: int,
+    raw_low_paise: int,
+    max_shortfall_pct: Decimal = AUCTION_RELIEF_MAX_SHORTFALL_PCT,
+) -> AuctionReliefResult:
+    """CONTEXT 4.5 gate 1 AUCTION RELIEF (QUESTIONS.md Q-12 addendum 2). PURE.
+
+    The architect's ruling of 2026-07-26, verbatim in QUESTIONS.md: **the ceiling stays**. A gate-1
+    failure ABOVE the ceiling may be relieved if and only if all four hold:
+
+    (a) the FLOOR side is not triggered -- the gap is above ``+5.0%``, never below ``-0.1%``. A
+        below-floor failure means the 1-minute sum EXCEEDS the exchange's own daily total, which is
+        the signature of an un-recovered vendor volume adjustment, not of a thin market;
+    (b) the stored day's 1-minute HIGH equals the RAW daily HIGH and its 1-minute LOW equals the RAW
+        daily LOW, **exactly** -- no tolerance. The ruling's whole rationale is that data LOSS clips
+        extremes with overwhelming probability, so intact extremes are the evidence;
+    (c) the FIRST stamp's OPEN equals the RAW daily OPEN, exactly. A lost opening minute is the one
+        loss that need not move either extreme, so the open is tested separately;
+    (d) the shortfall is at most ``max_shortfall_pct`` -- a sanity cap.
+
+    A relieved day is an **auction-relief pass**, counted SEPARATELY from a gate-1 pass and
+    disclosed; ``gate1.passed`` itself is untouched, and so are
+    :data:`VOLUME_GAP_MIN_PCT` / :data:`VOLUME_GAP_MAX_PCT`. Nothing here widens the band: relief is
+    a second, strictly-evidenced verdict layered on a failure, and it can only ever be reached by a
+    day that already failed above the ceiling.
+
+    Args:
+        gate1: the day's :func:`volume_gate` result (a PASSING one is never relieved -- there is
+            nothing to relieve, and the caller must not double-count it).
+    """
+    above_ceiling = (
+        not gate1.passed and gate1.gap_pct is not None and gate1.gap_pct > VOLUME_GAP_MAX_PCT
+    )
+    extremes_intact = (
+        minute_high_paise == raw_high_paise
+        and minute_low_paise == raw_low_paise
+        and raw_high_paise > 0
+        and raw_low_paise > 0
+    )
+    open_matches = minute_open_paise == raw_open_paise and raw_open_paise > 0
+    within_cap = gate1.gap_pct is not None and gate1.gap_pct <= max_shortfall_pct
+    conditions = (
+        ("(a) failed ABOVE the +5.0% ceiling, floor side not triggered", above_ceiling),
+        ("(b) 1-min HIGH == raw daily HIGH and 1-min LOW == raw daily LOW exactly", extremes_intact),
+        ("(c) first stamp's open == raw daily open exactly", open_matches),
+        (f"(d) shortfall <= {max_shortfall_pct}%", within_cap),
+    )
+    failed = [name for name, held in conditions if not held]
+    if failed:
+        return AuctionReliefResult(
+            relieved=False,
+            conditions=conditions,
+            reason="not relieved: " + "; ".join(failed),
+        )
+    return AuctionReliefResult(
+        relieved=True,
+        conditions=conditions,
+        reason=(
+            f"auction-relief pass: volume short by {gate1.gap_pct:.3f}% while the day's extremes "
+            "and opening print match the exchange's own daily record exactly -- a thin day whose "
+            "pre-open call auction exceeds 5% of its volume, not data loss"
+        ),
     )
 
 

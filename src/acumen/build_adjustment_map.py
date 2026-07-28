@@ -30,7 +30,12 @@ from pathlib import Path
 from . import vendor_adjustment as va
 from .daily_store import DailyStore, DailyStoreError
 from .instrument_master import InstrumentMaster, InstrumentMasterError, load_instrument_master
-from .minute_backfill import MINUTE_DATA_FLOOR, _tick_paise, build_symbol_factors
+from .minute_backfill import (
+    MINUTE_DATA_FLOOR,
+    _tick_paise,
+    corp_actions_for_symbol,
+    fetch_corp_action_history,
+)
 from .quality_gates import volume_gate
 from .smartapi_client import Credentials, OneMinuteBar, SmartApiClient, SmartApiError
 
@@ -82,13 +87,25 @@ def run(args: argparse.Namespace) -> int:
     token = master.token(symbol)
     print(f"token      : {token}   tick = {master.tick_size(symbol)} ({tick_paise} paise)")
 
-    sf = build_symbol_factors(symbol, date(int(args.from_year), 1, 1), fetch_date, daily_store,
-                              allow_network=args.allow_network, cache_dir=args.cache_dir,
-                              tick_paise=tick_paise)
-    events = va.events_from_factor_table(sf.factors, sf.suppressions, sf.pending_ex_dates, symbol=symbol)
+    actions = fetch_corp_action_history(
+        date(int(args.from_year), 1, 1), fetch_date,
+        allow_network=args.allow_network, cache_dir=args.cache_dir,
+    )
+    view = corp_actions_for_symbol(symbol, actions, daily_store)
+    sf = view.symbol_factors(tick_paise=tick_paise)
+    # Q-11 addendum 3 clause (ii): unparsed subjects are map NODES too, with {measured, absent}.
+    unparsed = tuple(sorted({
+        e.action.ex_date for e in view.parse_exceptions if e.action.symbol == symbol
+    }))
+    events = va.events_from_factor_table(
+        sf.factors, sf.suppressions, sf.pending_ex_dates, symbol=symbol,
+        unparsed_ex_dates=unparsed,
+    )
     print("\nPRICE-MOVING EVENTS (era keys are built from these):")
     for e in events:
-        print(f"   {e.ex_date}  {e.kind:9s} ours_price={e.our_price_factor} share_count={e.is_share_count}")
+        compound = f"  [compound of {'+'.join(e.component_kinds)}]" if e.is_compound else ""
+        print(f"   {e.ex_date}  {e.kind:16s} ours_price={e.our_price_factor} "
+              f"share_count={e.is_share_count}{compound}")
 
     if not args.allow_network:
         print("\nSTOPPING: --allow-network is required to fetch the probe windows.")

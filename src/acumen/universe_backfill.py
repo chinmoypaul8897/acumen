@@ -75,6 +75,20 @@ QUARANTINE_GATE1_MIN_PASS_RATE: Decimal = Decimal("0.80")
 #: change) that must reach the architect before hours more are spent on it.
 HALT_QUARANTINE_FRACTION: Decimal = Decimal("0.10")
 
+#: QUESTIONS.md Q-11 addendum 2 (vendor application floors): "Floors are hunted ONLY where failure
+#: is systematic: every quarantined symbol and every settled symbol with gate-1 < 98%." This is
+#: that 98%. A symbol at or above it has no systematic failure for a floor to explain, and is not
+#: probed. Reading it as the EFFECTIVE gate-1 rate (auction relief included) is deliberate: a
+#: PNBHOUSING-shaped symbol whose failures are relieved as a market property does not have an
+#: adjustment problem, and spending 11 probes per event hunting one would be measuring noise.
+FLOOR_HUNT_GATE1_MAX_RATE: Decimal = Decimal("0.98")
+
+#: Within a hunted symbol, an EVENT is only searched when this fraction of the days in its pre-ex
+#: provable-era span actually FAIL gate 1. The ruling scopes the hunt to systematic failure, and a
+#: span that already reconciles has no floor to find -- searching it would spend ~11 credentialed
+#: probes to confirm "applied throughout". Every skip is recorded with its reason.
+FLOOR_HUNT_MIN_FAILURE_RATE: Decimal = Decimal("0.10")
+
 #: How many pre-ex trading days to probe per era when building a map. The FIX-4 runbook used
 #: 4-5 per window; the measured factor is the MEDIAN over the era's probe days, so a handful is
 #: enough to be robust to one odd day while costing one request per era.
@@ -91,7 +105,7 @@ DEFAULT_REPORT_PATH: Path = Path("docs") / "backfill_minute_report.md"
 #: carries a different marker and is RE-GATED from the stored candles -- no window refetched. Bump
 #: this string whenever a gate's definition changes; it is what makes a re-gate automatic, bounded
 #: (a row already on the current definition is skipped) and auditable.
-GATE_DEFINITION: str = "gate2-completeness-2026-07-26"
+GATE_DEFINITION: str = "gate2-completeness+auction-relief-2026-07-26"
 
 #: The route reason a quarantine-recovery reroute stamps on a symbol (Q-12 addendum ruling).
 _RECOVERY_REASON: str = "quarantine-recovery (Q-12 addendum ruling)"
@@ -104,7 +118,7 @@ _RECOVERY_REASON: str = "quarantine-recovery (Q-12 addendum ruling)"
 #: classification (:func:`acumen.minute_backfill.stored_day_baseline`), which both prevents that and
 #: REPAIRS a doubly-divided day by multiplying it back. A row stamped with anything else is
 #: re-processed so the repair reaches it; bump this whenever that discipline changes.
-REBUILD_DISCIPLINE: str = "baseline-classification-2026-07-26"
+REBUILD_DISCIPLINE: str = "baseline-classification+floor-provenances-2026-07-27"
 
 #: Per-symbol terminal states in this run's ledger.
 STATUS_SETTLED: str = "settled"
@@ -134,12 +148,17 @@ class RunHalted(UniverseBackfillError):
 
 @dataclass(frozen=True)
 class DailyDay:
-    """One symbol-day of the RAW daily store, reduced to what the run actually uses."""
+    """One symbol-day of the RAW daily store, reduced to what the run actually uses.
+
+    ``open_paise`` is carried for the auction-relief ruling's condition (c) -- "first stamp's open
+    == raw daily open exactly" (QUESTIONS.md Q-12 addendum 2).
+    """
 
     high_paise: int
     low_paise: int
     close_paise: int
     volume: int
+    open_paise: int = 0
 
 
 @dataclass(frozen=True)
@@ -201,6 +220,7 @@ def build_daily_cache(
             low_paise=int(row.low_paise),
             close_paise=int(row.close_paise),
             volume=int(row.volume),
+            open_paise=int(row.open_paise),
         )
     return DailyCache(by_symbol=by_symbol)
 
@@ -215,7 +235,7 @@ class CachedDailyStore:
     answer" contract.
     """
 
-    _COLUMNS = ["trade_date", "high_paise", "low_paise", "close_paise", "volume"]
+    _COLUMNS = ["trade_date", "open_paise", "high_paise", "low_paise", "close_paise", "volume"]
 
     def __init__(self, cache: DailyCache) -> None:
         self._cache = cache
@@ -225,6 +245,7 @@ class CachedDailyStore:
         rows = [
             {
                 "trade_date": day,
+                "open_paise": value.open_paise,
                 "high_paise": value.high_paise,
                 "low_paise": value.low_paise,
                 "close_paise": value.close_paise,
@@ -331,6 +352,11 @@ class SymbolRecord:
     windows_error: int = 0
     gate1_pass: int = 0
     gate1_total: int = 0
+    #: Auction-relief passes (Q-12 addendum 2): above-ceiling failures with intact extremes and a
+    #: matching opening print. Counted SEPARATELY from ``gate1_pass``, never folded into it.
+    gate1_relieved: int = 0
+    gate1_relieved_with_missing: int = 0
+    gate1_relieved_median_gap: str = ""
     gate2_excluded: int = 0
     gate3_checked: int = 0
     gate3_failed: int = 0
@@ -385,12 +411,47 @@ class SymbolRecord:
     median_daily_volume_above_ceiling: int = 0
     #: Rendered "span: failing/total (rate)" strings, one per inter-ex-date span.
     era_failure_rates: list[str] = field(default_factory=list)
+    # --- vendor application floors (Q-11 addendum 2) --------------------------------------
+    #: True once the floor hunt has been ATTEMPTED, so a resumed run never re-probes a symbol.
+    floors_hunted: bool = False
+    #: Rendered "kind@ex-date -> floor | note" strings, one per event the hunt looked at.
+    floor_findings: list[str] = field(default_factory=list)
+    floors_resolved: int = 0
+    #: The ex-dates a floor was RESOLVED for. Kept as well as counted so a map that lost its floors
+    #: can be repaired by re-measuring exactly those events -- the post-repair gate-1 failure rate
+    #: cannot tell you an event has a floor, because the repair is why the failures are gone.
+    floor_ex_dates: list[str] = field(default_factory=list)
+    floor_probes_spent: int = 0
+    floor_note: str = ""
+    #: The gate-1 numbers immediately BEFORE the floor pass, so its effect is auditable alone.
+    pre_floor_gate1_pass: int = -1
+    pre_floor_gate1_total: int = -1
+    # --- gate 3, kept per failure so the report can print the numbers ---------------------
+    gate3_failure_rows: list[str] = field(default_factory=list)
 
     def era_rate_summary(self) -> str:
         return "; ".join(self.era_failure_rates)
 
     @property
+    def gate1_effective_pass(self) -> int:
+        """Strict passes PLUS auction-relief passes -- what coverage and quarantine measure on."""
+        return self.gate1_pass + self.gate1_relieved
+
+    @property
     def gate1_rate(self) -> Decimal:
+        """The EFFECTIVE gate-1 rate: strict passes plus auction-relief passes, over gated days.
+
+        The auction-relief ruling calls a relieved day a pass ("counted SEPARATELY
+        ('auction-relief pass')"), so the coverage and quarantine decisions read this. The strict
+        numerator is never overwritten -- :attr:`gate1_strict_rate` and ``gate1_relieved`` are both
+        printed beside it in the report.
+        """
+        if not self.gate1_total:
+            return Decimal(0)
+        return Decimal(self.gate1_effective_pass) / Decimal(self.gate1_total)
+
+    @property
+    def gate1_strict_rate(self) -> Decimal:
         if not self.gate1_total:
             return Decimal(0)
         return Decimal(self.gate1_pass) / Decimal(self.gate1_total)
@@ -423,6 +484,11 @@ class SymbolRecord:
         self.min_minutes_per_day = min(tally.minutes_per_day) if tally.minutes_per_day else 0
         self.gate1_pass = tally.gate1_pass
         self.gate1_total = tally.gate1_total
+        self.gate1_relieved = tally.gate1_relieved
+        self.gate1_relieved_with_missing = tally.gate1_relieved_with_missing
+        self.gate1_relieved_median_gap = (
+            f"{_median_decimal(tally.gate1_relieved_gaps):.2f}%" if tally.gate1_relieved_gaps else ""
+        )
         self.gate2_excluded = tally.gate2_excluded
         self.gate2_missing = tally.gate2_missing
         self.gate2_duplicates = tally.gate2_duplicates
@@ -432,6 +498,7 @@ class SymbolRecord:
         self.liquidity_days = tally.liquidity_days
         self.gate3_checked = tally.gate3_checked
         self.gate3_failed = tally.gate3_failed
+        self.gate3_failure_rows = list(tally.gate3_failures)
         self.gate_definition = GATE_DEFINITION
         self.rebuild_discipline = REBUILD_DISCIPLINE
 
@@ -456,6 +523,16 @@ class SymbolRecord:
             self.prior_gate2_excluded = previous.gate2_excluded
         self.reroute_attempted = previous.reroute_attempted
         self.map_required_by_recovery = previous.map_required_by_recovery
+        # A floor hunt is one-shot too: ~11 credentialed probes per event must not be re-spent on a
+        # resume. The findings ride along so the report keeps them after a plain re-gate.
+        self.floors_hunted = previous.floors_hunted
+        self.floor_findings = list(previous.floor_findings)
+        self.floors_resolved = previous.floors_resolved
+        self.floor_ex_dates = list(previous.floor_ex_dates)
+        self.floor_probes_spent = previous.floor_probes_spent
+        self.floor_note = previous.floor_note
+        self.pre_floor_gate1_pass = previous.pre_floor_gate1_pass
+        self.pre_floor_gate1_total = previous.pre_floor_gate1_total
         if self.map_required_by_recovery:
             self.route = ROUTE_MAP_REQUIRED
             self.route_reasons = [*self.route_reasons, _RECOVERY_REASON]
@@ -574,12 +651,27 @@ class GateTally:
     #: liquidity filter exists anywhere.
     liquidity_days: int = 0
     minutes_per_day: list[int] = field(default_factory=list)
-    #: ``(day, gap_pct, raw_daily_volume)`` for every gate-1 FAILING day, and the raw daily volume
-    #: of every gated day -- the inputs to :func:`gate1_failure_profile`.
+    #: ``(day, gap_pct, raw_daily_volume)`` for every UNRELIEVED gate-1 failing day, and the raw
+    #: daily volume of every gated day -- the inputs to :func:`gate1_failure_profile`.
     gate1_failures: list[tuple[date, "Decimal | None", int]] = field(default_factory=list)
     gate1_volumes: list[int] = field(default_factory=list)
     #: the days gate 1 actually ran on (a day with no raw daily row is not one of them).
     gate1_days: list[date] = field(default_factory=list)
+    # --- auction relief (Q-12 addendum 2) -------------------------------------------------
+    #: Days that FAILED gate 1 above the +5.0% ceiling and were relieved as a thin day's auction
+    #: share. Counted SEPARATELY from ``gate1_pass``, exactly as the ruling requires.
+    gate1_relieved: int = 0
+    gate1_relieved_days: list[date] = field(default_factory=list)
+    #: Of those, how many ALSO carried more than 15 tradeless minutes -- the size of decision B122
+    #: (a relieved day is handed to gate 2 as "gate 1 passed").
+    gate1_relieved_with_missing: int = 0
+    #: Median shortfall (gap%) over the relieved days, for the report.
+    gate1_relieved_gaps: list["Decimal"] = field(default_factory=list)
+
+    @property
+    def gate1_effective_pass(self) -> int:
+        """Strict gate-1 passes PLUS auction-relief passes -- what coverage is measured on."""
+        return self.gate1_pass + self.gate1_relieved
 
 
 def gate_symbol(
@@ -591,6 +683,14 @@ def gate_symbol(
     (2026-07-26) makes gate 1 the completeness oracle: absent minute stamps exclude a day only when
     gate 1 has also failed on it. On a gate-1-passing day the same absent stamps are tradeless
     minutes and are counted as liquidity instead.
+
+    A gate-1 failure ABOVE the +5.0% ceiling is then offered to :func:`acumen.quality_gates.
+    auction_relief` (QUESTIONS.md Q-12 addendum 2). The band is untouched -- ``gate1_pass`` stays
+    the STRICT count and a relieved day lands in ``gate1_relieved``, its own field. Decision B122:
+    a relieved day is handed to gate 2 as ``volume_reconciled=True``, because the relief conditions
+    (extremes and opening print matching the exchange's own daily record, exactly) are direct
+    evidence that nothing was lost -- which is the very hypothesis the gate-2 missing-minutes
+    trigger exists to catch. ``gate1_relieved_with_missing`` measures how often that mattered.
     """
     tally = GateTally()
     for day, bars in minute_store.iter_days(symbol, since, None):
@@ -601,6 +701,7 @@ def gate_symbol(
         tally.closes[day] = bars[-1].close_paise
         row = cache.day(symbol, day)
         reconciled: bool | None = None
+        relieved = False
         if row is None:
             tally.gate1_missing_daily += 1
         else:
@@ -608,13 +709,31 @@ def gate_symbol(
             tally.gate1_volumes.append(row.volume)
             tally.gate1_days.append(day)
             result = gates.volume_gate(row.volume, sum(b.volume for b in bars))
-            reconciled = result.passed
             if result.passed:
                 tally.gate1_pass += 1
             else:
-                tally.gate1_failures.append((day, result.gap_pct, row.volume))
+                relief = gates.auction_relief(
+                    result,
+                    minute_open_paise=bars[0].open_paise,
+                    minute_high_paise=max(b.high_paise for b in bars),
+                    minute_low_paise=min(b.low_paise for b in bars),
+                    raw_open_paise=row.open_paise,
+                    raw_high_paise=row.high_paise,
+                    raw_low_paise=row.low_paise,
+                )
+                relieved = relief.relieved
+                if relieved:
+                    tally.gate1_relieved += 1
+                    tally.gate1_relieved_days.append(day)
+                    if result.gap_pct is not None:
+                        tally.gate1_relieved_gaps.append(result.gap_pct)
+                else:
+                    tally.gate1_failures.append((day, result.gap_pct, row.volume))
+            reconciled = result.passed or relieved
         integrity = gates.integrity_gate(bars, day, volume_reconciled=reconciled)
         tally.minutes_per_day.append(integrity.present)
+        if relieved and integrity.missing > gates.MAX_MISSING_MINUTES:
+            tally.gate1_relieved_with_missing += 1
         if integrity.liquidity_note and integrity.passed:
             tally.liquidity_days += 1
         if not integrity.passed:
@@ -683,6 +802,16 @@ def _median_int(values: Sequence[int]) -> int:
     if len(ordered) % 2:
         return ordered[mid]
     return (ordered[mid - 1] + ordered[mid]) // 2
+
+
+def _median_decimal(values: Sequence[Decimal]) -> Decimal:
+    if not values:
+        return Decimal(0)
+    ordered = sorted(values)
+    mid = len(ordered) // 2
+    if len(ordered) % 2:
+        return ordered[mid]
+    return (ordered[mid - 1] + ordered[mid]) / Decimal(2)
 
 
 def gate1_failure_profile(tally: GateTally, ex_dates: Sequence[date]) -> Gate1FailureProfile:
@@ -779,6 +908,15 @@ def gate3_over_events(
     factor brought in at the comparison (:func:`acumen.quality_gates.
     adjustment_continuity_gate`). Mutates the tally in place so a symbol's whole gate picture
     lives in one object.
+
+    A FAILURE is recorded as a pipe-delimited row carrying the NUMBERS the architect is owed as
+    well as the diagnostic sentence:
+    ``symbol|events|ex_date|k|pre_ex_day|ex_day|raw_gap%|adjusted_gap%|reason``. The RAW gap
+    is the same two stored closes with NO factor applied; the ADJUSTED gap is CONTEXT 4.5's own
+    test. Both together are what makes a failure diagnosable -- a raw gap near ``k - 1`` with an
+    adjusted gap near zero is a healthy event, while a raw gap near ZERO with a large adjusted gap
+    means the two closes are already in the SAME price domain, i.e. the pre-ex side was never
+    un-adjusted for the event. That is exactly the shape a vendor application floor leaves behind.
     """
     if not tally.closes:
         return
@@ -788,14 +926,20 @@ def gate3_over_events(
         after = [d for d in days if d >= ex_date]
         if not before or not after:
             continue  # the ex-date sits outside the stored span; nothing to compare
+        pre_day, ex_day = before[-1], after[0]
+        pre_close, ex_close = tally.closes[pre_day], tally.closes[ex_day]
         result = gates.adjustment_continuity_gate(
-            ex_date, before[-1], after[0],
-            tally.closes[before[-1]], tally.closes[after[0]], k,
+            ex_date, pre_day, ex_day, pre_close, ex_close, k,
         )
         tally.gate3_checked += 1
         if not result.passed:
             tally.gate3_failed += 1
-            tally.gate3_failures.append(f"{symbol} {'+'.join(kinds)} ex {ex_date}: {result.reason}")
+            raw_gap = (Decimal(ex_close - pre_close) / Decimal(pre_close)) * Decimal(100)
+            tally.gate3_failures.append("|".join((
+                symbol, "+".join(kinds), ex_date.isoformat(), str(k),
+                pre_day.isoformat(), ex_day.isoformat(),
+                f"{raw_gap:.2f}", f"{result.gap * Decimal(100):.2f}", result.reason,
+            )))
 
 
 # --- the run ----------------------------------------------------------------------------
@@ -893,6 +1037,22 @@ def plan_symbol(
     return record, view, decision, mb._tick_paise(master, symbol)  # noqa: SLF001
 
 
+def unparsed_ex_dates(view: mb.SymbolCorpActions, symbol: str) -> tuple[date, ...]:
+    """The ex-dates of subjects on ``symbol`` the CONTEXT 4.2 parser could not classify. PURE.
+
+    These are exactly the ``ParseException``s the Q-11 routing rule already treats as
+    map-forcing. Under the Q-11 addendum-3 clause (ii) they become map NODES as well, with
+    candidates ``{measured, absent}`` -- so an unparsed subject no longer forces a symbol onto the
+    map path and then contributes nothing for the map to be built FROM.
+    """
+    wanted = symbol.strip().upper()
+    return tuple(sorted({
+        exception.action.ex_date
+        for exception in view.parse_exceptions
+        if exception.action.symbol == wanted
+    }))
+
+
 def build_map_for(
     client,
     cached_store: CachedDailyStore,
@@ -905,27 +1065,56 @@ def build_map_for(
     tick_paise: int | None,
     *,
     log: Callable[[str], None] = print,
-) -> tuple["va.AdjustmentMap | None", int]:
-    """Probe every era of ``symbol``'s ingest span and build + persist its map. Returns
-    ``(map, unprobed_era_count)``; ``None`` when no era could be probed at all."""
+) -> tuple["va.AdjustmentMap | None", int, int]:
+    """Probe every era of ``symbol``'s ingest span and build + persist its map.
+
+    Returns ``(map, unprobed_era_count, floors_dropped)``; the map is ``None`` when no era could be
+    probed at all.
+
+    Already-measured vendor APPLICATION FLOORS are CARRIED onto the rebuilt map
+    (:func:`acumen.vendor_adjustment.carry_floors_forward`). A rebuild happens whenever the map's
+    fetch date moves -- which is every calendar day -- and a floor is a property of the vendor's
+    archive, not of when we last looked at it. Rebuilding without carrying would drop the committed
+    probe evidence the Q-11 addendum-2 ruling requires, and would leave the next fresh fetch of
+    those days dividing by a chain the vendor never applied. A floor whose event no longer resolves
+    to the same factor is DROPPED and counted, so the caller can re-open the hunt.
+    """
     events = va.events_from_factor_table(
-        view.factors, view.suppressions, view.pending_rights_ex_dates, symbol=symbol
+        view.factors, view.suppressions, view.pending_rights_ex_dates, symbol=symbol,
+        # Q-11 addendum 3 clause (ii): an UNPARSED subject needs no parsing to enter the map. It
+        # was already forcing this symbol onto the map path (the routing rule's conservative
+        # clause) while contributing NO era key -- which is what left COLPAL with a map-required
+        # route and zero probeable eras. It now participates with {measured, absent}.
+        unparsed_ex_dates=unparsed_ex_dates(view, symbol),
     )
     windows, unprobeable = era_probe_windows(events, cache.days(symbol), clamp, config.end)
     if unprobeable:
         log(f"    {len(unprobeable)} era(s) have no trading day to probe -- older spans stay "
             "un-provable (excluded + counted)")
     if not windows:
-        return None, len(unprobeable)
+        return None, len(unprobeable), 0
     log(f"    probing {len(windows)} era(s): {[w.label for w in windows]}")
     eras = va.measure_symbol_live(
         client, cached_store, symbol, token, events, windows, config.end
     )
     if not eras:
-        return None, len(unprobeable)
+        return None, len(unprobeable), 0
     amap = va.build_map(symbol, config.end, events, eras, tick_paise=tick_paise)
+    try:
+        previous = mb.load_adjustment_map_for(symbol, data_dir=config.map_data_dir)
+    except va.VendorAdjustmentError:
+        previous = None
+    amap, dropped = va.carry_floors_forward(previous, amap)
+    if amap.floors:
+        log(f"    carried {len(amap.floors)} already-measured floor(s) onto the rebuilt map: "
+            + ", ".join(
+                f"{f.ex_date}->{f.floor_date}" for f in amap.floors if f.floor_date
+            ))
+    for floor in dropped:
+        log(f"    DROPPED floor {floor.ex_date}->{floor.floor_date}: its event no longer resolves "
+            "to the factor the probes were classified under; the hunt re-opens")
     va.persist_map(amap, data_dir=config.map_data_dir)
-    return amap, len(unprobeable)
+    return amap, len(unprobeable), len(dropped)
 
 
 def process_symbol(
@@ -973,7 +1162,7 @@ def process_symbol(
             adjustment_map = None
         if adjustment_map is None or adjustment_map.fetch_date != config.end:
             try:
-                adjustment_map, unprobed = build_map_for(
+                adjustment_map, unprobed, dropped = build_map_for(
                     client, cached_store, cache, symbol, master.token(symbol), view, clamp,
                     config, tick_paise, log=log,
                 )
@@ -983,6 +1172,10 @@ def process_symbol(
                 log(f"    map build FAILED: {exc}")
                 return record
             record.map_unprobed_eras = unprobed
+            if dropped:
+                # A floor that could not be carried is a floor we no longer hold evidence for.
+                # Re-open the hunt rather than leave the record claiming a measurement it lost.
+                record.floors_hunted = False
         if adjustment_map is None:
             record.status = STATUS_MAP_UNBUILDABLE
             record.note = (
@@ -999,6 +1192,19 @@ def process_symbol(
             for era in adjustment_map.eras for c in era.choices
         ]
         log(f"    map: {record.map_eras_provable}/{record.map_eras} eras provable")
+        if record.floors_hunted and record.floors_resolved and not adjustment_map.floors:
+            # Self-healing invariant: the record may only CLAIM a measured floor while the map still
+            # CARRIES its evidence. A map rebuilt before floors were carried forward loses it, and a
+            # sticky `floors_hunted` would then keep the hunt permanently closed over a claim nothing
+            # backs. Re-open it; the re-hunt costs ~11 probes and restores the committed artifact.
+            # ``floor_ex_dates`` is deliberately NOT cleared -- it is what tells the re-hunt which
+            # events to re-measure regardless of the failure-rate scope gate, because a repaired
+            # span no longer LOOKS like it needs a floor. That is the whole trap.
+            log(f"    {record.floors_resolved} floor(s) claimed but the map carries none "
+                "(rebuilt before the carry-forward) -- re-opening the hunt for "
+                f"{record.floor_ex_dates or 'every in-scope event'}")
+            record.floors_hunted = False
+            record.floors_resolved = 0
 
     symbol_factors = view.symbol_factors(tick_paise=tick_paise)
     if adjustment_map is not None:
@@ -1034,39 +1240,69 @@ def process_symbol(
     record.apply_tally(tally)
     _settle(record, tally, view.factors)
 
-    if (
-        record.status == STATUS_QUARANTINED
-        and record.route == ROUTE_TABLE_PATH
-        and not record.reroute_attempted
-    ):
-        # The Q-12 addendum ruling: a quarantined TABLE-PATH symbol is rerouted through the map path
-        # as a second pass, because the routing rule only guarantees a PRICE oracle for a
-        # non-share-count event -- so a bonus/split-only symbol whose vendor used a different factor
-        # has nothing that can catch it. Probes buy the oracle; no stored candle is refetched.
-        reroute_quarantined_to_map(
+    if reroute_owed(record):
+        # The Q-12 addendum ruling, widened by the Q-11 addendum-2 floor ruling's own scope
+        # ("... DIXON incl. table-path re-routes, MOTHERSON, ... HDFCBANK"): a TABLE-PATH symbol
+        # that is quarantined OR sits below the 98% floor-hunt line is rerouted through the map
+        # path as a second pass, because the routing rule only guarantees a PRICE oracle for a
+        # non-share-count event -- so a bonus/split-only symbol whose vendor used a different
+        # factor, or spliced its archive, has nothing that can catch it. Probes buy the oracle;
+        # no stored candle is refetched. A floor search NEEDS that oracle, so this runs first.
+        tally = reroute_quarantined_to_map(
             client, master, cache, cached_store, record, view, clamp, config, tick_paise, log=log,
+        ) or tally
+
+    if floor_hunt_owed(record):
+        run_floor_pass(
+            client, master, cache, cached_store, record, view, clamp, config, tick_paise, tally,
+            log=log,
         )
 
     log(f"    windows {record.windows_present}p/{record.windows_empty}e/{record.windows_error}x  "
         f"days={record.depth_days} gate1={record.gate1_pass}/{record.gate1_total} "
-        f"({record.gate1_rate:.1%}) gate2_excl={record.gate2_excluded} "
+        f"(+{record.gate1_relieved} relieved -> {record.gate1_rate:.1%}) "
+        f"gate2_excl={record.gate2_excluded} "
         f"liquidity_days={record.liquidity_days} "
         f"avg_min/day={record.avg_minutes_per_day} -> {record.status}")
-    if tally.gate3_failures:
-        for failure in tally.gate3_failures:
-            log(f"    GATE-3 FAIL: {failure}")
+    for failure in record.gate3_failure_rows:
+        log(f"    GATE-3 FAIL: {failure}")
     return record
+
+
+def reroute_owed(record: SymbolRecord) -> bool:
+    """Does this TABLE-PATH symbol owe a map-path second pass? PURE.
+
+    The Q-12 addendum ruled the reroute for a QUARANTINED table-path symbol. The Q-11 addendum-2
+    floor ruling names table-path symbols that are merely BELOW 98% (DIXON, MOTHERSON, HDFCBANK)
+    among the symbols whose floors must be hunted -- and a floor search is arbitrated by the map's
+    price oracle, which a table-path symbol does not have. So the same second pass now also fires
+    at the floor-hunt line. It stays one-shot: ``reroute_attempted`` is sticky.
+    """
+    if record.route != ROUTE_TABLE_PATH or record.reroute_attempted:
+        return False
+    if not record.gate1_total:
+        return False
+    return (
+        record.status == STATUS_QUARANTINED
+        or record.gate1_rate < FLOOR_HUNT_GATE1_MAX_RATE
+    )
 
 
 def _settle(
     record: SymbolRecord, tally: GateTally, factors: Sequence[ca.Factor]
 ) -> None:
-    """Set the terminal status from a fresh tally, and profile the failures if it is quarantined."""
+    """Set the terminal status from a fresh tally, and profile the failures if it is quarantined.
+
+    The rate is the EFFECTIVE one -- strict gate-1 passes plus auction-relief passes -- because the
+    relief ruling counts a relieved day as a pass. The strict numerator stays visible in the record
+    and in the report; nothing is folded away.
+    """
     if record.gate1_total and record.gate1_rate < QUARANTINE_GATE1_MIN_PASS_RATE:
         record.status = STATUS_QUARANTINED
+        relief = f" (strict {record.gate1_strict_rate:.1%} + {record.gate1_relieved} relieved)"
         record.note = (
-            f"gate-1 pass rate {record.gate1_rate:.1%} is below "
-            f"{QUARANTINE_GATE1_MIN_PASS_RATE:.0%}; skipped, listed, run continues"
+            f"gate-1 pass rate {record.gate1_rate:.1%}{relief if record.gate1_relieved else ''} is "
+            f"below {QUARANTINE_GATE1_MIN_PASS_RATE:.0%}; skipped, listed, run continues"
         )
     else:
         record.status = STATUS_SETTLED
@@ -1088,31 +1324,39 @@ def reroute_quarantined_to_map(
     tick_paise: int | None,
     *,
     log: Callable[[str], None] = print,
-) -> None:
-    """The Q-12-addendum quarantine-recovery second pass. Mutates ``record`` in place.
+) -> "GateTally | None":
+    """The Q-12-addendum recovery second pass. Mutates ``record`` in place; returns the new tally.
 
     Probe the symbol's eras, build + persist a map (so the recovery is auditable), apply it to the
     ALREADY-STORED days by the NET factor ``k_map / k_table`` -- the store was already un-adjusted
     once by the factor table at ingest -- and re-run the gates. If the symbol recovers it settles; if
     it does not, it stays quarantined and carries the ruling's failure-pattern analysis.
 
+    It now also fires for a table-path symbol merely BELOW the 98% floor-hunt line
+    (:func:`reroute_owed`), because the floor search that follows is arbitrated by the map's price
+    oracle and a table-path symbol has none. The returned tally is what that search reads its
+    failing days from, so the two passes see the same store.
+
     ``reroute_attempted`` is set whatever the outcome, so a resumed run never re-probes it.
     """
     record.reroute_attempted = True
-    log(f"    QUARANTINE RECOVERY: rerouting {record.symbol} through the map path (second pass)")
+    log(f"    MAP RECOVERY: rerouting {record.symbol} through the map path (second pass; "
+        f"gate 1 {record.gate1_rate:.1%}, status {record.status})")
     try:
-        adjustment_map, unprobed = build_map_for(
+        adjustment_map, unprobed, dropped = build_map_for(
             client, cached_store, cache, record.symbol, master.token(record.symbol),
             view, clamp, config, tick_paise, log=log,
         )
     except (sac.SmartApiError, va.VendorAdjustmentError, DailyStoreError, InstrumentMasterError) as exc:
         record.reroute_note = f"map build failed: {type(exc).__name__}: {exc}"
-        log(f"      reroute map build FAILED: {exc} -- stays quarantined on the table-path numbers")
-        return
+        log(f"      reroute map build FAILED: {exc} -- stays on the table-path numbers")
+        return None
+    if dropped:
+        record.floors_hunted = False
     if adjustment_map is None:
         record.reroute_note = "no era of the ingest span could be probed; nothing to reroute through"
         log(f"      {record.reroute_note}")
-        return
+        return None
 
     record.route = ROUTE_MAP_REQUIRED
     record.map_required_by_recovery = True
@@ -1132,7 +1376,7 @@ def reroute_quarantined_to_map(
     )
     tally = gate_symbol(config.minute_store, cache, record.symbol, since=clamp)
     gate3_over_events(tally, record.symbol, view.factors)
-    before = f"{record.gate1_pass}/{record.gate1_total} ({record.gate1_rate:.1%})"
+    before = f"{record.gate1_effective_pass}/{record.gate1_total} ({record.gate1_rate:.1%})"
     record.snapshot_prior()
     record.apply_tally(tally)
     record.unprovable_days = len(applied.unprovable_days)
@@ -1141,11 +1385,227 @@ def reroute_quarantined_to_map(
     record.reroute_note = (
         f"map {record.map_eras_provable}/{record.map_eras} eras provable; "
         f"{applied.days_rewritten} day(s) rewritten, {applied.identity_days} already raw; "
-        f"gate 1 {before} -> {record.gate1_pass}/{record.gate1_total} ({record.gate1_rate:.1%})"
+        f"gate 1 {before} -> {record.gate1_effective_pass}/{record.gate1_total} "
+        f"({record.gate1_rate:.1%})"
     )
     log(f"      {record.reroute_note} -> {record.status}")
     for failure in tally.gate3_failures:
         log(f"      GATE-3 FAIL: {failure}")
+    return tally
+
+
+# --- the vendor application-floor hunt (Q-11 addendum 2) ---------------------------------
+
+
+def floor_hunt_owed(record: SymbolRecord) -> bool:
+    """Is this symbol inside the ruling's hunt scope, and not yet hunted? PURE.
+
+    "Floors are hunted ONLY where failure is systematic: every quarantined symbol and every settled
+    symbol with gate-1 < 98%." A symbol with no gated day at all has no failure to explain.
+    """
+    if record.floors_hunted or not record.gate1_total:
+        return False
+    if record.status == STATUS_QUARANTINED:
+        return True
+    return record.gate1_rate < FLOOR_HUNT_GATE1_MAX_RATE
+
+
+def floor_candidate_days(
+    adjustment_map: "va.AdjustmentMap", days: Sequence[date], ex_date: date
+) -> list[date]:
+    """The trading days a floor search for ``ex_date`` may probe. PURE.
+
+    Strictly before the ex-date, and only days whose era the map RESOLVED: an un-provable era has
+    no committed per-event chain to drop the event from, so its days answer neither hypothesis --
+    and the ruling's own closing sentence keeps them un-provable. Restricting the domain is what
+    makes the classifier's two hypotheses exact rather than speculative.
+    """
+    inside: list[date] = []
+    for day in days:
+        if day >= ex_date:
+            continue
+        era = adjustment_map.era_for_day(day)
+        if era is None or not era.provable:
+            continue
+        if any(c.ex_date == ex_date and c.price_factor != _ONE for c in era.choices):
+            inside.append(day)
+    return sorted(inside)
+
+
+def hunt_symbol_floors(
+    client,
+    cached_store: CachedDailyStore,
+    symbol: str,
+    token: str,
+    adjustment_map: "va.AdjustmentMap",
+    tally: GateTally,
+    *,
+    force_ex_dates: frozenset[date] = frozenset(),
+    log: Callable[[str], None] = print,
+) -> tuple[list["va.EventFloor"], list[str], int]:
+    """Binary-search a vendor application floor for each systematically-failing event. I/O (probes).
+
+    Returns ``(floors, findings, probes_spent)``. Events are searched NEWEST-first, so by the time
+    an older event is searched every newer event's floor is already known and is honoured inside
+    the chain the classifier tests against -- the searches compose instead of confounding.
+
+    One probe is one credentialed ONE_MINUTE call for a single session, memoised across events, so
+    a day two searches both want costs one request. ``~11 probes per event`` is the ruling's own
+    estimate and :data:`acumen.vendor_adjustment.MAX_FLOOR_PROBES` is the hard cap.
+
+    ``force_ex_dates`` bypasses the :data:`FLOOR_HUNT_MIN_FAILURE_RATE` scope gate for events a
+    previous pass already resolved a floor for. That gate reads the STORE's gate-1 failures to
+    decide whether an event is worth ~11 probes -- which is right the first time and exactly wrong
+    afterwards, because a span repaired BY a floor no longer fails. Without this, a map that lost
+    its floors could never get them back: the repair would hide its own justification.
+    """
+    failing = {day for day, _gap, _volume in tally.gate1_failures}
+    gated = sorted(tally.gate1_days)
+    cache: dict[date, "va.ProbeDay | None"] = {}
+    spent = 0
+
+    def probe(day: date) -> "va.ProbeDay | None":
+        nonlocal spent
+        if day not in cache:
+            cache[day] = va.probe_one_day(client, cached_store, symbol, token, day)
+            spent += 1
+        return cache[day]
+
+    floors: list["va.EventFloor"] = []
+    findings: list[str] = []
+    current = adjustment_map
+    for ex_date in sorted(adjustment_map.all_event_ex_dates, reverse=True):
+        if ex_date > adjustment_map.fetch_date:
+            continue
+        days = floor_candidate_days(current, gated, ex_date)
+        if not days:
+            findings.append(
+                f"{ex_date.isoformat()} -> not searched: no day of a provable era carries this "
+                "event with a factor to drop"
+            )
+            continue
+        failures = sum(1 for day in days if day in failing)
+        rate = Decimal(failures) / Decimal(len(days))
+        if rate < FLOOR_HUNT_MIN_FAILURE_RATE and ex_date not in force_ex_dates:
+            findings.append(
+                f"{ex_date.isoformat()} -> not searched: its pre-ex span reconciles "
+                f"({failures}/{len(days)} = {rate:.1%} of days fail gate 1, below the "
+                f"{FLOOR_HUNT_MIN_FAILURE_RATE:.0%} systematic-failure threshold)"
+            )
+            continue
+        if rate < FLOOR_HUNT_MIN_FAILURE_RATE:
+            log(f"      re-measuring {ex_date} despite a reconciling span "
+                f"({failures}/{len(days)} = {rate:.1%} fail): a previous pass resolved a floor "
+                "here, and the repair is why the span no longer fails")
+        log(f"      floor search {ex_date} over {len(days)} day(s) "
+            f"({failures} failing, {rate:.1%})")
+        floor = va.search_event_floor_live(probe, current, ex_date, days)
+        floors.append(floor)
+        current = va.with_floors(current, floors)
+        findings.append(
+            f"{ex_date.isoformat()} -> "
+            + (floor.floor_date.isoformat() if floor.floor_date else "no splice")
+            + f" ({'resolved' if floor.resolved else 'UNRESOLVED'}, "
+            f"{len(floor.probes)} probe(s)): {floor.note}"
+        )
+        log(f"        {findings[-1]}")
+    return floors, findings, spent
+
+
+def run_floor_pass(
+    client,
+    master: InstrumentMaster,
+    cache: DailyCache,
+    cached_store: CachedDailyStore,
+    record: SymbolRecord,
+    view: mb.SymbolCorpActions,
+    clamp: date,
+    config: RunConfig,
+    tick_paise: int | None,
+    tally: GateTally,
+    *,
+    log: Callable[[str], None] = print,
+) -> None:
+    """Hunt floors, commit them to the map, re-apply to the STORE and re-gate. Mutates ``record``.
+
+    No stored candle is refetched: the only network calls are the binary search's own probe days.
+
+    ``floors_hunted`` is set for every outcome the symbol itself determines -- a resolved floor, no
+    floor, an unprobeable event -- so a resumed run never re-spends ~11 probes on a settled answer.
+    It is deliberately NOT set when the hunt dies on a :class:`~acumen.smartapi_client.SmartApiError`:
+    CONTEXT 4.3 states that transient "access denied" bursts are NORMAL and must be retried, never
+    read as an answer, and a sticky flag would turn one rate-limit burst into a permanently
+    unmeasured floor.
+    """
+    try:
+        adjustment_map = mb.load_adjustment_map_for(record.symbol, data_dir=config.map_data_dir)
+    except va.VendorAdjustmentError:
+        adjustment_map = None
+    if adjustment_map is None:
+        # No price oracle to arbitrate "event-in vs event-out" against, so there is nothing to
+        # search. The symbol keeps its numbers; the reason is recorded rather than silently skipped.
+        record.floors_hunted = True
+        record.floor_note = "no adjustment map on disk to hunt floors against"
+        log(f"    floor hunt skipped for {record.symbol}: {record.floor_note}")
+        return
+    log(f"    FLOOR HUNT: {record.symbol} at gate-1 {record.gate1_rate:.1%} "
+        f"(< {FLOOR_HUNT_GATE1_MAX_RATE:.0%} or quarantined)")
+    forced = frozenset(date.fromisoformat(d) for d in record.floor_ex_dates)
+    try:
+        floors, findings, spent = hunt_symbol_floors(
+            client, cached_store, record.symbol, master.token(record.symbol),
+            adjustment_map, tally, force_ex_dates=forced, log=log,
+        )
+    except sac.SmartApiError as exc:
+        # CONTEXT 4.3: a transient "access denied" burst is NORMAL and is retried, never treated as
+        # an answer. Leave the hunt OPEN so the next run re-measures instead of committing silence.
+        record.floor_note = (
+            f"floor hunt interrupted by a transient vendor error, RETRIED on the next run: {exc}"
+        )
+        log(f"      floor hunt interrupted: {exc} -- the map is left exactly as it was; the hunt "
+            "stays OPEN and the next run retries it (CONTEXT 4.3)")
+        return
+    except (va.VendorAdjustmentError, DailyStoreError, InstrumentMasterError) as exc:
+        record.floors_hunted = True  # deterministic: retrying would fail identically forever
+        record.floor_note = f"floor hunt failed: {type(exc).__name__}: {exc}"
+        log(f"      floor hunt FAILED: {exc} -- the map is left exactly as it was")
+        return
+
+    record.floors_hunted = True
+    record.floor_findings = findings
+    record.floor_probes_spent = spent
+    resolved = [f for f in floors if f.resolved and f.floor_date is not None]
+    record.floors_resolved = len(resolved)
+    record.floor_ex_dates = [f.ex_date.isoformat() for f in resolved]
+    if not resolved:
+        record.floor_note = (
+            f"{spent} probe(s) spent; no event carries a vendor application floor inside our "
+            "history, so the map's chain is unchanged"
+        )
+        log(f"      {record.floor_note}")
+        return
+
+    adjustment_map = va.with_floors(adjustment_map, floors)
+    va.persist_map(adjustment_map, data_dir=config.map_data_dir)
+    applied = mb.rebuild_symbol_raw_with_map(
+        config.minute_store, cached_store, record.symbol, adjustment_map, tick_paise=tick_paise,
+    )
+    before = f"{record.gate1_effective_pass}/{record.gate1_total} ({record.gate1_rate:.1%})"
+    record.pre_floor_gate1_pass = record.gate1_effective_pass
+    record.pre_floor_gate1_total = record.gate1_total
+    new_tally = gate_symbol(config.minute_store, cache, record.symbol, since=clamp)
+    gate3_over_events(new_tally, record.symbol, view.factors)
+    record.snapshot_prior()
+    record.apply_tally(new_tally)
+    record.unknown_baseline_days = len(applied.unknown_baseline_days)
+    _settle(record, new_tally, view.factors)
+    record.floor_note = (
+        f"{len(resolved)} floor(s) resolved over {spent} probe(s); "
+        f"{applied.days_rewritten} day(s) rewritten, {applied.identity_days} already raw; "
+        f"gate 1 {before} -> {record.gate1_effective_pass}/{record.gate1_total} "
+        f"({record.gate1_rate:.1%})"
+    )
+    log(f"      {record.floor_note} -> {record.status}")
 
 
 def needs_reprocessing(record: SymbolRecord, config: RunConfig) -> str | None:
@@ -1185,8 +1645,20 @@ def needs_reprocessing(record: SymbolRecord, config: RunConfig) -> str | None:
             return f"adjustment map built under a superseded estimator ({amap.volume_estimator_id or 'none'})"
         if amap.fetch_date != config.end:
             return f"adjustment map keyed to fetch date {amap.fetch_date}, run end is {config.end}"
-    if record.status == STATUS_QUARANTINED and record.route == ROUTE_TABLE_PATH and not record.reroute_attempted:
-        return "quarantine-recovery pass owed (Q-12 addendum)"
+        if record.floors_resolved and not amap.floors:
+            # The record may only CLAIM a measured vendor application floor while the map still
+            # CARRIES its probe evidence (the Q-11 addendum-2 ruling commits the floor TO the map).
+            # A map rebuilt before floors were carried forward loses it, and `floors_hunted` is
+            # sticky -- so without this the claim would outlive its evidence forever and the next
+            # fresh fetch of those days would divide by a chain the vendor never applied.
+            return (
+                f"record claims {record.floors_resolved} vendor application floor(s) but the "
+                "adjustment map carries none -- the hunt must re-open"
+            )
+    if reroute_owed(record):
+        return "map-path recovery pass owed (Q-12 addendum / Q-11 addendum-2 hunt scope)"
+    if floor_hunt_owed(record):
+        return "vendor application-floor hunt owed (Q-11 addendum 2)"
     return None
 
 
@@ -1207,7 +1679,13 @@ def run_universe(
     ledger.halted = ""
     cached_store = CachedDailyStore(cache)
     ceiling = int(HALT_QUARANTINE_FRACTION * Decimal(len(symbols)))
-    already = ledger.quarantined()
+    # Count only the quarantined symbols THIS run is responsible for. The ceiling is a fraction of
+    # the symbols being processed, so measuring it against the whole ledger makes any `--symbols`
+    # subset unstartable the moment anything anywhere is quarantined -- the operator's own
+    # single-symbol diagnostic path, refused for a reason that has nothing to do with the symbol.
+    # For a full-universe run this is exactly the previous behaviour (the subset IS the universe).
+    in_scope = {s.strip().upper() for s in symbols}
+    already = [s for s in ledger.quarantined() if s in in_scope]
     if len(already) > ceiling:
         # Check BEFORE fetching anything: a resumed run must not spend another symbol's worth of
         # requests only to halt again on the same systemic fault.
@@ -1347,12 +1825,14 @@ def build_report(
         by_route[record.route] = by_route.get(record.route, 0) + 1
 
     gate1_pass = sum(r.gate1_pass for r in settled)
+    gate1_relieved = sum(r.gate1_relieved for r in settled)
+    gate1_effective = gate1_pass + gate1_relieved
     gate1_total = sum(r.gate1_total for r in settled)
     gate2_excluded = sum(r.gate2_excluded for r in settled)
     unprovable = sum(r.unprovable_days for r in settled)
     quarantined_days = sum(r.gate1_total for r in quarantined)
     all_days = gate1_total + quarantined_days
-    usable = gate1_pass - gate2_excluded
+    usable = gate1_effective - gate2_excluded
 
     lines: list[str] = []
     add = lines.append
@@ -1380,16 +1860,26 @@ def build_report(
         add(f"| {status} | {sum(1 for r in records if r.status == status)} |")
     add(f"| Not yet processed | {len(unprocessed)} |")
     add(f"| Symbol-days gated (settled symbols) | {gate1_total:,} |")
-    add(f"| Gate-1 PASS | {gate1_pass:,} ({_pct(gate1_pass, gate1_total)}) |")
+    add(f"| Gate-1 PASS (strict band) | {gate1_pass:,} ({_pct(gate1_pass, gate1_total)}) |")
+    add(f"| Gate-1 AUCTION-RELIEF pass (Q-12 addendum 2) | {gate1_relieved:,} "
+        f"({_pct(gate1_relieved, gate1_total)}) |")
+    add(f"| Gate-1 EFFECTIVE pass (strict + relief) | {gate1_effective:,} "
+        f"({_pct(gate1_effective, gate1_total)}) |")
     add(f"| Gate-2 exclusions | {gate2_excluded:,} |")
     add(f"| Un-provable days (no map era / unknown factor) | {unprovable:,} |")
+    add(f"| Vendor application floors resolved (Q-11 addendum 2) | "
+        f"{sum(r.floors_resolved for r in records):,} over "
+        f"{sum(r.floor_probes_spent for r in records):,} probe(s) |")
     add(f"| **TOTAL coverage** (gate-1-passing days of every symbol-day seen) | "
-        f"**{_pct(gate1_pass, all_days)}** |")
+        f"**{_pct(gate1_effective, all_days)}** |")
+    add(f"| TOTAL coverage, STRICT band only (no relief) | {_pct(gate1_pass, all_days)} |")
     add(f"| Usable symbol-days (gate 1 AND gate 2) | ~{max(usable, 0):,} |")
     add("")
     add(f"**Definition of done (plan.md chunk 5B): >= 95% of symbol-days pass gates.** "
-        f"Measured: **{_pct(gate1_pass, all_days)}** of all symbol-days seen pass gate 1, with "
-        "every failure categorized in section 4.")
+        f"Measured: **{_pct(gate1_effective, all_days)}** of all symbol-days seen pass gate 1, "
+        f"with every failure categorized in section 4. Without the auction relief the same store "
+        f"measures {_pct(gate1_pass, all_days)}; the two numbers are printed side by side "
+        "everywhere in this report, and the relief count is never folded into the strict one.")
     if ledger.halted:
         add("")
         add(f"> **RUN HALTED.** {ledger.halted}")
@@ -1441,13 +1931,20 @@ def build_report(
 
     add("## 3. Depth found, per symbol")
     add("")
-    add("| Symbol | Route | Clamp | First 1-min day | Days | Windows p/e/x | Gate-1 | Gate-2 excl | Avg min/day | Status |")
-    add("|---|---|---|---|---|---|---|---|---|---|")
+    add("| Symbol | Route | Clamp | First 1-min day | Days | Windows p/e/x | Gate-1 (strict) | "
+        "Relief | Gate-1 (effective) | Floors | Gate-2 excl | Avg min/day | Status |")
+    add("|---|---|---|---|---|---|---|---|---|---|---|---|---|")
     for record in sorted(records, key=lambda r: r.symbol):
+        floors = (
+            f"{record.floors_resolved}" if record.floors_hunted else "-"
+        )
         add(f"| {record.symbol} | {record.route} | {record.clamp_start or '-'} | "
             f"{record.first_stored_date or '-'} | {record.depth_days} | "
             f"{record.windows_present}/{record.windows_empty}/{record.windows_error} | "
             f"{record.gate1_pass}/{record.gate1_total} ({_pct(record.gate1_pass, record.gate1_total)}) | "
+            f"{record.gate1_relieved} | "
+            f"{record.gate1_effective_pass}/{record.gate1_total} "
+            f"({_pct(record.gate1_effective_pass, record.gate1_total)}) | {floors} | "
             f"{record.gate2_excluded} | {record.avg_minutes_per_day} | {record.status} |")
     add("")
 
@@ -1470,15 +1967,15 @@ def build_report(
         for record in sorted(moved, key=lambda r: r.symbol):
             before_pass += max(record.prior_gate1_pass, 0)
             before_total += max(record.prior_gate1_total, 0)
-            after_pass += record.gate1_pass
+            after_pass += record.gate1_effective_pass
             after_total += record.gate1_total
             before_g2 += max(record.prior_gate2_excluded, 0)
             after_g2 += record.gate2_excluded
             add(f"| {record.symbol} | {record.route} | "
                 f"{record.prior_gate1_pass}/{record.prior_gate1_total} "
                 f"({_pct(max(record.prior_gate1_pass, 0), max(record.prior_gate1_total, 0))}) | "
-                f"{record.gate1_pass}/{record.gate1_total} "
-                f"({_pct(record.gate1_pass, record.gate1_total)}) | "
+                f"{record.gate1_effective_pass}/{record.gate1_total} "
+                f"({_pct(record.gate1_effective_pass, record.gate1_total)}) | "
                 f"{max(record.prior_gate2_excluded, 0)} | {record.gate2_excluded} | "
                 f"{record.prior_status or '-'} | {record.status} |")
         add(f"| **TOTAL ({len(moved)})** | | **{before_pass:,}/{before_total:,} "
@@ -1506,12 +2003,17 @@ def build_report(
             f"{_pct(record.liquidity_days, record.depth_days)} |")
     add("")
 
+    _add_floor_section(add, records)
+    _add_relief_section(add, records, gate1_total)
+
     add("## 4. Exclusions by reason")
     add("")
     add("| Reason | Symbol-days | Note |")
     add("|---|---|---|")
-    add(f"| gate-1 (volume reconciliation outside [-0.1%, +5.0%]) | "
-        f"{gate1_total - gate1_pass:,} | CONTEXT 4.5 gate 1; excluded + counted per CONTEXT 7-E3 |")
+    add(f"| gate-1 (volume reconciliation outside [-0.1%, +5.0%], UNRELIEVED) | "
+        f"{gate1_total - gate1_effective:,} | CONTEXT 4.5 gate 1; excluded + counted per CONTEXT "
+        f"7-E3. {gate1_relieved:,} further above-ceiling failures were relieved as a thin day's "
+        "auction share (section 3d) and are NOT excluded |")
     add(f"| gate-2 (candle integrity) | {gate2_excluded:,} | duplicates, impossible OHLC, negative "
         "values, or missing minutes ON A DAY WHERE GATE 1 ALSO FAILS (the completeness ruling) |")
     add(f"| un-provable (no map era / unknown factor in (D, F]) | {unprovable:,} | the Q-11 "
@@ -1576,8 +2078,8 @@ def build_report(
         for record in sorted(quarantined, key=lambda r: r.symbol):
             rerouted = "yes" if record.reroute_attempted else "n/a (map path)"
             add(f"| {record.symbol} | {record.route} | "
-                f"{record.gate1_pass}/{record.gate1_total} "
-                f"({_pct(record.gate1_pass, record.gate1_total)}) | {rerouted} | "
+                f"{record.gate1_effective_pass}/{record.gate1_total} "
+                f"({_pct(record.gate1_effective_pass, record.gate1_total)}) | {rerouted} | "
                 f"{record.failure_pattern or '-'} | {record.note} |")
         add("")
         add("**Failure-pattern analysis** (the Q-12-addendum ruling: \"failures clustered before a "
@@ -1607,7 +2109,7 @@ def build_report(
             "Median raw daily volume (all days) | Median on the above-ceiling days | Pattern |")
         add("|---|---|---|---|---|---|---|")
         for record in sorted(quarantined, key=lambda r: r.symbol):
-            add(f"| {record.symbol} | {record.gate1_total - record.gate1_pass} | "
+            add(f"| {record.symbol} | {record.gate1_total - record.gate1_effective_pass} | "
                 f"{record.gate1_above_ceiling} | {record.gate1_below_floor} | "
                 f"{record.median_daily_volume:,} | "
                 f"{record.median_daily_volume_above_ceiling:,} | "
@@ -1636,6 +2138,37 @@ def build_report(
         f"series must show |day-over-day gap| < 20%. Checked on the stored RAW closes with the "
         f"event's own CONTEXT 4.2 factor applied at the comparison. **{gate3_checked} ex-date(s) "
         f"checked, {gate3_failed} failed.**")
+    add("")
+    failures = [
+        row.split("|")[:8] for record in sorted(records, key=lambda r: r.symbol)
+        for row in record.gate3_failure_rows
+        if len(row.split("|")) >= 8
+    ]
+    if failures:
+        add("Every failure, with its numbers. `raw gap` is the two stored closes with NO factor "
+            "applied; `adjusted gap` is CONTEXT 4.5's own test (the pre-ex close scaled by `k`). "
+            "Read together they name the defect: a raw gap near `k - 1` with an adjusted gap near "
+            "zero is a healthy event, while a raw gap near ZERO with a large adjusted gap means "
+            "the two closes are ALREADY in the same price domain -- i.e. the pre-ex side was never "
+            "un-adjusted for the event, which is the exact signature of a vendor APPLICATION FLOOR "
+            "(section 3c) sitting above the pre-ex day.")
+        add("")
+        add("| Symbol | Event(s) | Ex-date | k | Pre-ex day | Ex day | Raw gap | Adjusted gap | "
+            "Classification |")
+        add("|---|---|---|---|---|---|---|---|---|")
+        by_symbol = {r.symbol: r for r in records}
+        for symbol, kinds, ex_date, k, pre_day, ex_day, raw_gap, adj_gap in failures:
+            add(f"| {symbol} | {kinds} | {ex_date} | {k} | {pre_day} | {ex_day} | {raw_gap}% | "
+                f"{adj_gap}% | {_gate3_classification(by_symbol.get(symbol), raw_gap, k)} |")
+        add("")
+    add("**Classification key.** `pre-floor span` -- the pre-ex close sits below a vendor "
+        "application floor this run MEASURED for that very event, so the two closes were never in "
+        "the same price domain and the gate-3 comparison there was meaningless before the fix; the "
+        "row above is the POST-fix recheck. `unresolved-floor span` -- the symbol was hunted but no "
+        "floor resolved for this event, so the comparison stands and the failure is residual. "
+        "`not hunted` -- the symbol reconciles above the hunt line, so the failure is residual and "
+        "carries its own numbers. **No failure is waived**: every row is printed with its gap "
+        "either way.")
     add("")
 
     add("## 6. Unknown series on F&O-universe symbols (QUESTIONS.md Q-4)")
@@ -1678,13 +2211,154 @@ def build_report(
         "1-minute stamp on a gate-1-passing day is a no-trade minute; see section 3b for the "
         "per-symbol traded-minute statistics and section 4 for the trigger counts. **No liquidity "
         "filter exists anywhere in the code** -- the trader specified none.")
-    add(f"- **Neither ruling widened gate 1's band.** It is still "
-        f"`[{gates.VOLUME_GAP_MIN_PCT}%, {gates.VOLUME_GAP_MAX_PCT}%]`. The +5.0% ceiling's behaviour "
-        "on illiquid names is DEFERRED to the architect with the per-symbol evidence in section 4.")
+    add(f"- **NO ruling has widened gate 1's band.** It is still "
+        f"`[{gates.VOLUME_GAP_MIN_PCT}%, {gates.VOLUME_GAP_MAX_PCT}%]`, byte-identical, and "
+        "`volume_gate` is untouched. The +5.0% ceiling question the Q-12 addendum DEFERRED is now "
+        "answered by the AUCTION-RELIEF ruling (section 3d): the ceiling stays, and an "
+        "above-ceiling failure with intact extremes, a matching opening print and a shortfall "
+        f"<= {gates.AUCTION_RELIEF_MAX_SHORTFALL_PCT}% is separately counted as an "
+        "`auction-relief pass`. Below-floor failures are never relieved.")
+    add("- **Vendor APPLICATION FLOORS (Q-11 addendum 2).** The vendor's archive is spliced: for "
+        "some events its back-adjustment never reached the older bars. Each floor in section 3c "
+        "was BINARY-SEARCHED against the daily oracle (does this day fit with the event in the "
+        "chain or out of it?), never fitted, and is committed to the symbol's map with every probe "
+        "day and verdict. Below a measured floor the event is ABSENT from that day's chain. An "
+        "unresolved search changes nothing -- un-provable stays the honest fallback.")
+    add("- **Compound and unparsed map nodes (Q-11 addendum 3).** Events sharing an ex-date compose "
+        "into ONE node (k = product, share-count flags combined), so a symbol carrying a bonus and "
+        "a face-value split on the same day is representable at last; and an UNPARSED subject "
+        "enters the map with candidates {measured, absent} instead of forcing the map path and "
+        "then contributing no era to probe. Both are why BAJAJFINSV and COLPAL have minute data in "
+        "this report for the first time.")
     add("- **The daily store was verified before the run** (`DailyStore.verify()`, the owed "
         "REVIEW_2 F7 check): the oracle is checked before it is trusted.")
     add("")
     return "\n".join(lines) + "\n"
+
+
+def _gate3_classification(record: SymbolRecord | None, raw_gap: str, k: str) -> str:
+    """Classify one gate-3 failure against this run's floor findings. PURE.
+
+    A gate-3 comparison is only meaningful when the two closes are in the SAME price domain. A raw
+    gap near zero on an event whose ``k`` is far from 1 means they are not -- the pre-ex close was
+    never un-adjusted for the event, which is what a vendor application floor above the pre-ex day
+    leaves behind. The classification says whether a floor was MEASURED for that symbol (so the row
+    is the post-fix recheck), searched-but-unresolved, or never hunted.
+    """
+    try:
+        gap = Decimal(raw_gap) / Decimal(100)
+        factor = Decimal(k)
+    except (ArithmeticError, ValueError):
+        return "unclassified"
+    same_domain = factor != _ONE and abs(gap) < abs(_ONE - factor) / Decimal(2)
+    if record is None or not record.floors_hunted:
+        return (
+            "not hunted -- residual, and the raw gap says the closes are in the SAME price domain"
+            if same_domain else "not hunted -- residual"
+        )
+    if record.floors_resolved:
+        return "pre-floor span, floor MEASURED -- this row is the post-fix recheck"
+    return (
+        "unresolved-floor span -- hunted, no floor fitted; residual"
+        if same_domain else "hunted, no floor needed; residual"
+    )
+
+
+def _add_floor_section(add: Callable[[str], None], records: Sequence[SymbolRecord]) -> None:
+    """Section 3c: the vendor application floors this run measured (Q-11 addendum 2)."""
+    hunted = [r for r in records if r.floors_hunted]
+    if not hunted:
+        return
+    add("### 3c. Vendor APPLICATION FLOORS (QUESTIONS.md Q-11 addendum 2)")
+    add("")
+    add("The architect's ruling: \"the vendor's back-adjustments have per-event APPLICATION "
+        "FLOORS -- internal splice dates before which the event was never applied to its archive "
+        "... for days < F_e the event is ABSENT from that day's chain\". Each floor below was "
+        "BINARY-SEARCHED, not fitted: the search asks the daily oracle, one probed session at a "
+        "time, whether that day's fetched bars fit the era's chain WITH the event or WITHOUT it, "
+        "and bisects the boundary. Price containment (2 paise vs the RAW daily high/low) decides; "
+        "a day that answers neither is `undecided` and an undecided run abandons the search "
+        f"UNRESOLVED rather than guessing. Budget {va.MAX_FLOOR_PROBES} probes per event.")
+    add("")
+    add("Hunt scope is the ruling's own: every QUARANTINED symbol and every settled symbol below "
+        f"gate-1 {FLOOR_HUNT_GATE1_MAX_RATE:.0%}. Within a symbol an event is searched only when "
+        f"its pre-ex provable-era span actually fails systematically (>= "
+        f"{FLOOR_HUNT_MIN_FAILURE_RATE:.0%} of its days) -- there is no floor to find where "
+        "nothing fails, and every skip is recorded with its reason.")
+    add("")
+    add("| Symbol | Gate-1 before the floor pass | Gate-1 after | Floors resolved | Probes | Note |")
+    add("|---|---|---|---|---|---|")
+    for record in sorted(hunted, key=lambda r: r.symbol):
+        before = (
+            f"{record.pre_floor_gate1_pass}/{record.pre_floor_gate1_total} "
+            f"({_pct(max(record.pre_floor_gate1_pass, 0), max(record.pre_floor_gate1_total, 0))})"
+            if record.pre_floor_gate1_total >= 0 else "unchanged"
+        )
+        add(f"| {record.symbol} | {before} | {record.gate1_effective_pass}/{record.gate1_total} "
+            f"({_pct(record.gate1_effective_pass, record.gate1_total)}) | "
+            f"{record.floors_resolved} | {record.floor_probes_spent} | "
+            f"{record.floor_note or '-'} |")
+    add("")
+    add("Per-event findings (every event the hunt looked at, including the ones it declined to "
+        "search and why):")
+    add("")
+    for record in sorted(hunted, key=lambda r: r.symbol):
+        if not record.floor_findings:
+            continue
+        add(f"- **{record.symbol}**")
+        for finding in record.floor_findings:
+            add(f"  - {finding}")
+    add("")
+
+
+def _add_relief_section(
+    add: Callable[[str], None],
+    records: Sequence[SymbolRecord],
+    gated_days: int,
+) -> None:
+    """Section 3d: the auction relief the deferred-ceiling ruling granted (Q-12 addendum 2)."""
+    relieved = [r for r in records if r.gate1_relieved]
+    total_relieved = sum(r.gate1_relieved for r in records)
+    add("### 3d. AUCTION RELIEF -- the deferred +5.0% ceiling, answered (QUESTIONS.md Q-12 addendum 2)")
+    add("")
+    add("The architect's ruling: **\"the ceiling stays\"**. `VOLUME_GAP_MIN_PCT` and "
+        f"`VOLUME_GAP_MAX_PCT` are byte-identical (`[{gates.VOLUME_GAP_MIN_PCT}%, "
+        f"{gates.VOLUME_GAP_MAX_PCT}%]`) and `volume_gate` is untouched. A gate-1 failure ABOVE "
+        "the ceiling is separately examined and relieved **IFF ALL FOUR** hold: (a) the failure is "
+        "above the ceiling, never below the floor; (b) the stored 1-min HIGH equals the raw daily "
+        "HIGH and the 1-min LOW the raw daily LOW, EXACTLY; (c) the first stamp's open equals the "
+        f"raw daily open, exactly; (d) the shortfall is <= "
+        f"{gates.AUCTION_RELIEF_MAX_SHORTFALL_PCT}%. Data LOSS clips extremes; a day with intact "
+        "extremes, a matching opening print and only volume short is a thin day whose pre-open "
+        "auction exceeds 5% -- a market property.")
+    add("")
+    add(f"**{total_relieved:,} symbol-day(s) relieved** across {len(relieved)} symbol(s), out of "
+        f"{gated_days:,} gated days on settled symbols. Relieved days are counted SEPARATELY "
+        "everywhere in this report -- the strict gate-1 numerator is never overwritten.")
+    add("")
+    if relieved:
+        add("| Symbol | Gate-1 strict | Auction-relief pass | Effective | Median shortfall | "
+            "Relieved days also carrying tradeless minutes | Status |")
+        add("|---|---|---|---|---|---|---|")
+        for record in sorted(relieved, key=lambda r: -r.gate1_relieved):
+            add(f"| {record.symbol} | {record.gate1_pass}/{record.gate1_total} "
+                f"({_pct(record.gate1_pass, record.gate1_total)}) | {record.gate1_relieved} | "
+                f"{record.gate1_effective_pass}/{record.gate1_total} "
+                f"({_pct(record.gate1_effective_pass, record.gate1_total)}) | "
+                f"{record.gate1_relieved_median_gap or '-'} | "
+                f"{record.gate1_relieved_with_missing} | {record.status} |")
+        add("")
+    add("**Decision B122, recorded not assumed.** The completeness ruling excludes a day for "
+        "missing minutes only \"ON A DAY WHERE GATE-1 ALSO FAILS\". A relieved day's gate-1 "
+        "verdict is *pass (by relief)*, so it is handed to gate 2 as reconciled. The relief's own "
+        "conditions (b) and (c) are the direct evidence that nothing was lost -- exactly the "
+        "hypothesis the missing-minutes trigger exists to catch -- and the thin days relief "
+        "targets are precisely the days that carry tradeless minutes, so the other reading would "
+        "cancel the relief it had just granted. The last column above measures how often it "
+        f"mattered: {sum(r.gate1_relieved_with_missing for r in records):,} of {total_relieved:,} "
+        "relieved days also carried more than "
+        f"{gates.MAX_MISSING_MINUTES} tradeless minutes.")
+    add("")
 
 
 def _dedupe_events(events: Sequence[MapEvent]) -> list[MapEvent]:

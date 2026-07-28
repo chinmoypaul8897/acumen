@@ -1094,6 +1094,98 @@ its era keys, so if the vendor did adjust for it the era's containment simply fa
 days are un-provable -> excluded + counted. Safe (nothing wrong is stored, gate 1 and containment
 both hold) and disclosed here rather than silently patched.
 
+### Q-11 ADDENDUM 2 (chunk 5B FIX-3, 2026-07-26) -- VENDOR APPLICATION FLOORS
+
+**ARCHITECT'S RULING (vendor application floors), verbatim:**
+
+> "ARCHITECT'S RULING (vendor application floors): the vendor's back-adjustments have
+> per-event APPLICATION FLOORS — internal splice dates before which the event was never
+> applied to its archive (proven: CANBK's split fails only <2022-06; VEDL passes only
+> after 14 consecutive failing eras; RELIANCE's demerger floor was FIX-4's unpinned
+> question). The map model gains one optional measured quantity per event: floor_date
+> F_e, binary-searched via daily-oracle probes (day fits with event-in vs event-out;
+> ~11 probes per event); for days < F_e the event is ABSENT from that day's chain.
+> Floors are hunted ONLY where failure is systematic: every quarantined symbol and
+> every settled symbol with gate-1 < 98% (BPCL, IOC, GAIL, TATASTEEL, NMDC, OIL,
+> JUBLFOOD, HAL, BSE, DIXON incl. table-path re-routes, MOTHERSON, PETRONET, PFC,
+> HDFCBANK...). Deterministic; floor + probe evidence recorded in the map. Un-provable
+> remains the honest fallback where no floor fits."
+
+**EXECUTED by the chunk-5B FIX-3 session (2026-07-26).** Every clause is code with a test behind
+it, in `src/acumen/vendor_adjustment.py` (the model + the pure binary search + the probe) and
+`src/acumen/universe_backfill.py` (the hunt scope and the wiring).
+
+- **The model.** `EventFloor(ex_date, floor_date, resolved, probes, note)` is one optional
+  measured quantity per event, carried on `AdjustmentMap.floors` and persisted with the map.
+  `AdjustmentMap.factors_for_day` now forms the day's chain PER EVENT from the era's committed
+  `EventChoice`s and **drops any event whose floor lies above the day** -- literally the ruling's
+  "for days < F_e the event is ABSENT from that day's chain". A map with no floors is
+  byte-identical in behaviour to the FIX-2 map (the chain is still the era's `k_price`/`k_volume`).
+- **The search is a binary search over the DAYS, not a fit.** `binary_search_floor(days, classify)`
+  is PURE: it asks the classifier for the newest day (must be `event-in`, else the floor model does
+  not apply and the search is UNRESOLVED), the oldest day (`event-in` -> no splice inside the span),
+  and then bisects the OUT/IN boundary. `classify` is the daily oracle: probe day D, form the era's
+  chain WITH the event and WITHOUT it, and test each against 2-paise price containment vs the RAW
+  daily high/low. Exactly one side containing decides; both or neither is `undecided`, and an
+  undecided midpoint steps at most `MAX_UNDECIDED_STEPS` neighbours before the search gives up
+  UNRESOLVED rather than guessing. Budget `MAX_FLOOR_PROBES = 16` per event (the ruling's ~11 plus
+  slack). PRICE containment alone decides -- it is the exact oracle; the volume observable carries
+  the auction shortfall and would only add `undecided` verdicts. The gap is recorded per probe.
+- **The hunt scope is the ruling's own.** `FLOOR_HUNT_GATE1_MAX_RATE = 0.98`: a symbol is hunted
+  when it is QUARANTINED or its gate-1 rate is below 98%. A TABLE-PATH symbol in that set is
+  rerouted through the map path first (the ruling's "incl. table-path re-routes" -- the Q-12
+  addendum reroute previously fired only on quarantine), so it has the price oracle a floor search
+  needs. Within a symbol, an event is only searched when its pre-ex PROVABLE-era span actually
+  carries systematic failure (`FLOOR_HUNT_MIN_FAILURE_RATE`) and its price factor is not already 1
+  -- there is no floor to find where nothing fails, and the ruling scopes the hunt to systematic
+  failure. Every skip is recorded with its reason.
+- **Floors apply to PROVABLE eras only.** An un-provable era has no committed per-event chain to
+  drop an event FROM, so it stays un-provable -- the ruling's own closing sentence ("un-provable
+  remains the honest fallback where no floor fits"). The search domain is therefore restricted to
+  days whose era is provable, which is also what makes the classifier's two hypotheses exact.
+- **Deterministic and auditable.** The same probe days produce the same floor; the floor, every
+  probe day and its verdict, and the reason for every skip are persisted in the map JSON and
+  printed in `docs/backfill_minute_report.md`.
+
+### Q-11 ADDENDUM 3 (chunk 5B FIX-3, 2026-07-26) -- COMPOUND + UNPARSED MAP NODES
+
+**ARCHITECT'S RULING (compound + unknown events), verbatim:**
+
+> "ARCHITECT'S RULING (compound + unknown events): (i) same-ex-date events compose
+> into ONE compound map node — k = product, share-count flags combined, candidates
+> apply to the compound (unblocks BAJAJFINSV). (ii) An UNPARSED price-suspect event
+> needs no parsing to enter the map: it participates with candidates {measured,
+> absent} only (no 'ours'), one scalar per event, oracle-arbitrated as ever. Unparsed
+> events therefore never block a map; they are measured or absent."
+
+**EXECUTED by the chunk-5B FIX-3 session (2026-07-26).** In
+`src/acumen/vendor_adjustment.py::events_from_factor_table`, which now groups every price-moving
+event by EX-DATE and composes one node per date.
+
+- **(i) the compound node.** `compose_event` multiplies the components' CONTEXT 4.2 factors into
+  the node's `our_price_factor` (`None` if ANY component has none -- a demerger or an unparsed
+  component makes the whole product unknown), combines the share-count flags (the node is
+  share-count only when EVERY component is), and carries an explicit compound VOLUME `ours` --
+  the product over components of the share-count factor, 1.0 for a cash dividend, `None` for
+  anything whose volume scaling we cannot know. A bonus 1:1 (k=0.5) plus a 5->1 face-value split
+  (k=0.2) on the same date is ONE node with k = 0.1 on both sides; a bonus plus a special dividend
+  is one node whose price `ours` is the product and whose volume `ours` is the bonus alone. The
+  arbitration is untouched: the candidate set applies to the compound, exactly as ruled. This
+  unblocks **BAJAJFINSV**, which the FIX-2 map builder refused outright ("two price-moving events
+  share an ex-date 2022-09-13"); the refusal is kept as a defensive guard for any direct caller
+  that hands `build_map` two nodes on one date, and can no longer fire from this path.
+- **(ii) the unparsed node.** A new pseudo-kind `KIND_UNPARSED` enters the event list for every
+  subject on the symbol that the CONTEXT 4.2 parser could not classify (the same
+  `ParseException`s that already force MAP-REQUIRED under the Q-11 routing rule). It carries
+  `our_price_factor=None` and no volume `ours`, so its candidate list is exactly `{measured,
+  absent}` on the price side -- no `ours`, as ruled -- and `{price-factor, measured, absent}` on
+  the volume side (the Q-12 clause-(ii) candidate, which is not an `ours` either). One scalar per
+  event, oracle-arbitrated as ever. An unparsed subject that carries no price move resolves to
+  `absent` at cost 1, below `measured` at cost 2, so an informational notice costs a probe window
+  and changes no chain.
+- **Unparsed events therefore never block a map.** They now BUILD one instead: see the COLPAL
+  diagnosis in the CHUNK 5B FIX-3 REPORT and `docs/backfill_minute_report.md`.
+
 
 ---
 
@@ -1260,6 +1352,57 @@ through the map as a second pass is an option the architect may want", raised of
   `5.0`, and the report carries a dedicated section ("Deferred to the architect: the gate-1
   +5.0% ceiling on illiquid names") holding exactly the per-symbol evidence the ruling asks for.
   No band was moved.
+
+### Q-12 ADDENDUM 2 (chunk 5B FIX-3, 2026-07-26) -- AUCTION RELIEF: the deferred ceiling, answered
+
+The +5.0%-ceiling question the Q-12 addendum DEFERRED ("flag it there with per-symbol evidence;
+do not tune the band") came back from the architect's review of the completed run's report.
+
+**ARCHITECT'S RULING (auction relief -- the deferred +5.0% ceiling), verbatim:**
+
+> "ARCHITECT'S RULING (auction relief — the deferred +5.0% ceiling): the ceiling stays.
+> A gate-1 failure ABOVE the ceiling may be relieved IFF ALL hold: (a) the floor side
+> is not triggered; (b) stored 1-min HIGH == raw daily HIGH and 1-min LOW == raw daily
+> LOW exactly; (c) first stamp's open == raw daily open exactly; (d) shortfall <= 20%
+> (sanity cap). Rationale: data LOSS clips extremes with overwhelming probability; a
+> day with intact extremes, matching open, and only volume short is a thin day whose
+> pre-open auction exceeds 5% — a market property (PNBHOUSING: 734/746 above-ceiling
+> failures at half-median volume). Relieved days are counted SEPARATELY
+> ('auction-relief pass') and disclosed; the -0.1% floor is untouched; below-floor
+> failures are never relieved."
+
+**EXECUTED by the chunk-5B FIX-3 session (2026-07-26).** In
+`src/acumen/quality_gates.py::auction_relief` (PURE), wired into
+`universe_backfill.gate_symbol`.
+
+- **The ceiling stays and the band is byte-identical.** `VOLUME_GAP_MIN_PCT = -0.1` and
+  `VOLUME_GAP_MAX_PCT = 5.0` are untouched, and `volume_gate` itself is untouched -- pinned by
+  `tests/test_vendor_adjustment.py::test_the_gate1_floor_is_not_widened_by_the_q12_ruling` and by
+  a new `tests/test_quality_gates.py` probe that reads the two constants. Relief is a SEPARATE
+  verdict layered on a gate-1 FAILURE, never a widening: a day that fails gate 1 still fails
+  gate 1, and is then separately examined for relief.
+- **The four conditions are each individually NECESSARY**, and each is tested alone
+  (`tests/test_auction_relief.py` flips one condition at a time and asserts the relief is
+  refused): (a) the gap must be ABOVE the +5.0% ceiling -- a below-floor failure (minute volume
+  EXCEEDING the daily total, the signature of an un-recovered vendor adjustment) is NEVER
+  relieved; (b) the stored day's fold HIGH must equal the raw daily HIGH and its fold LOW the raw
+  daily LOW, EXACTLY, to the paisa -- no tolerance, because the ruling's whole rationale is that
+  data loss clips extremes; (c) the FIRST stamp's open must equal the raw daily open exactly --
+  a lost opening minute is the one loss that need not move an extreme; (d) the shortfall must be
+  <= 20%.
+- **Counted SEPARATELY and disclosed.** A relieved day is an `auction-relief pass`, not a gate-1
+  pass: `GateTally.gate1_pass` stays the STRICT count and `gate1_relieved` is its own field, so
+  the report prints the strict rate, the relief count and the effective rate side by side, per
+  symbol and in the headline. Coverage and the quarantine decision use the effective rate (the
+  ruling calls a relieved day a pass); the strict number is never overwritten.
+- **Class-B decision, recorded not assumed (B122).** The completeness ruling makes gate 2 exclude
+  a day for missing minutes only "ON A DAY WHERE GATE-1 ALSO FAILS". A relieved day's gate-1
+  verdict is "pass (by relief)", so it is passed to `integrity_gate` as `volume_reconciled=True`.
+  The reading is forced by the relief conditions themselves: (b) and (c) are direct evidence that
+  no data was lost, which is the exact hypothesis the gate-2 missing-minutes trigger exists to
+  catch -- and the thin days relief targets are precisely the days that carry tradeless minutes,
+  so the other reading would cancel the relief it just granted. The report counts how many
+  relieved days also carried >15 tradeless minutes, so the size of this decision is visible.
 
 ---
 

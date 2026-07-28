@@ -67,7 +67,7 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, time
 from decimal import ROUND_HALF_EVEN, Decimal
 from itertools import product
@@ -110,6 +110,13 @@ _PRICE_CONTAINMENT_REL: Decimal = Decimal("0.001")
 SOURCE_OURS: str = "ours"  # our CONTEXT 4.2 factor -- an exact known multiplier
 SOURCE_MEASURED: str = "measured"  # the vendor's factor, measured from the fetched/raw ratio
 SOURCE_ABSENT: str = "absent"  # the vendor did not apply this event in this era (factor 1.0)
+
+#: Q-11 ADDENDUM 3 clause (ii) pseudo-kind: a corporate-action subject the CONTEXT 4.2 parser
+#: could not classify. It needs no parsing to enter the map -- it participates with candidates
+#: ``{measured, absent}`` only (there is no ``ours`` for something unparsed) and is arbitrated by
+#: the same oracle as every other event. So an unparsed subject can no longer BLOCK a map: it is
+#: measured or absent.
+KIND_UNPARSED: str = "unparsed"
 #: VOLUME side only (Q-12 ruling clause ii): the factor the PRICE oracle already proved for this
 #: same event, reused as a volume candidate. A rights or demerger has no ``ours`` volume factor at
 #: all -- the vendor scaled volume by something that is not our TERP -- but its price factor is
@@ -127,6 +134,13 @@ MIN_VOLUME_ESTIMATOR_DAYS: int = 3
 #: stale and rebuilt, rather than silently consumed. Bump this string whenever the estimator or the
 #: volume candidate set changes.
 MAP_VOLUME_ESTIMATOR: str = "min-over-price-passing-days-v2"
+
+#: Identity of the MAP MODEL a persisted map was built under. A map written before the FIX-3
+#: rulings has no compound/unparsed nodes and no floor field at all, so its era keys can differ
+#: from the ones this builder would produce -- it must be REBUILT (probe windows only; no stored
+#: candle is refetched), never consumed. Bump this whenever the node model or the chain model
+#: changes; :func:`map_is_current` makes the rebuild automatic and auditable.
+MAP_MODEL: str = "compound-unparsed-nodes+application-floors-v3"
 
 _ONE: Decimal = Decimal(1)
 #: Ratio tolerance for calling a solved/measured value "actually ours" or "actually absent".
@@ -159,29 +173,117 @@ class VendorAdjustmentError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class EventComponent:
+    """One raw corporate action feeding a map node, before same-ex-date composition. PURE data."""
+
+    kind: str
+    our_price_factor: Decimal | None
+    is_share_count: bool
+
+    def our_volume_factor(self) -> Decimal | None:
+        """This component's clean ``ours`` VOLUME multiplier, or ``None`` when there is none."""
+        if self.is_share_count:
+            return self.our_price_factor
+        if self.kind == KIND_DIVIDEND:
+            return _ONE  # a cash dividend moves the price, never the share count
+        return None
+
+
+@dataclass(frozen=True)
 class EventSpec:
-    """One price-moving corporate action, with what we know about it (our factor, its kind).
+    """One map NODE: every price-moving corporate action sharing one ex-date, composed.
 
     ``our_price_factor`` is our CONTEXT 4.2 multiplier, or ``None`` for a demerger / a rights whose
-    issue price we could not recover (Q-6 tier 2) -- for those the vendor's factor is only ever an
-    observation. ``is_share_count`` (a bonus/split/consolidation) means the vendor scales VOLUME by
-    the same factor; a special dividend scales price but not volume, so its volume ``ours`` is 1.0.
+    issue price we could not recover (Q-6 tier 2) / an unparsed subject -- for those the vendor's
+    factor is only ever an observation. ``is_share_count`` (a bonus/split/consolidation) means the
+    vendor scales VOLUME by the same factor; a special dividend scales price but not volume, so its
+    volume ``ours`` is 1.0.
+
+    **Q-11 ADDENDUM 3 clause (i) -- the compound node.** Two corporate actions can share an ex-date
+    (BAJAJFINSV: a 1:1 bonus AND a 5->1 face-value split, both ex 2022-09-13), and then only their
+    PRODUCT describes the price step. The map keys eras by ex-date and cannot represent two nodes on
+    one date, so same-ex-date events COMPOSE into one node: ``k`` is the product, the share-count
+    flags combine, and the candidate set is arbitrated against the compound exactly as against a
+    single event. ``component_kinds`` keeps the parts visible in the audit row.
+
+    ``our_volume_factor_value`` carries a compound's own volume ``ours`` -- the product over
+    components of the share-count factor, 1.0 for a cash dividend, ``None`` for anything whose
+    volume scaling we cannot know. ``None`` here means "derive it the single-event way", which is
+    what every non-compound node does.
     """
 
     kind: str
     ex_date: date
     our_price_factor: Decimal | None
     is_share_count: bool
+    #: A COMPOUND node's own volume ``ours``; ``None`` -> derive per the single-event rule.
+    our_volume_factor_value: Decimal | None = None
+    #: The component kinds this node composes (length > 1 only for a compound node).
+    component_kinds: tuple[str, ...] = ()
+
+    @property
+    def is_compound(self) -> bool:
+        return len(self.component_kinds) > 1
 
     def our_volume_factor(self) -> Decimal | None:
         """The clean ``ours`` VOLUME candidate: the price factor for a share-count event, 1.0 for a
-        cash dividend (volume never scales for it), else ``None`` (a rights/demerger volume factor is
-        only ever measured -- the vendor scaled it by a value that differs from our TERP)."""
+        cash dividend (volume never scales for it), else ``None`` (a rights/demerger/unparsed volume
+        factor is only ever measured -- the vendor scaled it by a value that is not our TERP)."""
+        if self.our_volume_factor_value is not None:
+            return self.our_volume_factor_value
         if self.is_share_count:
             return self.our_price_factor
         if self.kind == KIND_DIVIDEND:
             return _ONE
         return None
+
+
+def compose_event(ex_date: date, components: Sequence[EventComponent]) -> EventSpec:
+    """Compose every event sharing ``ex_date`` into ONE map node (Q-11 addendum 3, clause i). PURE.
+
+    ``k = product`` on both sides, share-count flags combined:
+
+    * **price** -- the product of the components' CONTEXT 4.2 factors, or ``None`` if ANY component
+      has none (a demerger, an unrecoverable rights or an unparsed subject makes the whole product
+      unknown, and the node then has no ``ours`` at all -- which is exactly right, because we cannot
+      claim to know a step we can only observe);
+    * **volume** -- the product of the components' volume ``ours`` (the share-count factor, 1.0 for
+      a cash dividend), or ``None`` if any component has none. So a bonus + special dividend has a
+      price ``ours`` of ``k_bonus x k_div`` and a volume ``ours`` of ``k_bonus`` alone;
+    * **share-count** -- the node is share-count only when EVERY component is, so a mixed node never
+      claims the clean "volume scales with price" identity.
+
+    A single-component date composes to exactly the node the pre-compound builder produced, so
+    nothing about a symbol without same-date events moves.
+    """
+    if not components:
+        raise VendorAdjustmentError(f"no component events to compose at {ex_date}")
+    if len(components) == 1:
+        one = components[0]
+        return EventSpec(
+            kind=one.kind,
+            ex_date=ex_date,
+            our_price_factor=one.our_price_factor,
+            is_share_count=one.is_share_count,
+            component_kinds=(one.kind,),
+        )
+    price: Decimal | None = _ONE
+    volume: Decimal | None = _ONE
+    for component in components:
+        if price is not None:
+            price = None if component.our_price_factor is None else price * component.our_price_factor
+        if volume is not None:
+            one_volume = component.our_volume_factor()
+            volume = None if one_volume is None else volume * one_volume
+    kinds = tuple(component.kind for component in components)
+    return EventSpec(
+        kind="+".join(sorted(set(kinds))),
+        ex_date=ex_date,
+        our_price_factor=price,
+        is_share_count=all(component.is_share_count for component in components),
+        our_volume_factor_value=volume,
+        component_kinds=kinds,
+    )
 
 
 def events_from_factor_table(
@@ -190,25 +292,38 @@ def events_from_factor_table(
     pending_ex_dates: Iterable[date] = (),
     *,
     symbol: str | None = None,
+    unparsed_ex_dates: Iterable[date] = (),
 ) -> tuple[EventSpec, ...]:
-    """Build the price-moving :class:`EventSpec` list from a chunk-3 factor table. PURE.
+    """Build the price-moving map NODES from a chunk-3 factor table. PURE.
 
     Only events that MOVE a price or volume enter an era key: factors with ``k != 1`` (bonus,
     split, rights, special dividend), plus demergers and unrecoverable/pending rights (which carry
-    no factor but the vendor may have adjusted by). Ordinary dividends (``k == 1``) are dropped --
-    they neither move a price nor fragment an era.
+    no factor but the vendor may have adjusted by), plus -- Q-11 addendum 3 clause (ii) -- every
+    UNPARSED subject on the symbol. Ordinary dividends (``k == 1``) are dropped: they neither move
+    a price nor fragment an era.
+
+    Everything sharing an ex-date is COMPOSED into one node (:func:`compose_event`, clause i), so
+    the returned nodes carry DISTINCT ex-dates by construction and the map's ex-date keying is
+    always representable.
+
+    Args:
+        unparsed_ex_dates: ex-dates of subjects the CONTEXT 4.2 parser could not classify on this
+            symbol (``ParseException``). They enter as :data:`KIND_UNPARSED` components with no
+            factor, so their candidate list is ``{measured, absent}`` -- never ``ours``. An
+            unparsed subject that carries no price move resolves to ``absent`` (cost 1, below
+            ``measured``'s 2) and changes no chain; one that does carry a price move is measured
+            against the daily oracle like any other. Either way it never blocks the map.
     """
     wanted = None if symbol is None else symbol.strip().upper()
-    specs: list[EventSpec] = []
+    by_ex: dict[date, list[EventComponent]] = {}
     for f in factors:
         if wanted is not None and f.symbol != wanted:
             continue
         if f.k == _ONE:
             continue
-        specs.append(
-            EventSpec(
+        by_ex.setdefault(f.ex_date, []).append(
+            EventComponent(
                 kind=f.kind,
-                ex_date=f.ex_date,
                 our_price_factor=f.k,
                 is_share_count=f.kind in (KIND_BONUS, KIND_SPLIT),
             )
@@ -216,13 +331,24 @@ def events_from_factor_table(
     for s in suppressions:
         if wanted is not None and s.symbol != wanted:
             continue
-        specs.append(
-            EventSpec(kind=s.kind, ex_date=s.ex_date, our_price_factor=None, is_share_count=False)
+        by_ex.setdefault(s.ex_date, []).append(
+            EventComponent(kind=s.kind, our_price_factor=None, is_share_count=False)
         )
     for ex in pending_ex_dates:
-        specs.append(EventSpec(kind=KIND_RIGHTS, ex_date=ex, our_price_factor=None, is_share_count=False))
-    specs.sort(key=lambda e: (e.ex_date, e.kind))
-    return tuple(specs)
+        by_ex.setdefault(ex, []).append(
+            EventComponent(kind=KIND_RIGHTS, our_price_factor=None, is_share_count=False)
+        )
+    for ex in unparsed_ex_dates:
+        components = by_ex.setdefault(ex, [])
+        # One unparsed component per date is enough: a second unparsed subject on the same day adds
+        # no new unknown (the node already carries a single measured-or-absent scalar), and adding
+        # it would only duplicate the label in the audit row.
+        if not any(c.kind == KIND_UNPARSED for c in components):
+            components.append(
+                EventComponent(kind=KIND_UNPARSED, our_price_factor=None, is_share_count=False)
+            )
+    return tuple(compose_event(ex, sorted(components, key=lambda c: c.kind))
+                 for ex, components in sorted(by_ex.items()))
 
 
 # --- probe measurements ----------------------------------------------------------------
@@ -401,6 +527,222 @@ class EraResolution:
     note: str
 
 
+# --- vendor APPLICATION FLOORS (Q-11 addendum 2) ---------------------------------------
+
+#: The classifier's three verdicts for one probed day, against one event.
+FLOOR_IN: str = "event-in"  # the day's fetched bars DO carry this event's adjustment
+FLOOR_OUT: str = "event-out"  # they do NOT -- the day sits below the vendor's splice
+FLOOR_UNDECIDED: str = "undecided"  # neither hypothesis contains, or both do
+
+#: Probe budget for ONE event's floor search. A binary search over ~2,400 trading days needs
+#: ceil(log2(2400)) + 2 endpoint probes = ~13; the ruling's estimate is "~11 probes per event".
+#: 16 leaves room for a couple of undecided midpoints without ever becoming an open-ended sweep.
+MAX_FLOOR_PROBES: int = 16
+
+#: How many neighbours an UNDECIDED midpoint may step to before the search gives up UNRESOLVED.
+#: A damaged single day must not sink a search; a run of them means the floor model does not fit
+#: there, and guessing is worse than "un-provable" (CLAUDE.md rule 1).
+MAX_UNDECIDED_STEPS: int = 2
+
+
+@dataclass(frozen=True)
+class FloorProbe:
+    """One day of a floor binary search: what was asked, and what the daily oracle answered."""
+
+    day: date
+    verdict: str
+    k_in: Decimal | None = None
+    k_out: Decimal | None = None
+    #: ``fetched/raw`` for HIGH and LOW on this day -- the observable the verdict was read from.
+    ratio_high: Decimal | None = None
+    ratio_low: Decimal | None = None
+
+
+@dataclass(frozen=True)
+class EventFloor:
+    """One event's measured vendor APPLICATION FLOOR: the splice date its adjustment starts at.
+
+    The architect's Q-11 addendum-2 ruling: the vendor's back-adjustments have per-event
+    application floors -- internal splice dates before which the event was never applied to its
+    archive. ``floor_date`` is that date, binary-searched with daily-oracle probes; **for days
+    strictly before it the event is ABSENT from that day's chain**.
+
+    ``floor_date is None`` with ``resolved`` True means the event is applied on every day of the
+    searched span (no splice inside our history) -- the chain is unchanged. ``resolved`` False means
+    the search could not pin a boundary; the chain is likewise unchanged, and the days stay whatever
+    gate 1 makes of them. Nothing is ever guessed: an unresolved search leaves the map exactly as it
+    was, which is the ruling's own "un-provable remains the honest fallback where no floor fits".
+    """
+
+    ex_date: date
+    floor_date: date | None
+    resolved: bool
+    probes: tuple[FloorProbe, ...] = ()
+    note: str = ""
+
+    def applies_on(self, day: date) -> bool:
+        """Did the vendor apply this event to a bar stamped ``day``? PURE."""
+        if self.floor_date is None:
+            return True
+        return day >= self.floor_date
+
+
+def classify_floor_day(
+    probe: ProbeDay, k_in: Decimal, k_out: Decimal, tol_paise: int = DEFAULT_PRICE_CONTAINMENT_PAISE
+) -> str:
+    """Does ``probe``'s day fit with the event IN the chain, or OUT of it? PURE.
+
+    The ruling's "day fits with event-in vs event-out", read through the same daily oracle the map
+    itself is arbitrated by: un-adjust the day's fetched HIGH and LOW by each candidate chain and
+    require containment within :data:`DEFAULT_PRICE_CONTAINMENT_PAISE` of the RAW daily high/low.
+    Exactly one side containing decides. Both (which happens only when the two chains are the same
+    number) or neither is :data:`FLOOR_UNDECIDED` -- an honest "this day answers nothing".
+
+    PRICE alone decides. It is the exact observable -- a wrong chain misses by the factor, hundreds
+    of paise -- while the volume ratio carries the pre-open auction shortfall the gate-1 band exists
+    to absorb, so adding it could only turn decisive days undecided.
+    """
+    if k_in <= 0 or k_out <= 0:
+        return FLOOR_UNDECIDED
+    in_ok = _day_price_contained(probe, k_in, tol_paise)
+    out_ok = _day_price_contained(probe, k_out, tol_paise)
+    if in_ok and not out_ok:
+        return FLOOR_IN
+    if out_ok and not in_ok:
+        return FLOOR_OUT
+    return FLOOR_UNDECIDED
+
+
+@dataclass(frozen=True)
+class FloorSearch:
+    """The outcome of one binary search: the boundary, whether it resolved, and every probe."""
+
+    floor_date: date | None
+    resolved: bool
+    probes: tuple[FloorProbe, ...]
+    note: str
+
+
+def binary_search_floor(
+    days: Sequence[date],
+    classify: Callable[[date], FloorProbe],
+    *,
+    max_probes: int = MAX_FLOOR_PROBES,
+    max_undecided_steps: int = MAX_UNDECIDED_STEPS,
+) -> FloorSearch:
+    """Binary-search the vendor's application floor over ``days``. PURE control flow.
+
+    ``days`` is the ascending list of candidate trading days (every one strictly before the event's
+    ex-date, and every one inside a PROVABLE era so the two hypotheses are exact). ``classify``
+    probes ONE day and returns its :class:`FloorProbe`; it is the only thing here that touches the
+    network, which is why it is injected -- the search itself is deterministic and offline-testable.
+
+    The model is a single step: below the floor the event is absent, at and above it the event is
+    applied. So the search
+    (1) probes the NEWEST day -- it must be :data:`FLOOR_IN`, otherwise the event is not applied
+        even beside its own ex-date and there is no floor to find (UNRESOLVED, chain untouched);
+    (2) probes the OLDEST day -- :data:`FLOOR_IN` means the event is applied throughout and there is
+        no splice inside our history (``floor_date=None``, resolved);
+    (3) otherwise bisects the OUT/IN boundary, and returns the OLDEST day that is still
+        :data:`FLOOR_IN` -- i.e. the first day the vendor's adjustment reaches.
+
+    An :data:`FLOOR_UNDECIDED` day steps to at most ``max_undecided_steps`` neighbours before the
+    search abandons UNRESOLVED. Running out of ``max_probes`` also abandons. Neither ever guesses a
+    boundary: an unresolved search leaves the map's chain exactly as it was.
+    """
+    ordered = sorted(set(days))
+    if not ordered:
+        return FloorSearch(None, False, (), "no candidate day inside a provable era to probe")
+
+    probes: list[FloorProbe] = []
+    seen: dict[int, FloorProbe] = {}
+
+    def look(index: int) -> FloorProbe | None:
+        """Probe ``ordered[index]`` once, memoised; ``None`` when the budget is spent."""
+        if index in seen:
+            return seen[index]
+        if len(probes) >= max_probes:
+            return None
+        probe = classify(ordered[index])
+        seen[index] = probe
+        probes.append(probe)
+        return probe
+
+    def decisive(index: int, low: int, high: int) -> tuple[int, str] | None:
+        """``(index, verdict)`` for ``index`` or a near neighbour STRICTLY inside ``(low, high)``.
+
+        Strictly inside is load-bearing, not tidiness: an endpoint's verdict is already the loop's
+        invariant, so returning one would move neither bound and the bisection would spin on the
+        same midpoint forever without spending a probe. Out of strictly-inside candidates means the
+        search abandons UNRESOLVED, which is the honest answer.
+        """
+        offsets = [0]
+        for step in range(1, max_undecided_steps + 1):
+            offsets.extend((step, -step))
+        for offset in offsets:
+            candidate = index + offset
+            if not (low < candidate < high):
+                continue
+            probe = look(candidate)
+            if probe is None:
+                return None
+            if probe.verdict != FLOOR_UNDECIDED:
+                return candidate, probe.verdict
+        return None
+
+    newest = look(len(ordered) - 1)
+    if newest is None or newest.verdict != FLOOR_IN:
+        verdict = "budget spent" if newest is None else newest.verdict
+        return FloorSearch(
+            None, False, tuple(probes),
+            f"the newest probed day ({ordered[-1].isoformat()}) is {verdict}, not {FLOOR_IN}: the "
+            "event is not applied even beside its own ex-date, so there is no floor to find",
+        )
+    if len(ordered) == 1:
+        return FloorSearch(
+            None, True, tuple(probes),
+            "a single candidate day, and the event is applied on it: no splice inside our history",
+        )
+    oldest = look(0)
+    if oldest is None:
+        return FloorSearch(None, False, tuple(probes), "probe budget spent before the oldest day")
+    if oldest.verdict == FLOOR_IN:
+        return FloorSearch(
+            None, True, tuple(probes),
+            f"applied on the oldest stored day too ({ordered[0].isoformat()}): no splice inside "
+            "our history, the chain is unchanged",
+        )
+    if oldest.verdict == FLOOR_UNDECIDED:
+        return FloorSearch(
+            None, False, tuple(probes),
+            f"the oldest probed day ({ordered[0].isoformat()}) answers neither hypothesis; no "
+            "boundary is guessed",
+        )
+
+    low, high = 0, len(ordered) - 1  # invariant: ordered[low] is OUT, ordered[high] is IN
+    while high - low > 1:
+        found = decisive((low + high) // 2, low, high)
+        if found is None:
+            return FloorSearch(
+                None, False, tuple(probes),
+                f"the search stalled between {ordered[low].isoformat()} and "
+                f"{ordered[high].isoformat()} (undecided midpoints or probe budget spent); no "
+                "boundary is guessed",
+            )
+        index, verdict = found
+        if verdict == FLOOR_IN:
+            high = min(high, index)
+        else:
+            low = max(low, index)
+        if high - low <= 1:
+            break
+    return FloorSearch(
+        ordered[high], True, tuple(probes),
+        f"vendor application floor {ordered[high].isoformat()}: the event is absent from every "
+        f"chain before it ({ordered[low].isoformat()} probed {FLOOR_OUT}) and applied from it on",
+    )
+
+
 @dataclass(frozen=True)
 class AdjustmentMap:
     """The committed per-symbol adjustment map: one :class:`EraResolution` per probed era."""
@@ -414,9 +756,17 @@ class AdjustmentMap:
     #: different value was built under a superseded ruling and must be rebuilt, not consumed --
     #: see :func:`map_is_current`.
     volume_estimator_id: str = MAP_VOLUME_ESTIMATOR
+    #: Q-11 addendum 2: the measured per-event vendor application floors. Empty means none were
+    #: hunted (or none resolved), and the map then behaves exactly as it did before the ruling.
+    floors: tuple[EventFloor, ...] = ()
+    #: Which MAP MODEL built this map (:data:`MAP_MODEL`) -- see :func:`map_is_current`.
+    map_model_id: str = MAP_MODEL
 
     def _era_index(self) -> dict[tuple[date, ...], EraResolution]:
         return {era.ex_dates: era for era in self.eras}
+
+    def _floor_index(self) -> dict[date, EventFloor]:
+        return {floor.ex_date: floor for floor in self.floors}
 
     def in_window_ex_dates(self, day: date) -> tuple[date, ...]:
         """The price-moving ex-dates in ``(day, fetch_date]`` -- the era key for ``day``."""
@@ -425,6 +775,30 @@ class AdjustmentMap:
     def era_for_day(self, day: date) -> EraResolution | None:
         """The resolved era covering ``day``, or ``None`` when that era was never probed."""
         return self._era_index().get(self.in_window_ex_dates(day))
+
+    def era_chain_for_day(self, day: date) -> tuple[Decimal, Decimal] | None:
+        """The day's era chain with FLOORS IGNORED -- ``(k_price, k_volume)`` as the era committed.
+
+        This is not what the day should be un-adjusted BY (that is :meth:`factors_for_day`); it is
+        the set of factors that has ever been applied to the day by any pass, ours or the vendor's.
+        The in-place rebuild uses it to GENERATE its baseline hypotheses, so a day the store already
+        holds under the pre-floor chain is still recognisable after a floor drops that chain to 1.
+        """
+        if not self.in_window_ex_dates(day):
+            return _ONE, _ONE
+        era = self.era_for_day(day)
+        if era is None or not era.provable:
+            return None
+        return era.k_price, era.k_volume
+
+    def event_applies_on(self, ex_date: date, day: date) -> bool:
+        """Did the vendor apply the event at ``ex_date`` to a bar stamped ``day``? PURE.
+
+        True unless a RESOLVED floor for that event sits above ``day`` (Q-11 addendum 2). An event
+        with no floor, or one whose search did not resolve, is applied as the era resolved it.
+        """
+        floor = self._floor_index().get(ex_date)
+        return True if floor is None else floor.applies_on(day)
 
     def factors_for_day(self, day: date) -> tuple[Decimal, Decimal] | None:
         """``(k_price, k_volume)`` for ``day``, or ``None`` when the day is un-provable.
@@ -435,13 +809,87 @@ class AdjustmentMap:
         never wrongly excluded for want of a probe window. Otherwise ``None`` means the day's era was
         not probed or found no fitting candidate -- the day cannot be un-adjusted and gate 1 will
         exclude and count it.
+
+        With FLOORS committed (Q-11 addendum 2) the chain is formed PER EVENT from the era's own
+        :class:`EventChoice` rows, dropping every event whose application floor sits above ``day``.
+        Without floors the product of those same per-event factors IS the era's ``k_price`` /
+        ``k_volume``, so a floorless map answers exactly as it did before the ruling.
         """
         if not self.in_window_ex_dates(day):
             return _ONE, _ONE
         era = self.era_for_day(day)
         if era is None or not era.provable:
             return None
-        return era.k_price, era.k_volume
+        if not self.floors:
+            return era.k_price, era.k_volume
+        k_price = _ONE
+        k_volume = _ONE
+        for choice in era.choices:
+            if not self.event_applies_on(choice.ex_date, day):
+                continue  # below the vendor's splice: ABSENT from this day's chain
+            k_price *= choice.price_factor
+            k_volume *= choice.volume_factor
+        return k_price, k_volume
+
+
+def with_floors(adjustment_map: AdjustmentMap, floors: Sequence[EventFloor]) -> AdjustmentMap:
+    """A copy of ``adjustment_map`` carrying ``floors``. PURE (the map is frozen)."""
+    return replace(adjustment_map, floors=tuple(floors))
+
+
+def carry_floors_forward(
+    previous: AdjustmentMap | None, fresh: AdjustmentMap
+) -> tuple[AdjustmentMap, tuple[EventFloor, ...]]:
+    """Carry an already-measured floor onto a freshly-rebuilt map. PURE.
+
+    Returns ``(map_with_carried_floors, dropped)``.
+
+    A vendor APPLICATION FLOOR is a property of the vendor's ARCHIVE -- the splice date before which
+    it never applied an event -- so it does not expire when the map is rebuilt under a newer fetch
+    date. Rebuilding without carrying it is a silent regression in the exact artifact the Q-11
+    addendum-2 ruling asks be committed ("floor + probe evidence recorded in the map"): the store
+    stays correct only until the next fresh fetch, and the audit trail is gone immediately.
+
+    A floor is carried ONLY when the fresh map still resolves its event to the SAME committed price
+    factor. That is the assumption the floor's own probes were classified under -- each probe asked
+    "does this day fit with this factor in the chain, or out of it?" -- so a changed factor
+    invalidates the measurement and the floor is DROPPED rather than reused. Dropped floors are
+    returned so the caller can re-open the hunt instead of quietly losing one.
+    """
+    if previous is None or not previous.floors:
+        return fresh, ()
+    was = canonical_event_factors(previous)
+    now = canonical_event_factors(fresh)
+    kept: list[EventFloor] = []
+    dropped: list[EventFloor] = []
+    for floor in previous.floors:
+        before, after = was.get(floor.ex_date), now.get(floor.ex_date)
+        if before is not None and after is not None and before[0] == after[0]:
+            kept.append(floor)
+        else:
+            dropped.append(floor)
+    return with_floors(fresh, kept), tuple(dropped)
+
+
+def canonical_event_factors(
+    adjustment_map: AdjustmentMap,
+) -> dict[date, tuple[Decimal, Decimal, str, str]]:
+    """Each event's committed ``(price, volume, price_source, volume_source)``. PURE.
+
+    Read from the NEWEST provable era in which the event appears -- the same "decided at its newest
+    appearance and carried older" discipline the builder itself uses. An event that appears only in
+    un-provable eras is absent from the result: nothing about it was ever committed.
+    """
+    committed: dict[date, tuple[Decimal, Decimal, str, str]] = {}
+    for era in sorted(adjustment_map.eras, key=lambda e: (len(e.ex_dates), e.ex_dates)):
+        if not era.provable:
+            continue
+        for choice in era.choices:
+            committed.setdefault(
+                choice.ex_date,
+                (choice.price_factor, choice.volume_factor, choice.price_source, choice.volume_source),
+            )
+    return committed
 
 
 # --- the pure builder ------------------------------------------------------------------
@@ -1053,7 +1501,28 @@ def to_dict(adjustment_map: AdjustmentMap) -> dict:
         "fetch_date": adjustment_map.fetch_date.isoformat(),
         "tick_paise": adjustment_map.tick_paise,
         "volume_estimator": adjustment_map.volume_estimator_id,
+        "map_model": adjustment_map.map_model_id,
         "all_event_ex_dates": [d.isoformat() for d in adjustment_map.all_event_ex_dates],
+        "floors": [
+            {
+                "ex_date": floor.ex_date.isoformat(),
+                "floor_date": None if floor.floor_date is None else floor.floor_date.isoformat(),
+                "resolved": floor.resolved,
+                "note": floor.note,
+                "probes": [
+                    {
+                        "day": p.day.isoformat(),
+                        "verdict": p.verdict,
+                        "k_in": None if p.k_in is None else str(p.k_in),
+                        "k_out": None if p.k_out is None else str(p.k_out),
+                        "ratio_high": None if p.ratio_high is None else str(p.ratio_high),
+                        "ratio_low": None if p.ratio_low is None else str(p.ratio_low),
+                    }
+                    for p in floor.probes
+                ],
+            }
+            for floor in adjustment_map.floors
+        ],
         "eras": [
             {
                 "label": era.label,
@@ -1110,6 +1579,32 @@ def from_dict(payload: Mapping) -> AdjustmentMap:
             )
             for e in payload["eras"]
         )
+        floors = tuple(
+            EventFloor(
+                ex_date=date.fromisoformat(str(f["ex_date"])),
+                floor_date=(
+                    None if f.get("floor_date") is None else date.fromisoformat(str(f["floor_date"]))
+                ),
+                resolved=bool(f["resolved"]),
+                probes=tuple(
+                    FloorProbe(
+                        day=date.fromisoformat(str(p["day"])),
+                        verdict=str(p["verdict"]),
+                        k_in=None if p.get("k_in") is None else Decimal(str(p["k_in"])),
+                        k_out=None if p.get("k_out") is None else Decimal(str(p["k_out"])),
+                        ratio_high=(
+                            None if p.get("ratio_high") is None else Decimal(str(p["ratio_high"]))
+                        ),
+                        ratio_low=(
+                            None if p.get("ratio_low") is None else Decimal(str(p["ratio_low"]))
+                        ),
+                    )
+                    for p in f.get("probes", ())
+                ),
+                note=str(f.get("note", "")),
+            )
+            for f in payload.get("floors", ())
+        )
         return AdjustmentMap(
             symbol=str(payload["symbol"]),
             fetch_date=date.fromisoformat(str(payload["fetch_date"])),
@@ -1119,20 +1614,31 @@ def from_dict(payload: Mapping) -> AdjustmentMap:
             # A map written before the Q-12 ruling carries no marker at all -> "" -> stale, which is
             # exactly right: it was built with the superseded median volume estimator.
             volume_estimator_id=str(payload.get("volume_estimator", "")),
+            floors=floors,
+            # Likewise: a map written before the FIX-3 rulings carries no model marker -> "" ->
+            # stale, because its era keys predate compound + unparsed nodes.
+            map_model_id=str(payload.get("map_model", "")),
         )
     except (KeyError, ValueError, TypeError) as exc:
         raise VendorAdjustmentError(f"cannot read adjustment map: {exc}") from exc
 
 
 def map_is_current(adjustment_map: AdjustmentMap) -> bool:
-    """Was this map built with the CURRENT volume estimator (:data:`MAP_VOLUME_ESTIMATOR`)?
+    """Was this map built under the CURRENT estimator AND the current map model?
 
     A ``False`` here is not a corrupt file -- it is a map built under a superseded ruling. It must be
-    REBUILT (probe windows only; no stored candle is refetched) rather than consumed, because its
-    committed volume factors came from the biased median and its un-provable eras may be provable
-    under the ruled estimator.
+    REBUILT (probe windows only; no stored candle is refetched) rather than consumed, because:
+
+    * a pre-Q-12 map's committed volume factors came from the biased median
+      (:data:`MAP_VOLUME_ESTIMATOR`), and its un-provable eras may be provable under the ruled
+      estimator;
+    * a pre-FIX-3 map's ERA KEYS predate the compound and unparsed nodes
+      (:data:`MAP_MODEL`), so it can be keyed on a set of ex-dates this builder no longer produces.
     """
-    return adjustment_map.volume_estimator_id == MAP_VOLUME_ESTIMATOR
+    return (
+        adjustment_map.volume_estimator_id == MAP_VOLUME_ESTIMATOR
+        and adjustment_map.map_model_id == MAP_MODEL
+    )
 
 
 def persist_map(adjustment_map: AdjustmentMap, data_dir: Path | None = None) -> Path:
@@ -1230,6 +1736,113 @@ def measure_symbol_live(
         measure_era(key, "+".join(sorted(era_labels[key])), days)
         for key, days in era_days.items()
     ]
+
+
+def probe_one_day(client, daily_store, symbol: str, token: str, day: date) -> ProbeDay | None:
+    """Fetch ONE day of 1-minute bars, fold it, and pair it with the RAW daily row. I/O.
+
+    The unit of a floor binary search (Q-11 addendum 2): one credentialed ONE_MINUTE call for a
+    single session, folded to a daily OHLC and compared against the chunk-2 raw daily store --
+    exactly the observable :func:`measure_symbol_live` builds an era from, for one day. Returns
+    ``None`` when the vendor served nothing for that day or the daily store has no row for it (a
+    day that answers nothing, which the classifier then reports as undecided).
+    """
+    bars = client.get_candles(
+        token,
+        INTERVAL_ONE_MINUTE,
+        datetime.combine(day, time(9, 15)),
+        datetime.combine(day, time(15, 30)),
+    )
+    folds = fold_bars(bars)
+    fold = folds.get(day)
+    if fold is None:
+        return None
+    frame = daily_store.daily(symbol, day, day)
+    if frame.empty:
+        return None
+    row = frame.iloc[0]
+    return ProbeDay(
+        day=day,
+        fetched_high=fold["high"], fetched_low=fold["low"], fetched_close=fold["close"],
+        fetched_volume=fold["volume"],
+        raw_high=int(row["high_paise"]), raw_low=int(row["low_paise"]),
+        raw_close=int(row["close_paise"]), raw_volume=int(row["volume"]),
+    )
+
+
+def era_chain_without(
+    era: EraResolution, day_map: AdjustmentMap, day: date, *, drop_ex_date: date | None
+) -> Decimal:
+    """The era's PRICE chain at ``day``, with ``drop_ex_date``'s event removed. PURE.
+
+    Every other event is applied exactly as the era committed it, minus any whose already-measured
+    floor sits above ``day`` -- so a second event's floor, once found, is honoured while a third
+    event's floor is searched. This is the arithmetic the floor classifier's two hypotheses are
+    built from.
+    """
+    chain = _ONE
+    for choice in era.choices:
+        if choice.ex_date == drop_ex_date:
+            continue
+        if not day_map.event_applies_on(choice.ex_date, day):
+            continue
+        chain *= choice.price_factor
+    return chain
+
+
+def search_event_floor_live(
+    probe: Callable[[date], ProbeDay | None],
+    adjustment_map: AdjustmentMap,
+    ex_date: date,
+    days: Sequence[date],
+    *,
+    tol_paise: int = DEFAULT_PRICE_CONTAINMENT_PAISE,
+    max_probes: int = MAX_FLOOR_PROBES,
+    on_probe: Callable[[FloorProbe], None] | None = None,
+) -> EventFloor:
+    """Measure ONE event's vendor application floor (Q-11 addendum 2). I/O via ``probe``.
+
+    ``days`` are candidate trading days strictly before ``ex_date``, each inside a PROVABLE era of
+    ``adjustment_map`` -- provability is what makes the two hypotheses exact, and the ruling's own
+    closing sentence keeps un-provable eras un-provable. The event's factor is read from the era
+    covering each probed day, so a symbol whose event resolved differently in different eras is
+    still classified against the chain that era actually committed.
+    """
+    def classify(day: date) -> FloorProbe:
+        era = adjustment_map.era_for_day(day)
+        if era is None or not era.provable:
+            return FloorProbe(day=day, verdict=FLOOR_UNDECIDED)
+        factor = next((c.price_factor for c in era.choices if c.ex_date == ex_date), None)
+        if factor is None or factor == _ONE:
+            # Nothing to test: this era does not carry the event, or carries it as ABSENT (factor
+            # 1), in which case "in" and "out" are the same chain and the day answers nothing.
+            return FloorProbe(day=day, verdict=FLOOR_UNDECIDED)
+        k_out = era_chain_without(era, adjustment_map, day, drop_ex_date=ex_date)
+        k_in = k_out * factor
+        measured = probe(day)
+        if measured is None:
+            return FloorProbe(day=day, verdict=FLOOR_UNDECIDED, k_in=k_in, k_out=k_out)
+        high_ratio, low_ratio = measured.price_ratios()
+        return FloorProbe(
+            day=day,
+            verdict=classify_floor_day(measured, k_in, k_out, tol_paise),
+            k_in=k_in, k_out=k_out, ratio_high=high_ratio, ratio_low=low_ratio,
+        )
+
+    def classify_and_report(day: date) -> FloorProbe:
+        result = classify(day)
+        if on_probe is not None:
+            on_probe(result)
+        return result
+
+    search = binary_search_floor(days, classify_and_report, max_probes=max_probes)
+    return EventFloor(
+        ex_date=ex_date,
+        floor_date=search.floor_date,
+        resolved=search.resolved,
+        probes=search.probes,
+        note=search.note,
+    )
 
 
 def build_symbol_map_live(
