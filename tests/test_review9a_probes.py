@@ -6,20 +6,27 @@ test; every assertion is new. Three of them PIN A DEFECT rather than assert corr
 whoever fixes the defect, which is exactly the tripwire a silent regression needs.
 
 **The E13 basis fixture**, hand-computed here before coding -- four executed trades, cost
-Rs 100.00 = 10,000 paise each:
+Rs 100.00 = 10,000 paise each. Trade 3 is the discriminating row: it made money BEFORE the
+round trip and lost it after.
 
-| # | gross | net | in gross_profit? | counted a WINNER? |
+| # | before costs | net | in gross_profit? | counted a WINNER? |
 |---|---|---|---|---|
 | 1 | +3,000.00 | +2,900.00 | yes | yes |
 | 2 | +1,000.00 |   +900.00 | yes | yes |
-| 3 |    +40.00 |    -60.00 | **yes** | **no** |
+| 3 |    +40.00 |    -60.00 | **no** | **no** |
 | 4 | -2,000.00 | -2,100.00 | no  | no |
 
-* gross profit = 3,000 + 1,000 + 40 = **Rs 4,040.00** over THREE rows (gross > 0)
-* winners = **2** (net > 0); avg profit = (2,900 + 900)/2 = **Rs 1,900.00**
-* winners x avg profit = **Rs 3,800.00** != gross profit **Rs 4,040.00**
-* the gap Rs 240.00 = 2 x Rs 100.00 commission (BASIS) + Rs 40.00 (MEMBERSHIP: trade 3 is
-  inside gross profit and outside the winner set)
+**Recomputed on the architect's E13 PRESENTATION BASIS (30-Jul-2026), which these probes now
+assert instead of pinning the defect they were written for:**
+
+* gross profit = the WINNERS' net sum 2,900 + 900 = **Rs 3,800.00** over TWO rows
+* winners = **2**; avg profit = 3,800/2 = **Rs 1,900.00**
+* winners x avg profit = **Rs 3,800.00 == gross profit** -- the identity a reader would try,
+  which under the old mixed basis failed by Rs 240.00 (Rs 200.00 of winners' commission plus
+  trade 3's Rs 40.00 of membership)
+* gross loss = -60.00 - 2,100.00 = **-Rs 2,160.00**; net = 3,800 - 2,160 = **Rs 1,640.00**
+* the before-costs pair, for the single labelled line: +Rs 4,040.00 and -Rs 2,000.00, and
+  4,040 - 2,000 - 400 (four round trips) = **Rs 1,640.00** = the net
 
 ASCII-only, like every other source file in this repo (chunk-0 B7).
 """
@@ -88,64 +95,71 @@ def basis_rows() -> tuple[LedgerRow, ...]:
 # ==============================================================================================
 
 
-def test_the_gross_profit_population_is_not_the_winner_population() -> None:
-    """REVIEW_9A finding Q1. `gross_profit` counts rows by the sign of GROSS; `winners`,
-    `losers` and `percent_profitable` count them by the sign of NET. A trade whose gross
-    profit is smaller than the Rs 100 round trip is inside the first set and outside the
-    second -- so the two numbers, printed side by side, describe different trades."""
+def test_the_gross_profit_population_is_the_winner_population() -> None:
+    """**FLIPPED (REVIEW_9A finding Q1 + Q2, closed by the architect's E13 basis ruling).**
+
+    The probe used to pin the defect: `gross_profit` counted rows by the sign of GROSS while
+    `winners` counted them by the sign of NET, so two adjacent numbers described different
+    trades. The ruling fixes ONE population -- the sign of NET -- and this now asserts it.
+    Trade 3 (+Rs 40.00 before costs, -Rs 60.00 after) is the row that used to sit in one set
+    and not the other; it is now a loser on both counts."""
     rows = basis_rows()
     m = pf.metrics(rows, initial_capital_paise=CAPITAL)
 
-    gross_positive = [r for r in rows if r.gross_pnl_paise > 0]
     net_positive = [r for r in rows if r.net_pnl_paise > 0]
-
-    assert len(gross_positive) == 3
-    assert len(net_positive) == 2
-    assert m.winners == 2
-    assert m.gross_profit_paise == 404_000  # Rs 4,040.00 over THREE rows
-    # the row that is in one population and not the other:
-    odd = set(r.symbol for r in gross_positive) - set(r.symbol for r in net_positive)
-    assert odd == {"CCC"}
-    # and the headline rate is the NET one, so the gross-basis rate is never printed:
+    assert len(net_positive) == 2 and m.winners == 2
+    assert m.gross_profit_paise == 380_000  # the WINNERS' net sum, Rs 3,800.00
+    assert m.gross_profit_paise == sum(r.net_pnl_paise for r in net_positive)
+    assert m.gross_loss_paise == -216_000  # CCC's -60 and DDD's -2,100, both net
     assert m.percent_profitable == Fraction(2, 4)
-    assert Fraction(len(gross_positive), m.total_trades) == Fraction(3, 4)
+    # the discriminating row is a LOSER on the one basis that exists now:
+    ccc = next(r for r in rows if r.symbol == "CCC")
+    assert ccc.gross_pnl_paise > 0 > ccc.net_pnl_paise
+    assert ccc.net_pnl_paise in [r.net_pnl_paise for r in rows if r.net_pnl_paise < 0]
+    assert m.net_pnl_paise == m.gross_profit_paise + m.gross_loss_paise
 
 
-def test_winners_times_avg_profit_does_not_equal_gross_profit() -> None:
-    """REVIEW_9A finding Q1, the arithmetic. The identity a report reader would try fails,
-    and it fails by exactly two terms: the winners' commission (BASIS: avg profit is NET,
-    gross profit is GROSS) and the gross of every gross-positive row that the winner set
-    excludes (MEMBERSHIP)."""
+def test_winners_times_avg_profit_equals_gross_profit() -> None:
+    """**FLIPPED (REVIEW_9A finding Q1, the arithmetic).** The identity a report reader would
+    try used to fail by two terms -- the winners' commission (BASIS) and the gross of every
+    gross-positive row the winner set excluded (MEMBERSHIP). On the ruled basis both terms are
+    zero by construction, and the two old terms are asserted here to be exactly what the
+    conversion removed."""
     rows = basis_rows()
     m = pf.metrics(rows, initial_capital_paise=CAPITAL)
 
     assert m.avg_profit_paise == Fraction(190_000)  # Rs 1,900.00, a NET average
-    naive = m.winners * m.avg_profit_paise
-    assert naive == 380_000  # Rs 3,800.00
-    assert naive != m.gross_profit_paise
+    assert m.winners * m.avg_profit_paise == m.gross_profit_paise == 380_000
+    assert m.losers * m.avg_loss_paise == m.gross_loss_paise
 
-    basis_term = m.winners * COST
-    membership_term = sum(
+    # what the old basis added on top, now provably absent from the reported figure:
+    old_basis_term = m.winners * COST
+    old_membership_term = sum(
         r.gross_pnl_paise for r in rows if r.gross_pnl_paise > 0 and r.net_pnl_paise <= 0
     )
-    assert basis_term == 20_000  # Rs 200.00
-    assert membership_term == 4_000  # Rs 40.00
-    assert naive + basis_term + membership_term == m.gross_profit_paise
+    assert old_basis_term == 20_000 and old_membership_term == 4_000
+    assert m.before_cost_profit_paise == m.gross_profit_paise + old_basis_term + old_membership_term
+    assert m.before_cost_profit_paise == 404_000  # printed ONCE, labelled, nowhere else
 
 
-def test_the_largest_win_line_mixes_a_net_number_with_a_gross_share() -> None:
-    """REVIEW_9A finding Q2. `largest_win_paise` and its percent-of-notional are NET; the
-    percent-of-gross-profit beside them divides that trade's GROSS by gross profit. Three
-    numbers, two bases, printed inside one parenthesis in the pack."""
+def test_the_largest_win_line_is_net_on_every_one_of_its_three_numbers() -> None:
+    """**FLIPPED (REVIEW_9A finding Q4).** The line used to print three numbers on two bases
+    inside one parenthesis: a NET amount, a NET percent-of-notional and a GROSS share of a
+    GROSS pot. All three are NET now."""
     rows = basis_rows()
     m = pf.metrics(rows, initial_capital_paise=CAPITAL)
     best = max(rows, key=lambda r: r.net_pnl_paise)
 
     assert m.largest_win_paise == best.net_pnl_paise == 290_000
     assert m.largest_win_pct_of_notional == Fraction(290_000, 1_000_000)  # NET / notional
-    assert m.largest_win_pct_of_gross_profit == Fraction(300_000, 404_000)  # GROSS / gross
-    # the same figure on a NET basis would be a different number entirely:
-    assert m.largest_win_pct_of_gross_profit != Fraction(290_000, 404_000)
+    assert m.largest_win_pct_of_gross_profit == Fraction(290_000, 380_000)  # NET / NET
+    # the old mixed figure -- that trade's GROSS over the old GROSS pot -- is gone:
+    assert m.largest_win_pct_of_gross_profit != Fraction(300_000, 404_000)
+
+    # and the loss line mirrors it, so its share of the loss pot is a NET ratio too
+    worst = min(rows, key=lambda r: r.net_pnl_paise)
+    assert m.largest_loss_paise == worst.net_pnl_paise == -210_000
+    assert m.largest_loss_pct_of_gross_loss == Fraction(-210_000, -216_000)
 
 
 # ==============================================================================================

@@ -535,8 +535,8 @@ RECONCILIATION_LABELS: dict[str, str] = {
     "winners": "Winners (net)",
     "losers": "Losers (net)",
     "flat": "Flat (net)",
-    "gross_profit_paise": "Gross profit",
-    "gross_loss_paise": "Gross loss",
+    "gross_profit_paise": "Gross profit (chunk-8 basis, before Rs 100/trade costs)",
+    "gross_loss_paise": "Gross loss (chunk-8 basis, before Rs 100/trade costs)",
     "exit_stop": "Exit: stop-loss-hit",
     "exit_square_off": "Exit: square-off-at-the-15:15-close",
     "exit_target": "Exit: target-hit",
@@ -737,27 +737,40 @@ def metrics_table(label: str, metrics: pf.Metrics) -> list[str]:
     run_up = metrics.max_run_up
     return [
         f"| Net PnL | {_money(metrics.net_pnl_paise)} |",
-        f"| Gross profit | {_money(metrics.gross_profit_paise)} |",
-        f"| Gross loss | {_money(metrics.gross_loss_paise)} |",
+        f"| Gross profit (net basis: the winners' net sum) | "
+        f"{_money(metrics.gross_profit_paise)} |",
+        f"| Gross loss (net basis: the losers' net sum) | "
+        f"{_money(metrics.gross_loss_paise)} |",
         f"| Profit factor | {_ratio(metrics.profit_factor)} |",
         f"| Commission paid | {_money(metrics.commission_paise)} |",
+        (
+            "| Profit / loss BEFORE Rs 100/trade costs | "
+            f"{_money(metrics.before_cost_profit_paise)} / "
+            f"{_money(metrics.before_cost_loss_paise)} -- the only before-costs figures in "
+            "this pack; every other number on this page is NET |"
+        ),
         f"| Expected payoff (per trade) | {_money(metrics.expected_payoff_paise)} |",
         f"| Total trades / open trades | {metrics.total_trades} / {metrics.open_trades} |",
-        f"| Winners / losers / flat | {metrics.winners} / {metrics.losers} / {metrics.flat} |",
-        f"| Percent profitable | {pf.format_pct(metrics.percent_profitable)} |",
+        (
+            f"| Winners / losers / flat (by NET sign) | {metrics.winners} / "
+            f"{metrics.losers} / {metrics.flat} |"
+        ),
+        f"| Percent profitable (net) | {pf.format_pct(metrics.percent_profitable)} |",
         f"| Avg PnL | {_money(metrics.avg_pnl_paise)} |",
         f"| Avg profit | {_money(metrics.avg_profit_paise)} |",
         f"| Avg loss | {_money(metrics.avg_loss_paise)} |",
         f"| Avg profit / avg loss | {_ratio(metrics.avg_profit_over_avg_loss)} |",
         (
             f"| Largest win | {_money(metrics.largest_win_paise)} "
-            f"({pf.format_pct(metrics.largest_win_pct_of_notional)} of its notional, "
-            f"{pf.format_pct(metrics.largest_win_pct_of_gross_profit)} of gross profit) |"
+            f"({pf.format_pct(metrics.largest_win_pct_of_notional)} of its own notional, "
+            f"{pf.format_pct(metrics.largest_win_pct_of_gross_profit)} of gross profit) "
+            "-- all three NET |"
         ),
         (
             f"| Largest loss | {_money(metrics.largest_loss_paise)} "
-            f"({pf.format_pct(metrics.largest_loss_pct_of_notional)} of its notional, "
-            f"{pf.format_pct(metrics.largest_loss_pct_of_gross_loss)} of gross loss) |"
+            f"({pf.format_pct(metrics.largest_loss_pct_of_notional)} of its own notional, "
+            f"{pf.format_pct(metrics.largest_loss_pct_of_gross_loss)} of gross loss) "
+            "-- all three NET; a loss over a loss is a POSITIVE share |"
         ),
         _outlier_line(metrics.outliers),
         (
@@ -1181,6 +1194,42 @@ def render_markdown(
     )
     add("")
     add("### 7a. CONTEXT 7-E13 metrics (All)")
+    add("")
+    add("**DEFINITIONS -- read these before the table** (the architect's Q-16 and E13 rulings, "
+        "30-Jul-2026; they close REVIEW_9A findings Q1, Q2, Q4, Q6 and Q7):")
+    add("")
+    add(f"* **Basis and population.** {pf.E13_BASIS}")
+    add(
+        "* **Drawdown and run-up denominators.** A drawdown's percent is over the RUNNING PEAK "
+        "it fell from, a run-up's over the RUNNING TROUGH it rose from -- not over the initial "
+        "capital. Both running extremes are SEEDED AT THE OPENING CAPITAL, so a fall on the "
+        "very first day is measured from the money that was actually there (decision B185); a "
+        "peak or trough shown as \"opening capital\" means exactly that."
+    )
+    add(
+        "* **Drawdown and run-up, two forms.** The close-to-close form walks daily CLOSING "
+        f"equity. The intra-trade form walks the 15-minute path: {pf.INTRADAY_PATH_LIMIT}."
+    )
+    add(f"* **Outliers.** {pf.OUTLIER_DEFINITION}")
+    add(
+        "* **CAGR span.** The ENDPOINT DIFFERENCE of the walked window in calendar days "
+        "(last day minus first day, so an 82-day window spans 81 days), over a 365-day year; "
+        "`None` when the final equity is at or below zero, because a negative base has no real "
+        "root (decision B187)."
+    )
+    add(
+        "* **Sharpe and Sortino.** E13's own convention: daily equity returns, risk-free rate "
+        "0, annualized x sqrt(252); sample standard deviation (n-1) for Sharpe, downside "
+        "sum-of-squares over ALL observations for Sortino; `-` when undefined, never 0 "
+        "(decision B186)."
+    )
+    add(
+        "* **The one exception to the net basis, stated so it cannot mislead.** Section 3's "
+        "reconciliation table compares this run against the COMMITTED chunk-8 pack figure by "
+        "figure, and chunk 8's own \"gross profit / gross loss\" are before-costs totals. "
+        "Those two rows are labelled with that basis where they appear and are a "
+        "cross-document check, not report metrics."
+    )
     add("")
     add("| Metric | Value |")
     add("|---|---|")

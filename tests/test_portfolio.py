@@ -15,15 +15,27 @@ Rs 100.00 = 10,000 paise per executed trade:
 | 5 | 01-06 | BBB | long | 10 | 4,000.00 | 40,000.00 | +500.00 | +400.00 |
 | 6 | 01-07 | BBB | long | 5 | 1,000.00 | 5,000.00 | 0.00 | -100.00 |
 
-* gross profit 3,000 + 1,000 + 500 = **Rs 4,500.00**; gross loss -1,000 - 2,000 =
-  **-Rs 3,000.00**; profit factor 4500/3000 = **3/2**; commission 6 x 100 = **Rs 600.00**;
-  net 2,900 - 1,100 + 900 - 2,100 + 400 - 100 = **Rs 900.00**.
-* winners (net > 0) 3, losers 3, flat 0 -> **% profitable = 1/2**; expected payoff
-  900/6 = **Rs 150.00**; avg profit (2,900 + 900 + 400)/3 = **Rs 1,400.00**; avg loss
-  (-1,100 - 2,100 - 100)/3 = **-Rs 1,100.00**; avg profit / avg loss = **14/11**.
-* largest win **+Rs 2,900.00** = 29/2000 of its own Rs 200,000.00 notional, and its gross
-  3,000/4,500 = **2/3** of gross profit; largest loss **-Rs 2,100.00** = -7/200 of its
-  Rs 60,000.00 notional, gross -2,000/-3,000 = **2/3** of gross loss.
+**Every figure below is on the E13 PRESENTATION BASIS the architect ruled on 30-Jul-2026:
+ONE basis (NET of the Rs 100 round trip) over ONE population (the sign of NET).**
+
+* winners (net > 0) 3, losers 3, flat 0 -> **% profitable = 1/2**.
+* gross profit = the winners' NET sum 2,900 + 900 + 400 = **Rs 4,200.00**; gross loss = the
+  losers' NET sum -1,100 - 2,100 - 100 = **-Rs 3,300.00**; profit factor 4200/3300 =
+  **14/11**; net = 4,200 - 3,300 = **Rs 900.00** -- the identity `net == gross profit +
+  gross loss`, with no commission term to reconcile because both pots are already net.
+* expected payoff 900/6 = **Rs 150.00**; avg profit 4,200/3 = **Rs 1,400.00**; avg loss
+  -3,300/3 = **-Rs 1,100.00**; avg profit / avg loss = **14/11**. With three winners and
+  three losers that ratio EQUALS the profit factor -- an arithmetic consequence of the single
+  basis, not a coincidence to rely on.
+* **winners x avg profit = 3 x 1,400 = Rs 4,200.00 = gross profit, exactly** -- the identity a
+  report reader would try, which the old mixed basis failed by Rs 4,609.60 on the pilot
+  (REVIEW_9A findings Q1 and Q2).
+* largest win **+Rs 2,900.00** = 29/2000 of its own Rs 200,000.00 notional and 2,900/4,200 =
+  **29/42** of gross profit -- both NET; largest loss **-Rs 2,100.00** = -7/200 of its
+  Rs 60,000.00 notional and -2,100/-3,300 = **7/11** of gross loss.
+* the ONE before-costs line the ruling allows: profit before Rs 100/trade costs 3,000 + 1,000
+  + 500 = **Rs 4,500.00**, loss before costs -1,000 - 2,000 = **-Rs 3,000.00**, commission
+  6 x 100 = **Rs 600.00**, and 4,500 - 3,000 - 600 = **Rs 900.00** = the net.
 * daily net: 01-01 **+Rs 1,800.00**, 01-02 **0**, 01-05 **+Rs 900.00**, 01-06
   **-Rs 1,700.00**, 01-07 **-Rs 100.00**. On capital Rs 100,000.00 the equity closes
   101,800 / 101,800 / 102,700 / 101,000 / 100,900.
@@ -374,12 +386,21 @@ def test_an_undefined_ratio_is_reported_as_undefined_not_as_zero() -> None:
 def test_every_money_metric_matches_the_hand_computation() -> None:
     m = pf.metrics(ROWS, initial_capital_paise=CAPITAL)
     assert m.net_pnl_paise == 90_000
-    assert m.gross_profit_paise == 450_000
-    assert m.gross_loss_paise == -300_000
-    assert m.profit_factor == Fraction(3, 2)
+    assert m.gross_profit_paise == 420_000  # the WINNERS' net sum (E13 basis ruling)
+    assert m.gross_loss_paise == -330_000  # the LOSERS' net sum
+    assert m.profit_factor == Fraction(14, 11)
     assert m.commission_paise == 60_000
     assert m.expected_payoff_paise == Fraction(15_000)
-    assert m.net_pnl_paise == m.gross_profit_paise + m.gross_loss_paise - m.commission_paise
+    # one basis: no commission term to reconcile, because both pots are already net
+    assert m.net_pnl_paise == m.gross_profit_paise + m.gross_loss_paise
+    # the before-costs pair, which exists for exactly one labelled line
+    assert m.before_cost_profit_paise == 450_000
+    assert m.before_cost_loss_paise == -300_000
+    assert (
+        m.before_cost_profit_paise + m.before_cost_loss_paise - m.commission_paise
+        == m.net_pnl_paise
+    )
+    assert m.basis == pf.E13_BASIS
 
 
 def test_every_count_metric_matches_the_hand_computation() -> None:
@@ -398,10 +419,13 @@ def test_every_average_and_extreme_matches_the_hand_computation() -> None:
     assert m.avg_profit_over_avg_loss == Fraction(14, 11)
     assert m.largest_win_paise == 290_000
     assert m.largest_win_pct_of_notional == Fraction(29, 2000)
-    assert m.largest_win_pct_of_gross_profit == Fraction(2, 3)
+    assert m.largest_win_pct_of_gross_profit == Fraction(29, 42)  # NET / NET
     assert m.largest_loss_paise == -210_000
     assert m.largest_loss_pct_of_notional == Fraction(-7, 200)
-    assert m.largest_loss_pct_of_gross_loss == Fraction(2, 3)
+    assert m.largest_loss_pct_of_gross_loss == Fraction(7, 11)  # NET / NET
+    # the identity the single basis buys: winners x avg profit IS gross profit
+    assert m.winners * m.avg_profit_paise == m.gross_profit_paise
+    assert m.losers * m.avg_loss_paise == m.gross_loss_paise
 
 
 def test_the_outliers_metric_carries_its_definition_beside_the_number() -> None:

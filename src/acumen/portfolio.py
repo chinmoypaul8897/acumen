@@ -23,6 +23,10 @@ output then prints. There is no default figure anywhere in this module.
 :meth:`acumen.config.Config.initial_capital_paise`, and every function that needs it REQUIRES
 it -- there is no default here to fall back on (REVIEW_9A finding C1).
 
+**ONE presentation basis: NET.** Every metric here is after the CONTEXT 3.5 round-trip cost
+and over one population keyed on the sign of NET PnL -- see :data:`E13_BASIS`. The before-costs
+totals survive as exactly two fields, for the single labelled line the ruling allows.
+
 **Money is integer paise; every ratio is a Fraction; the two statistics that need a square
 root are Decimal.** No float is produced anywhere in this file (CONTEXT 7-E11).
 
@@ -63,6 +67,19 @@ OUTLIER_DEFINITION: str = (
     "quartiles by linear interpolation between order statistics (R / numpy type 7), computed "
     "exactly in Fractions; shares are of the net-basis gross profit and gross loss "
     "(QUESTIONS.md Q-16(a), architect 30-Jul-2026)"
+)
+
+#: The architect's E13 PRESENTATION BASIS ruling (30-Jul-2026), which every metric in this
+#: module obeys and which the report prints beside its tables. One basis, one population.
+E13_BASIS: str = (
+    "single basis, NET of the CONTEXT 3.5 flat Rs 100/trade round-trip cost, throughout "
+    "(TradingView semantics, which is what E13 mimics). ONE population everywhere: a trade is "
+    "a winner or a loser by the sign of its NET PnL. Gross profit, gross loss and profit "
+    "factor are sums of those same NET figures over those same populations, so winners x avg "
+    "profit == gross profit exactly; every average, ratio, largest-win/loss line and "
+    "percentage is on NET (percent-of-notional = net / notional; share-of-profit = net / "
+    "net-basis gross profit). Before-costs totals appear ONCE, labelled, and nowhere else "
+    "(QUESTIONS.md Q-16, architect 30-Jul-2026; closes REVIEW_9A Q1/Q2/Q4)"
 )
 
 #: The quartile probabilities the fences are built from, and Tukey's own 1.5 multiplier -- as
@@ -1023,6 +1040,11 @@ class Metrics:
     gross_loss_paise: int
     profit_factor: Fraction | None
     commission_paise: int
+    #: The ONE place before-cost totals exist. Labelled "before Rs 100/trade costs" wherever
+    #: they are printed, and printed exactly once (the E13 presentation ruling).
+    before_cost_profit_paise: int
+    before_cost_loss_paise: int
+    basis: str
     expected_payoff_paise: Fraction | None
     # --- counts
     total_trades: int
@@ -1097,10 +1119,17 @@ def metrics(
     losses = [row for row in trades if row.net_pnl_paise < 0]
     flats = [row for row in trades if row.net_pnl_paise == 0]
 
-    gross_profit = sum(row.gross_pnl_paise for row in trades if row.gross_pnl_paise > 0)
-    gross_loss = sum(row.gross_pnl_paise for row in trades if row.gross_pnl_paise < 0)
+    # THE E13 PRESENTATION BASIS (architect, 30-Jul-2026): the profit and loss pots are sums
+    # of NET PnL over the NET-sign populations -- the same `wins` and `losses` counted above --
+    # so no reader has to reconcile two bases or two memberships. See :data:`E13_BASIS`.
+    gross_profit, gross_loss = net_basis_totals(trades)
     net = sum(row.net_pnl_paise for row in trades)
     commission = sum(row.cost_paise for row in trades)
+    # The before-costs pair, carried for the single labelled line the ruling permits.
+    before_cost_profit = sum(
+        row.gross_pnl_paise for row in trades if row.gross_pnl_paise > 0
+    )
+    before_cost_loss = sum(row.gross_pnl_paise for row in trades if row.gross_pnl_paise < 0)
 
     largest_win = max((row for row in trades), key=lambda r: r.net_pnl_paise, default=None)
     largest_loss = min((row for row in trades), key=lambda r: r.net_pnl_paise, default=None)
@@ -1120,6 +1149,9 @@ def metrics(
             Fraction(gross_profit, -gross_loss) if gross_loss < 0 else None
         ),
         commission_paise=commission,
+        before_cost_profit_paise=before_cost_profit,
+        before_cost_loss_paise=before_cost_loss,
+        basis=E13_BASIS,
         expected_payoff_paise=_ratio(net, len(trades)),
         total_trades=len(trades),
         open_trades=0,
@@ -1136,14 +1168,14 @@ def metrics(
         largest_win_pct_of_gross_profit=(
             None
             if largest_win is None or gross_profit == 0
-            else Fraction(largest_win.gross_pnl_paise, gross_profit)
+            else Fraction(largest_win.net_pnl_paise, gross_profit)
         ),
         largest_loss_paise=0 if largest_loss is None else largest_loss.net_pnl_paise,
         largest_loss_pct_of_notional=_pct_of_notional(largest_loss),
         largest_loss_pct_of_gross_loss=(
             None
             if largest_loss is None or gross_loss == 0
-            else Fraction(largest_loss.gross_pnl_paise, gross_loss)
+            else Fraction(largest_loss.net_pnl_paise, gross_loss)
         ),
         outliers=outliers(rows),
         outliers_note=OUTLIER_DEFINITION,
