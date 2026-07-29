@@ -12,6 +12,14 @@
 # is now UNBLOCKED: Config.require_risk_per_trade() returns 1000 instead of raising.
 risk_per_trade: 1000  # trader answer, Round 3, 25-Jul-2026
 
+# Flat cost per ROUND-TRIP trade in INR -- CONTEXT 3.5 ("Costs: 100 flat per round-trip
+# trade (R1-Q23) subtracted from each trade's PnL"). Charged once per EXECUTED trade; a
+# stock-day that produced no executed trade (no cross, or a cross that could not be sized)
+# pays nothing, because there is no round trip to charge. Wired here rather than typed into
+# the simulator: a money constant hidden in an engine module is invisible to the operator
+# and to the architect's spec sync.
+cost_per_trade: 100  # CONTEXT 3.5 / R1-Q23
+
 # Volume-profile Row Size N -- CONTEXT 3.3. Row Size = Number of Rows = 24, confirmed by
 # trader screenshot (Q32, Round 3): his Fixed Range Volume Profile Rows Layout = "Number of
 # Rows", Row Size = 24 (Volume Up/Down is display-only; POC uses total volume, CONTEXT 3.3

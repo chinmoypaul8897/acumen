@@ -12,6 +12,18 @@ amount) is unanswered and the registry states "code takes ``risk_per_trade`` as 
 config; no default". Every simulation / position-sizing path must therefore call
 :meth:`Config.require_risk_per_trade` before it sizes anything: while the value is null that
 call raises :class:`ConfigError` instead of letting a guessed number reach real money.
+(OPEN-1 was answered in Round 3 -- 1000 rupees -- and the committed config carries it; the
+guard stays because a config that LOSES the amount must fail loudly, not size on a guess.)
+
+``cost_per_trade`` is the same discipline for the other money number CONTEXT 3.5 fixes: the
+flat 100-rupee round-trip cost (R1-Q23). It lives here, next to the risk amount, rather than
+as a literal in the simulator -- a money constant typed into an engine module is invisible to
+the operator and to the architect's spec sync. Both amounts are declared in RUPEES (the units
+CONTEXT 3.5 states them in) and are converted ONCE, exactly, to the integer paise the engines
+work in (CONTEXT 7-E11) by :meth:`Config.require_risk_per_trade_paise` and
+:meth:`Config.cost_per_trade_paise`. The conversion goes through ``Decimal`` so a fractional
+rupee amount can never arrive as a float-rounded number of paise: an amount that is not a
+whole number of paise is refused.
 
 This module performs file I/O and is NOT part of the pure engine layer; engine functions
 receive already-loaded values as arguments (CONTEXT 6).
@@ -25,6 +37,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -40,7 +53,16 @@ DEFAULT_ENV_PATH: Path = REPO_ROOT / ".env"
 
 #: Top-level keys config.yaml is allowed to carry. Unknown keys are a hard error: a typo
 #: that silently falls back to a default is exactly the class of bug CLAUDE.md rule 1 bans.
-_ALLOWED_KEYS: frozenset[str] = frozenset({"risk_per_trade", "row_size", "paths"})
+#: Every key is also REQUIRED to be present -- a missing money key must not resolve to a
+#: default either.
+_ALLOWED_KEYS: frozenset[str] = frozenset(
+    {"risk_per_trade", "cost_per_trade", "row_size", "paths"}
+)
+
+#: CONTEXT 7-E11: prices and money are integer paise inside the engines. Rupee amounts in
+#: config.yaml (the units CONTEXT 3.5 states them in) cross into that domain exactly once,
+#: here.
+PAISE_PER_RUPEE: int = 100
 
 
 class ConfigError(RuntimeError):
@@ -52,6 +74,7 @@ class Config:
     """Validated contents of ``config.yaml``. Holds no secrets -- ever."""
 
     risk_per_trade: float | None
+    cost_per_trade: float
     row_size: int
     paths: Mapping[str, Path]
     source: Path
@@ -74,6 +97,31 @@ class Config:
                 "config.yaml before any trade can be sized (CONTEXT 3.5)."
             )
         return self.risk_per_trade
+
+    def require_risk_per_trade_paise(self) -> int:
+        """The CONTEXT 3.5 risk per trade as exact integer paise -- what the sizer divides by.
+
+        The simulator works entirely in integer paise (CONTEXT 7-E11), so the rupee amount
+        crosses into that domain HERE and nowhere else: ``qty = floor(risk_paise /
+        per_share_risk_paise)`` is then exact integer arithmetic with no float anywhere near
+        a share count.
+
+        Raises:
+            ConfigError: ``risk_per_trade`` is null (see :meth:`require_risk_per_trade`), or
+                it is not a whole number of paise.
+        """
+        return _rupees_to_paise(self.require_risk_per_trade(), "risk_per_trade", self.source)
+
+    def cost_per_trade_paise(self) -> int:
+        """The CONTEXT 3.5 flat round-trip cost as exact integer paise (R1-Q23: 100 rupees).
+
+        Charged once per EXECUTED round trip; a day that produced no executed trade pays
+        nothing (there is no round trip to charge).
+
+        Raises:
+            ConfigError: the amount is not a whole number of paise.
+        """
+        return _rupees_to_paise(self.cost_per_trade, "cost_per_trade", self.source)
 
     def path(self, name: str) -> Path:
         """Return the resolved filesystem path registered under ``name``."""
@@ -156,6 +204,7 @@ def load_config(config_path: Path | None = None, *, include_env: bool = True) ->
 
     return Config(
         risk_per_trade=_validate_risk_per_trade(raw["risk_per_trade"], path),
+        cost_per_trade=_validate_cost_per_trade(raw["cost_per_trade"], path),
         row_size=_validate_row_size(raw["row_size"], path),
         paths=_validate_paths(raw["paths"], path),
         source=path,
@@ -174,6 +223,45 @@ def _validate_risk_per_trade(value: Any, path: Path) -> float | None:
     if value <= 0:
         raise ConfigError(f"risk_per_trade in {path} must be > 0, got {value}.")
     return value
+
+
+def _validate_cost_per_trade(value: Any, path: Path) -> float:
+    """The flat round-trip cost (CONTEXT 3.5, R1-Q23) -- a positive INR amount, never null.
+
+    Unlike ``risk_per_trade`` there is no open item behind this number: CONTEXT 3.5 states it
+    outright, so a null here is a config that lost a spec value, not a pending answer.
+    """
+    if value is None:
+        raise ConfigError(
+            f"cost_per_trade is null in {path}: CONTEXT 3.5 fixes the flat round-trip cost "
+            "(R1-Q23) and allows no default -- fill the spec amount in config.yaml."
+        )
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ConfigError(
+            f"cost_per_trade in {path} must be a positive INR number (CONTEXT 3.5), "
+            f"got {type(value).__name__}."
+        )
+    if value <= 0:
+        raise ConfigError(f"cost_per_trade in {path} must be > 0, got {value}.")
+    return value
+
+
+def _rupees_to_paise(value: float, field: str, path: Path) -> int:
+    """Rupees -> exact integer paise (CONTEXT 7-E11). Refuses a fractional paisa.
+
+    ``Decimal(str(value))`` rather than ``value * 100``: the second is float arithmetic on a
+    money amount, which is exactly what CONTEXT 7-E11 keeps out of this codebase.
+    """
+    try:
+        scaled = Decimal(str(value)) * PAISE_PER_RUPEE
+    except InvalidOperation as exc:  # pragma: no cover -- the validators reject non-numbers
+        raise ConfigError(f"{field} in {path} is not a number: {value!r}.") from exc
+    if scaled != scaled.to_integral_value():
+        raise ConfigError(
+            f"{field} in {path} must be a whole number of paise (CONTEXT 7-E11); "
+            f"{value} rupees is {scaled} paise."
+        )
+    return int(scaled)
 
 
 def _validate_row_size(value: Any, path: Path) -> int:
