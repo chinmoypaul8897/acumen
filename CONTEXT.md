@@ -1,6 +1,6 @@
 # CONTEXT.md — ACUMEN INTELLIGENCE · Master Specification
 
-**Version 1.2 · 23 July 2026 · THIS FILE IS LAW.**
+**Version 1.3 · 29 July 2026 · THIS FILE IS LAW.**
 Every build/review session reads this before touching code. Nothing here may be changed by any Claude Code session — spec changes flow only through the architect (the Cowork chat), arrive as a new version of this file, and are logged in §10. If reality and this file disagree, STOP and write it to QUESTIONS.md.
 
 ## Table of contents
@@ -73,7 +73,7 @@ Definitions (from previous candle P): `bodyMax = max(P.open, P.close)` · `bodyM
    - P.high broken first AND `C.close >= bodyMin` → BULLISH.
    - P.low broken first AND `C.close <= bodyMax` → BEARISH.
    - "Broken" at 1-min level = 1-min candle's high > P.high (resp. low < P.low), scanned in time order.
-   - **Tie case** (both sides break within the SAME 1-min candle — R2-Q31, trader's worked example). Exact predicate: let m = that 1-min candle. `m.close < m.open` (red) → the LOW was swept later (high effectively first) → BULLISH if `C.close >= bodyMin`. Trader solved the worked example exactly this way (answered: Bullish). `m.close > m.open` (green) → high swept later → BEARISH if `C.close <= bodyMax` — **assumed mirror, OPEN-4 §9**. `m.close == m.open` (doji) → no decision → carry last bias and log the day — **also under OPEN-4**. (The trader's phrase was "closes red, near its bottom"; the codeable operator is close-vs-open. His example is the authority.)
+   - **Tie case** (both sides break within the SAME 1-min candle — R2-Q31 + Round-3 Q38/Q39, TRADER-FINAL): the decisive 1-min candle's direction is **IRRELEVANT** — red, green and doji all follow ONE rule (this OVERTURNS the earlier color-based assumption; the trader rejected the green mirror and the doji-carry explicitly). Resolve by the DAILY close against the body, with bullish precedence: `C.close >= bodyMin` → BULLISH; else `C.close <= bodyMax` → BEARISH (the bearish branch is unreachable for closes inside the body — bullish precedence — and closes outside the body were already decided by Rule 1). Worked example (trader-certified twice): body 2010–2040, daily close 2020 → BULLISH regardless of the 1-min candle's color.
 5. **No rule fires** → carry last known bias. If Bullish and Bearish conditions ever both evaluate true (should be impossible), Bullish takes precedence (trader's PDF).
 
 **Outside-bar precedence note (spec decision, from the PDF's own text):** rules are evaluated in the order above, so an outside bar whose close lands BEYOND the body (`close > bodyMax` or `< bodyMin`) is decided by **Rule 1** — the Rule-3 first-break test only ever decides candles whose close lands INSIDE the body `[bodyMin, bodyMax]`. Basis: the PDF says "if none of the Bullish or Bearish conditions for Rules 1, 2, or 3 are met → maintain last bias", i.e. the rule conditions co-evaluate; Rule 1's condition is met regardless of sweep order. This is verified with the trader at the chunk-4 gate via the F9 bias sequence.
@@ -92,6 +92,7 @@ Computed once per stock per trading day, after 11:15, from that day's **1-minute
 - **Row construction (TradingView's documented math, §5):** `top = max(high)`, `bottom = min(low)` over the window. `totalTicks = round((top − bottom)/tick)`; `tpr = totalTicks/N` rounded to a whole number (minimum 1), direction chosen so the realized row count is closest to requested N. Rows are stacked from `bottom` upward, each spanning `tpr` ticks; the leftover ticks (if any) form final rows of `tpr` ticks with the LAST row holding the remainder (may be smaller) — so realized row count can exceed N (TV's own example: 100 ticks, N=30 → tpr=3 → 33 rows of 3 + 1 row of 1 = 34 rows).
 - **Row containment:** rows are half-open `[lo, hi)` EXCEPT the topmost row, which includes `top`. A zero-range bar (`high == low`) is a point: its full volume goes to the single row containing that price. If `top == bottom` for the whole window (frozen stock), the profile is one single-tick row.
 - **POC value is a row MIDPOINT** — it may legally sit off the tick grid (half-tick values); all comparisons against it use full precision, never rounded prices.
+- **Window CONFIRMED (Round-3 Q42, trader):** the 8-candle window (1-min stamps 09:15..11:14) is final; the 9-candle alternative is dead. **tpr TIE (Q-13, RULED):** when both rounding directions land equally close to N, keep the FINER profile (smaller tpr) — evidence: reproduces all 25 trader-calibrated values to 4e-13; trader's live row-count read (25) sits one from finer's 26 vs three from coarser's 22; TV's own documented example lands finer. **totalTicks rounding = half-even** (pinned interim; verification slot in the chunk-12 pack with our-data screenshots). **N = 24 trader-screenshot-confirmed.**
 - **N (Row Size)** = **24 provisional** — trader's live calibration used 24 and matched; his personal everyday setting pending (OPEN-2 §9).
 - **tickSize** = per symbol from instrument master (₹0.01 for lower-priced stocks after NSE's Jun-2024 tick reform; NEVER hardcode 0.05) — §4.3.
 - **Volume spreading = PRORATA** (LOCKED by calibration 22-Jul-2026, 5/5 match vs trader's TradingView readings): each 1-min bar's volume is distributed across the rows its [low, high] range overlaps, proportionally to the price-overlap fraction (`overlap / (high − low)`, with `high==low` treated as one-tick span). Not "all at close", not "uniform".
@@ -107,7 +108,7 @@ Only in the direction of the day's bias (R1-Q24): bullish day → longs only; be
 1. **Reference (11:15):** compare the CLOSE of the 11:00–11:15 candle with POC (R2-Q34a).
    - reference < POC → state ARMED.
    - reference > POC → state WAIT-BELOW: need a later 15-min close **strictly** < POC first (== POC does not arm; PDF wording "close below it"); when that happens → ARMED.
-   - reference == POC exactly → **OPEN-3 (§9, unanswered Q34b)** — this OPEN item covers ONLY this 11:15 reference comparison, nothing else. Until answered: log the stock-day to QUESTIONS.md, take no trade.
+   - reference == POC exactly → **NO side (trader Q34b + Round-3 Q41, FINAL):** wait; the FIRST 15-min candle that closes strictly above or strictly below the POC sets the side — and ONLY sets it (it is never itself the entry — Q41 option A). First distinct close below → ARMED. First distinct close above → WAIT-BELOW (the Entry-2 path: need a close below, then buy on the close back above). OPEN-3 is resolved.
    - Reference candle missing but window valid → use the last available 1-min close ≤ 11:14 as reference (E10); none available → no trade.
 2. **Trigger:** first 15-min candle (closing at 11:30 or later — the 11:15–11:30 candle is the first eligible — up to the 15:00 close, R2-Q30) that **closes strictly above POC** (`close > POC`; close == POC does NOT count — R2-Q34c) while state is ARMED. Entry price = that candle's **close** (R1-Q14).
    - A close == POC while ARMED: not a trigger, state stays ARMED, nothing is consumed.
@@ -126,12 +127,12 @@ Only in the direction of the day's bias (R1-Q24): bullish day → longs only; be
 ### 3.5 Position sizing, costs, accounting
 
 - Capital: **₹1,00,000** (R1-Q21a).
-- Sizing: **fixed ₹ risk per trade** (R2-Q29a). `qty = floor(riskPerTrade / (entry − SL))` (shorts: `SL − entry`). qty == 0 → no trade, logged. **riskPerTrade amount = OPEN-1 (§9, pending from trader).**
+- Sizing: **fixed ₹ risk per trade = ₹1,000** (Round-3 Q29, TRADER-FINAL; wired in config). `qty = floor(1000 / (entry − SL))` (shorts: `SL − entry`). qty == 0 → no trade, consumed + logged. OPEN-1 resolved.
 - Costs: **₹100 flat per round-trip trade** (R1-Q23) subtracted from each trade's PnL.
 - Backtest instrument: **cash equity prices** (R2-Q35 agreed).
 - PnL per trade: `(exit − entry) × qty − 100` (long; mirrored short).
 - No partial exits, no trailing (R1-Q27). No leverage/notional cap specified by trader — v1 does not cap notional but the report MUST disclose max notional used vs capital (§7, OPEN-6).
-- **Portfolio semantics (v1 default — trader never specified; OPEN-7):** the backtest takes ALL signals across all stocks concurrently, each sized by the fixed-₹-risk rule, with NO capital/concurrency constraint. One equity curve: `capital + cumulative PnL` in trade-close order. The report MUST disclose: max concurrent positions, max aggregate notional vs ₹1L, distribution of daily concurrent-trade counts — so the trader sees exactly how far reality would differ. A concurrency/total-risk cap is queued as OPEN-7.
+- **Portfolio semantics (Round-3 Q40, TRADER-FINAL — option d, "no limits, show me the honest numbers"):** the backtest takes ALL signals across all stocks concurrently, each sized by the fixed-₹-risk rule, NO capital/concurrency constraint. One equity curve: `capital + cumulative PnL` in trade-close order. The report MUST disclose: max concurrent positions, max aggregate notional vs ₹1L, distribution of daily concurrent-trade counts, AND per-trade flags marking the trades his capital could not actually have taken (notional > ₹1L cash; > ₹5L typical-MIS tiers). OPEN-6 and OPEN-7 resolved by this answer.
 
 ---
 
@@ -196,6 +197,16 @@ Test oracle: NSE's official "Adjustment of F&O contracts Calculator" XLSX (`nsea
 3. **Adjustment sanity**: on every split/bonus ex-date in history, adjusted series must show |day-over-day gap| < 20% (unadjusted 1:10 split = −90% fake gap must disappear); validated against §4.2 oracle. **Also settles OPEN: SmartAPI 1-min adjustment status is UNVERIFIED — treated as RAW; this gate checks known split dates during backfill; if candles turn out pre-adjusted, architect updates §7-E11 before chunk 5 completes.**
 4. Old-history spot-check rides along with the full backfill (first run over 2016–2018) — same gates.
 
+## 4.6 MINUTE-LAKE FINAL STATE (v1.3 — the data era, sealed at tag chunk5B-pass)
+
+Everything below was proven by build + adversarial review (REVIEW_5A, REVIEW_5B, REVIEW_5B_2); the full ruling chain lives in QUESTIONS.md (Q-10…Q-14 with addenda).
+
+- **The vendor's 1-min feed is corporate-action back-adjusted, era-inconsistently, with per-EVENT and per-SIDE (price vs volume) application floors.** The store holds RAW prices, restored on ingest via measured per-symbol adjustment maps: candidates {ours, measured, absent} per event per side; application floors binary-searched; same-ex-date events compose into compound nodes; unparsed events enter as measured-or-absent nodes. All maps carry full probe provenance.
+- **Gate battery (per symbol-day, all three required for "usable"):** GATE 1 — volume reconciliation vs raw bhavcopy, band [−0.1%, +5.0%], with the evidence-gated auction-relief branch (above-ceiling only, extremes+open exact-match, ≤20% shortfall, counted separately). GATE 2 — integrity: duplicates, impossible OHLC, negatives, and missing-minutes only when gate 1 also fails (completeness = volume reconciliation, NOT minute counts; E4's minute-count trigger is retired; tradeless minutes are liquidity statistics). GATE 1P — per-day price containment: the day's fold [low,high] inside raw daily [low,high], tolerance max(2 paise, 0.1%) per side; no bhavcopy row → fail.
+- **Final coverage: 411,690 / 434,769 stored symbol-days pass all three gates = 94.69% — DoD (95%) NOT MET and formally architect-accepted** (under the battery the target was written against: 95.22%). 204 symbols settled, 6 quarantined (ASTRAL, IEX, NESTLEIND, NTPC, UPL, VBL). The **disclosed-residual register** (backfill report §3f) is the authoritative list of what is excluded and why.
+- **Chunk-9 duties (from REVIEW_5B_2):** recompute gate 1P per day (pure function, both stores local — there is no per-day exclusion file); read the residual register before any per-symbol statistic; note IOC (41.9% price-proven) and TATASTEEL (65.8%) are settled-but-partial under B149 — their backtests cover a minority of stored history, concentrated in recent years.
+- **Next-data-work list (frozen, not chased):** volume_measured one-word semantic fix (REVIEW_5B_2 Q2); bhavcopy ingest to clear the 178-day store-lag no-oracle failures (C2); probe-tolerance shape (quorum vs universal — the IOC 0.34-paise cascade, REVIEW_5B Q9); prose sites still saying "2-paise" (Q1).
+
 ## 5. TradingView replication facts (why our POC = his POC)
 
 - TV is an NSE-authorized realtime data vendor (NSE vendor list PDF) — its NSE volume is licensed exchange feed.
@@ -240,7 +251,7 @@ Test oracle: NSE's official "Adjustment of F&O contracts Calculator" XLSX (`nsea
 | F2 TCS bullish Entry-2 | PDF example | initial state WAIT-BELOW (reference above POC 2030) → close below at 2027 arms → re-cross close 2037 → entry 2037/SL 2032/TP 2052 |
 | F3 TCS bearish Entry-1 | PDF example + R1-Q1/Q2 corrections | entry 1980, SL 1988 (candle HIGH, risk 8), **TP 1956** (not 2004) |
 | F4 Gap entry SL | R2-Q33 worked numbers | prior close 2028 → gap candle low 2034, close 2042 → entry 2042, SL **2028**, TP 2084 |
-| F5 Rule-3 tie day | R2-Q31 worked numbers | P: O2010 H2050 L2000 C2040; same-minute double break, red 1-min close; C.close 2020 → BULLISH |
+| F5 Rule-3 tie day | R2-Q31 + Round-3 Q38/Q39 | P: O2010 H2050 L2000 C2040; same-minute double break; C.close 2020 → BULLISH — for RED, GREEN and DOJI decisive candles alike (color irrelevant; three sub-fixtures) |
 | F6 Row engine vs TV docs | TV's documented example | 100 ticks, N=30 → tpr=3 → **34 rows: 33 of 3 ticks + 1 remainder row of 1 tick**; N=25 → tpr=4 → 25 rows of 4 |
 | F7 POC calibration days | trader's TV readings 22-Jul-2026 + frozen 1-min CSVs in `poc/data/` (the CSVs are the authoritative input) | two assertions: (a) recomputed prorata POC from the CSVs matches the poc-run printout to ±0.01 (printed 2dp values: TCS 07-14→2205.25 · RELIANCE 07-16→1303.60 · HDFCBANK 07-14→815.27 · DIXON 07-16→14263.50 · MANAPPURAM 07-15→329.75; midpoints may be off-grid — §3.3); (b) on each day, prorata is the candidate nearest the trader's TV reading (2205.3 / 1303.7 / 815.3 / 14267 / 329.75) |
 | F8 CA factors | NSE calculator XLSX cases | bonus 1:2 k=2/3; split FV10→2 k=0.2; rights per TERP formula |
@@ -251,18 +262,21 @@ Rules: fixtures are frozen inputs (CSV) + expected outputs; reviewers rerun them
 
 ## 9. OPEN ITEMS REGISTRY — the only permitted unknowns (everything else is decided)
 
-| ID | What | Blocks | Owner | Interim behavior |
-|---|---|---|---|---|
-| OPEN-1 | ₹ risk-per-trade amount (R2-Q29 ticked (a), amount not written) | chunk 8 (simulator) | trader → Paul | code takes `risk_per_trade` as required config; no default |
-| OPEN-2 | Trader's own FRVP settings screenshot + 3 chart screenshots (Q32 — said "Okay", not sent) | final Row Size config; F7 extension | trader → Paul | N=24 provisional (matched in calibration) |
-| OPEN-3 | 11:15 reference exactly == POC: above or below? (Q34b skipped) | one branch of signal engine | trader → Paul | branch raises to QUESTIONS.md if ever hit; backtest counts occurrences |
-| OPEN-4 | Rule-3 tie: GREEN mirror (assumed by symmetry from his red example) + DOJI case (no decision → carry, logged) | nothing now; UAT confirm | trader at chunk-4 gate | implemented as §3.2 states, flagged in validation pack |
-| OPEN-5 | Survivorship: upgrade to point-in-time membership? | nothing (E5 default) | Paul decision later | current list + disclosure |
-| OPEN-6 | Notional/leverage cap for sizing | nothing (E6 default) | trader (low priority) | uncapped + disclosed |
-| OPEN-7 | Portfolio concurrency: cap on simultaneous positions / total open risk across 210 stocks? | report realism (§3.5 default until answered) | trader (with Q29 batch) | take-all + full disclosure of max concurrency and notional |
-| OPEN-8 | SmartAPI 1-min historical: raw or pre-adjusted? | chunk 5 sign-off | settled empirically by §4.5 gate 3 during backfill | treated as RAW |
+| ID | What | Resolution |
+|---|---|---|
+| OPEN-1 | ₹ risk per trade | **RESOLVED** — ₹1,000 (Round-3 Q29); in config |
+| OPEN-2 | Q32 screenshots | **RESOLVED** — received; Row Size 24 confirmed; window question they raised answered by Q42 |
+| OPEN-3 | reference == POC | **RESOLVED** — wait rule + side-only first distinct close (Q34b + Q41-A); §3.4 |
+| OPEN-4 | Rule-3 tie green/doji | **RESOLVED** — color irrelevant; daily close vs body with bullish precedence (Q38/Q39); §3.2. Code change executed chunk-7 prep |
+| OPEN-5 | Survivorship point-in-time upgrade | **OPEN (v2)** — E5 default stands: current list + disclosure |
+| OPEN-6 | Notional/leverage cap | **RESOLVED** — none; take-all + capital-infeasibility flags (Q40-d) |
+| OPEN-7 | Concurrency cap | **RESOLVED** — none (Q40-d); disclosures per §3.5 |
+| OPEN-8 | SmartAPI adjustment status | **RESOLVED** — back-adjusted, era-inconsistent, per-side; fully remedied by the Q-10…Q-14 machinery (§4.6) |
+| Q-13 | tpr rounding tie | **RESOLVED** — finer profile (§3.3); rounding MODE half-even = pinned interim, chunk-12 verification |
 
-When an item resolves: architect updates this file (version bump §10), the affected config/test changes in the same commit.
+Trader gates: **chunk-4 gate CLOSED** (bias table CONFIRMED, Round 3) · **chunk-6 gate CLOSED** (Q42 + row-count oracle). The trader owes nothing further until the chunk-12 validation pack. v2 backlog: OPEN-5, probe-tolerance shape, §4.6 next-data-work list.
+
+When anything here changes: architect updates this file (version bump §10), the affected config/test changes in the same commit.
 
 ## 10. Source documents & version log
 
@@ -272,7 +286,7 @@ Precedence if conflict is ever found: trader's R2 answers > R1 answers > PDF tex
 
 | Version | Date | Change |
 |---|---|---|
+| 1.3 | 29-Jul-2026 | Round-3 answers + data-era close, batched: §3.2 tie rule rewritten (color irrelevant — trader overturned green-mirror + doji-carry; bullish-precedence close-vs-body rule); §3.3 window confirmed 8-candle, tpr-tie → finer (Q-13 ruled), rounding half-even pinned, N=24 confirmed; §3.4 ==POC wait rule + side-only first distinct close (Q34b/Q41-A); §3.5 risk ₹1,000 + take-all confirmed (Q40-d) with capital-infeasibility flags; NEW §4.6 minute-lake final state (measured adjustment maps, floors per event per side, 3-gate battery incl. gate 1P, coverage 94.69% architect-accepted, residual register, chunk-9 duties, next-data-work list); §8 F5 extended to 3 sub-fixtures; §9 registry: everything resolved except OPEN-5 (v2); both trader gates recorded CLOSED |
 | 1.2 | 23-Jul-2026 | Added E13 (authoritative report-metric list & conventions incl. buy&hold benchmark definition — plan.md chunk 10 depends on it); repo layout gains STATUS.md ledger + docs/reviews/; DESIGN.md corrected to chunk 11 |
 | 1.1 | 23-Jul-2026 | Post-adversarial-review fixes: outside-bar precedence note; exact tie-case operators (+doji→OPEN-4); demerger day-blocking + resume; row remainder/containment/top-inclusive/point-bar rules; POC off-grid note; ARMED/==POC/consumption semantics; WAIT-BELOW strictness; reference fallback (E10); explicit bearish mirror; portfolio default + OPEN-7; SmartAPI adjustment status OPEN-8 + gate-3 check; gate bands fixed (F10/§4.5); gate-2 vs E4 thresholds separated; F2 initial state; F6 corrected (33×3+1×1); F7 semantics precise; price domains E11; bar stamping E12; dividend dual-reference note |
 | 1.0 | 23-Jul-2026 | Initial master spec. Open: OPEN-1…6 |
-
