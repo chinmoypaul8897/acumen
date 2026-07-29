@@ -59,6 +59,12 @@ _ALLOWED_KEYS: frozenset[str] = frozenset(
     {"risk_per_trade", "cost_per_trade", "row_size", "paths"}
 )
 
+#: Keys that MAY be absent. Both belong to the Round-3 Q40-d capital-infeasibility flags and
+#: both are deliberately unset until the trader answers Q43: a flag computed against a guessed
+#: capital figure would mark real trades "infeasible" on this repo's authority, not his. Absent
+#: (or null) means the flags are NOT COMPUTED and every output says so -- there is no default.
+_OPTIONAL_KEYS: frozenset[str] = frozenset({"capital_reference", "margin_basis"})
+
 #: CONTEXT 7-E11: prices and money are integer paise inside the engines. Rupee amounts in
 #: config.yaml (the units CONTEXT 3.5 states them in) cross into that domain exactly once,
 #: here.
@@ -78,6 +84,10 @@ class Config:
     row_size: int
     paths: Mapping[str, Path]
     source: Path
+    #: Q40-d capital-infeasibility inputs. ``None`` means the trader's Q43 answer has not
+    #: arrived and the flags are NOT COMPUTED (CONTEXT 3.5's disclosure list, chunk 9).
+    capital_reference: float | None = None
+    margin_basis: Decimal | None = None
 
     def require_risk_per_trade(self) -> float:
         """Return the INR risk per trade, or refuse to run.
@@ -122,6 +132,25 @@ class Config:
             ConfigError: the amount is not a whole number of paise.
         """
         return _rupees_to_paise(self.cost_per_trade, "cost_per_trade", self.source)
+
+    def capital_reference_paise(self) -> int | None:
+        """The Q40-d capital reference as exact integer paise, or ``None`` while Q43 is open.
+
+        ``None`` is a first-class answer here, unlike ``risk_per_trade``: the flags simply are
+        not computed and the report says so in the words
+        :data:`acumen.backtest.CAPITAL_FLAGS_PENDING_NOTE` carries.
+        """
+        if self.capital_reference is None:
+            return None
+        return _rupees_to_paise(self.capital_reference, "capital_reference", self.source)
+
+    def margin_basis_text(self) -> str | None:
+        """The Q40-d margin basis as its exact decimal TEXT, or ``None`` while Q43 is open.
+
+        Text, not a float: it travels into a run manifest that must be byte-identical across
+        runs, and a Decimal's own string form is exact.
+        """
+        return None if self.margin_basis is None else str(self.margin_basis)
 
     def path(self, name: str) -> Path:
         """Return the resolved filesystem path registered under ``name``."""
@@ -189,11 +218,11 @@ def load_config(config_path: Path | None = None, *, include_env: bool = True) ->
     if not isinstance(raw, dict):
         raise ConfigError(f"{path} must contain a top-level mapping, got {type(raw).__name__}.")
 
-    unknown = sorted(set(raw) - _ALLOWED_KEYS)
+    unknown = sorted(set(raw) - _ALLOWED_KEYS - _OPTIONAL_KEYS)
     if unknown:
         raise ConfigError(
             f"Unknown key(s) in {path}: {', '.join(unknown)}. "
-            f"Allowed keys: {', '.join(sorted(_ALLOWED_KEYS))}."
+            f"Allowed keys: {', '.join(sorted(_ALLOWED_KEYS | _OPTIONAL_KEYS))}."
         )
     missing = sorted(_ALLOWED_KEYS - set(raw))
     if missing:
@@ -206,6 +235,8 @@ def load_config(config_path: Path | None = None, *, include_env: bool = True) ->
         risk_per_trade=_validate_risk_per_trade(raw["risk_per_trade"], path),
         cost_per_trade=_validate_cost_per_trade(raw["cost_per_trade"], path),
         row_size=_validate_row_size(raw["row_size"], path),
+        capital_reference=_validate_capital_reference(raw.get("capital_reference"), path),
+        margin_basis=_validate_margin_basis(raw.get("margin_basis"), path),
         paths=_validate_paths(raw["paths"], path),
         source=path,
     )
@@ -244,6 +275,50 @@ def _validate_cost_per_trade(value: Any, path: Path) -> float:
     if value <= 0:
         raise ConfigError(f"cost_per_trade in {path} must be > 0, got {value}.")
     return value
+
+
+def _validate_capital_reference(value: Any, path: Path) -> float | None:
+    """``null``/absent (Q43 pending) or a positive INR amount -- nothing else.
+
+    CONTEXT 3.5's Q40-d disclosure list needs a capital figure to mark the trades his capital
+    could not actually have taken. The figure is the TRADER's (Q43); until it arrives this stays
+    null and the flags are not computed. There is deliberately no default -- not even CONTEXT
+    3.5's own 1,00,000 capital line, because the flag question the architect put to him is
+    which figure the FLAGS should use.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ConfigError(
+            f"capital_reference in {path} must be null (Q43 pending) or a positive INR "
+            f"number, got {type(value).__name__}."
+        )
+    if value <= 0:
+        raise ConfigError(f"capital_reference in {path} must be > 0, got {value}.")
+    return value
+
+
+def _validate_margin_basis(value: Any, path: Path) -> Decimal | None:
+    """``null``/absent (Q43 pending) or a positive multiple of the capital reference.
+
+    A "typical MIS tier" in CONTEXT 3.5's own words is a MULTIPLE of the cash capital (his
+    example: 1,00,000 cash vs a 5,00,000 tier). Stored as a Decimal so the tier boundary is
+    exact paise arithmetic, never a float comparison (CONTEXT 7-E11).
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        raise ConfigError(
+            f"margin_basis in {path} must be null (Q43 pending) or a positive multiple of "
+            f"capital_reference, got {type(value).__name__}."
+        )
+    try:
+        basis = Decimal(str(value))
+    except InvalidOperation as exc:
+        raise ConfigError(f"margin_basis in {path} is not a number: {value!r}.") from exc
+    if basis <= 0:
+        raise ConfigError(f"margin_basis in {path} must be > 0, got {value}.")
+    return basis
 
 
 def _rupees_to_paise(value: float, field: str, path: Path) -> int:

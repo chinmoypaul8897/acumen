@@ -18,6 +18,7 @@ suite has no reason to pull the operator's live credentials into ``os.environ``
 from __future__ import annotations
 
 import os
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -302,3 +303,68 @@ def test_missing_env_variable_error_names_the_variable_only() -> None:
 def test_optional_env_variable_returns_none() -> None:
     os.environ.pop("ACUMEN_TEST_ABSENT", None)
     assert env_value("ACUMEN_TEST_ABSENT", required=False) is None
+
+
+# --- the Q40-d capital-infeasibility inputs (chunk 9A; BLOCKED on the trader's Q43) -----
+
+
+def test_the_repo_config_leaves_both_capital_flag_keys_null() -> None:
+    """CONTEXT 3.5's flags need a capital figure that is the TRADER's (Q43) and has not
+    arrived. Null means the flags are NOT COMPUTED -- there is no default, not even
+    CONTEXT 3.5's own 1,00,000 capital line."""
+    config = load_config(include_env=False)
+    assert config.capital_reference is None
+    assert config.margin_basis is None
+    assert config.capital_reference_paise() is None
+    assert config.margin_basis_text() is None
+
+
+def test_both_capital_flag_keys_are_optional_not_required(tmp_path: Path) -> None:
+    """A config that predates chunk 9A still loads -- the keys are OPTIONAL, unlike the money."""
+    config = load_config(_write_config(tmp_path, _VALID), include_env=False)
+    assert config.capital_reference is None and config.margin_basis is None
+
+
+def test_a_supplied_capital_reference_crosses_into_paise_exactly(tmp_path: Path) -> None:
+    body = _VALID + "capital_reference: 100000\nmargin_basis: 5\n"
+    config = load_config(_write_config(tmp_path, body), include_env=False)
+    assert config.capital_reference_paise() == 10_000_000
+    assert config.margin_basis_text() == "5"
+
+
+def test_a_fractional_margin_basis_stays_exact(tmp_path: Path) -> None:
+    """A Decimal, never a float: the tier boundary is compared against integer paise."""
+    body = _VALID + "capital_reference: 100000\nmargin_basis: 4.5\n"
+    config = load_config(_write_config(tmp_path, body), include_env=False)
+    assert config.margin_basis_text() == "4.5"
+    assert config.margin_basis == Decimal("4.5")
+
+
+@pytest.mark.parametrize(
+    "body,message",
+    [
+        ("capital_reference: 0\n", "capital_reference"),
+        ("capital_reference: -1\n", "capital_reference"),
+        ("capital_reference: 'lots'\n", "capital_reference"),
+        ("margin_basis: 0\n", "margin_basis"),
+        ("margin_basis: -2\n", "margin_basis"),
+        ("margin_basis: [5]\n", "margin_basis"),
+    ],
+)
+def test_a_nonsense_capital_flag_value_is_refused(tmp_path: Path, body: str, message: str) -> None:
+    with pytest.raises(ConfigError, match=message):
+        load_config(_write_config(tmp_path, _VALID + body), include_env=False)
+
+
+def test_a_fractional_paisa_capital_reference_is_refused(tmp_path: Path) -> None:
+    body = _VALID + "capital_reference: 100.005\n"
+    config = load_config(_write_config(tmp_path, body), include_env=False)
+    with pytest.raises(ConfigError, match="whole number of paise"):
+        config.capital_reference_paise()
+
+
+def test_an_unknown_key_is_still_refused_after_the_optional_ones_were_added(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ConfigError, match="Unknown key"):
+        load_config(_write_config(tmp_path, _VALID + "leverage: 5\n"), include_env=False)

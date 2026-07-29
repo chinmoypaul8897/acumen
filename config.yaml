@@ -20,6 +20,18 @@ risk_per_trade: 1000  # trader answer, Round 3, 25-Jul-2026
 # and to the architect's spec sync.
 cost_per_trade: 100  # CONTEXT 3.5 / R1-Q23
 
+# Q40-d CAPITAL-INFEASIBILITY FLAGS (CONTEXT 3.5's disclosure list). Both keys are OPTIONAL
+# and both are NULL until the trader answers Q43 (which capital figure the flags must use)
+# and Q44. While they are null the backtest computes NO flag and every output says
+# "capital-infeasibility flags NOT computed -- the trader's Q43 answer is pending". There is
+# no default: a flag computed against a guessed figure would mark real trades infeasible on
+# this repo's authority rather than his. When the answers arrive: capital_reference is the
+# cash figure in INR and margin_basis is the MIS tier as a multiple of it (CONTEXT 3.5's own
+# example is 1,00,000 cash vs a 5,00,000 tier, i.e. margin_basis 5). The flags are then
+# computed POST-HOC from the ledger -- never inside the run.
+capital_reference:   # null -- trader Q43 pending
+margin_basis:        # null -- trader Q43 pending
+
 # Volume-profile Row Size N -- CONTEXT 3.3. Row Size = Number of Rows = 24, confirmed by
 # trader screenshot (Q32, Round 3): his Fixed Range Volume Profile Rows Layout = "Number of
 # Rows", Row Size = 24 (Volume Up/Down is display-only; POC uses total volume, CONTEXT 3.3
