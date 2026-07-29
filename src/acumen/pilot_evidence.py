@@ -760,7 +760,7 @@ def metrics_table(label: str, metrics: pf.Metrics) -> list[str]:
             f"({pf.format_pct(metrics.largest_loss_pct_of_notional)} of its notional, "
             f"{pf.format_pct(metrics.largest_loss_pct_of_gross_loss)} of gross loss) |"
         ),
-        f"| Outliers | NOT COMPUTED -- {metrics.outliers_note} |",
+        _outlier_line(metrics.outliers),
         (
             f"| Max drawdown (equity close-to-close) | {_money(excursion.amount_paise)} "
             f"({pf.format_pct(excursion.pct)}), {excursion.peak_day} -> {excursion.trough_day}, "
@@ -788,6 +788,34 @@ def metrics_table(label: str, metrics: pf.Metrics) -> list[str]:
         f"| Largest MFE / largest MAE | {_money(metrics.largest_mfe_paise)} / {_money(metrics.largest_mae_paise)} |",
         f"| Trading days in the series | {metrics.trading_days} |",
     ]
+
+
+def _outlier_line(found: pf.Outliers) -> str:
+    """E13's "outliers" under the Q-16(a) ruling: count, summed net, shares, and the RULE.
+
+    The ruling requires the definition beside the number, and the fences are printed with it so
+    a reader can re-derive the count from the trade list without rerunning anything.
+    """
+    if found.count == 0:
+        headline = (
+            f"NONE of {found.population} executed trades falls outside the fences "
+            f"[{_money(found.lower_fence_paise)}, {_money(found.upper_fence_paise)}]"
+        )
+    else:
+        headline = (
+            f"**{found.count}** of {found.population} executed trades, summed net "
+            f"{_money(found.net_paise)} -- {found.above_count} above "
+            f"{_money(found.upper_fence_paise)} "
+            f"({_money(found.above_net_paise)}, "
+            f"{pf.format_pct(found.share_of_gross_profit)} of gross profit) and "
+            f"{found.below_count} below {_money(found.lower_fence_paise)} "
+            f"({_money(found.below_net_paise)}, "
+            f"{pf.format_pct(found.share_of_gross_loss)} of gross loss)"
+        )
+    return (
+        f"| Outliers | {headline}. Q1 {_money(found.q1_paise)}, Q3 {_money(found.q3_paise)}, "
+        f"IQR {_money(found.iqr_paise)}. DEFINITION: {found.definition} |"
+    )
 
 
 def _ratio(value: Fraction | None) -> str:

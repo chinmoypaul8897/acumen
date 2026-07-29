@@ -43,6 +43,39 @@ Rs 100.00 = 10,000 paise per executed trade:
   beyond cash (trade 1 at Rs 200,000.00); trade 3 sits EXACTLY at Rs 100,000.00 and is NOT
   flagged (the rule is "exceeds"); nothing reaches the Rs 500,000.00 margin tier.
 
+**Q-16(a) TUKEY FENCES on this same six-trade ledger, hand-computed** (the architect's ruling
+of 30-Jul-2026: outliers are the trades whose NET PnL falls outside
+`[Q1 - 3/2 x IQR, Q3 + 3/2 x IQR]`; quartiles by linear interpolation between order statistics,
+R/numpy type 7, exact in Fractions):
+
+* the six net PnLs in paise, sorted: **-210,000 / -110,000 / -10,000 / +40,000 / +90,000 /
+  +290,000** (n = 6).
+* Q1: position (n-1) x 1/4 = 5/4 -> between x[1] and x[2], one quarter of the way:
+  -110,000 + (1/4)(-10,000 + 110,000) = **-85,000**.
+* Q3: position (n-1) x 3/4 = 15/4 -> between x[3] and x[4], three quarters of the way:
+  40,000 + (3/4)(90,000 - 40,000) = **+77,500**.
+* IQR = 77,500 - (-85,000) = **162,500**; 3/2 x IQR = **243,750**.
+* fences = [-85,000 - 243,750, 77,500 + 243,750] = **[-328,750, +321,250]**.
+* every one of the six sits INSIDE that band, so this ledger has **zero outliers** -- which is
+  the honest answer for it, and the reason the second fixture below exists.
+
+**The nine-trade OUTLIER fixture** (:func:`outlier_rows`), hand-computed the same way, built so
+that both tails fire:
+
+| net PnL (paise) | -900,000 | -80,000 | -60,000 | -40,000 | -20,000 | 0 | +20,000 | +40,000 | +1,000,000 |
+|---|---|---|---|---|---|---|---|---|---|
+
+* n = 9, so (n-1) x 1/4 = 2 and (n-1) x 3/4 = 6 land EXACTLY on order statistics -- no
+  interpolation, which makes the fixture checkable without trusting the estimator:
+  **Q1 = -60,000**, **Q3 = +20,000**, **IQR = 80,000**, 3/2 x IQR = **120,000**.
+* fences = **[-180,000, +140,000]**; outliers = **-900,000** and **+1,000,000** -- count **2**,
+  summed net **+100,000** (Rs 1,000.00).
+* net-basis gross profit = 20,000 + 40,000 + 1,000,000 = **1,060,000**; net-basis gross loss =
+  -900,000 - 80,000 - 60,000 - 40,000 - 20,000 = **-1,100,000** (the zero row is FLAT and is in
+  neither).
+* share of gross profit = 1,000,000 / 1,060,000 = **50/53**; share of gross loss =
+  -900,000 / -1,100,000 = **9/11**.
+
 ASCII-only, like every other source file in this repo (chunk-0 B7).
 """
 
@@ -315,12 +348,15 @@ def test_every_average_and_extreme_matches_the_hand_computation() -> None:
     assert m.largest_loss_pct_of_gross_loss == Fraction(2, 3)
 
 
-def test_the_outliers_metric_is_blocked_on_the_architect_not_invented() -> None:
-    """CONTEXT 7-E13 names "outliers" and fixes no definition. CLAUDE.md rule 1: do not decide."""
+def test_the_outliers_metric_carries_its_definition_beside_the_number() -> None:
+    """Q-16(a) RULED (architect, 30-Jul-2026): Tukey fences on net PnL. The ruling requires
+    the definition to be printed beside the figure, so the record carries it."""
     m = pf.metrics(ROWS, initial_capital_paise=CAPITAL)
-    assert m.outliers is None
+    assert m.outliers is not None
+    assert m.outliers.definition == pf.OUTLIER_DEFINITION == m.outliers_note
     assert "Q-16(a)" in m.outliers_note
-    assert "NOT computed" in m.outliers_note
+    assert "Tukey" in m.outliers_note
+    assert not hasattr(pf, "OUTLIERS_NOT_COMPUTED")
 
 
 def test_the_equity_metrics_match_the_hand_computation() -> None:
@@ -371,6 +407,109 @@ def test_metrics_on_an_empty_ledger_report_nothing_rather_than_dividing_by_zero(
     assert m.final_equity_paise == CAPITAL
     assert m.max_drawdown.amount_paise == 0
     assert m.cagr is None and m.sharpe is None
+
+
+# ==============================================================================================
+# Q-16(a) -- outliers by Tukey fences (architect's ruling, 30-Jul-2026)
+# ==============================================================================================
+
+
+def outlier_rows() -> tuple[LedgerRow, ...]:
+    """The nine-trade fixture hand-computed in this module's docstring: both tails fire."""
+    nets = (-900_000, -80_000, -60_000, -40_000, -20_000, 0, 20_000, 40_000, 1_000_000)
+    return tuple(
+        trade(D1 + timedelta(days=index), f"S{index}", LONG, 10, 100_000, net + COST)
+        for index, net in enumerate(nets)
+    )
+
+
+def test_the_quartiles_are_exact_fractions_by_linear_interpolation() -> None:
+    """Decision B195: R/numpy type 7. Both hand-computed cases -- the six-trade ledger, where
+    the position lands BETWEEN two order statistics, and the nine-trade one, where it lands
+    exactly ON them."""
+    six = [-210_000, -110_000, -10_000, 40_000, 90_000, 290_000]
+    assert pf.quantile(six, Fraction(1, 4)) == Fraction(-85_000)
+    assert pf.quantile(six, Fraction(3, 4)) == Fraction(77_500)
+
+    nine = [-900_000, -80_000, -60_000, -40_000, -20_000, 0, 20_000, 40_000, 1_000_000]
+    assert pf.quantile(nine, Fraction(1, 4)) == Fraction(-60_000)
+    assert pf.quantile(nine, Fraction(3, 4)) == Fraction(20_000)
+    # unsorted input is sorted first -- the estimator is over ORDER statistics
+    assert pf.quantile(list(reversed(nine)), Fraction(1, 4)) == Fraction(-60_000)
+    assert pf.quantile([], Fraction(1, 2)) is None
+    assert pf.quantile([7], Fraction(3, 4)) == Fraction(7)
+
+
+def test_the_six_trade_ledger_has_no_outliers_and_says_so_with_its_fences() -> None:
+    """Hand-computed in the module docstring: fences [-328,750, +321,250], nothing outside."""
+    found = pf.outliers(ROWS)
+    assert found.population == 6
+    assert found.q1_paise == Fraction(-85_000)
+    assert found.q3_paise == Fraction(77_500)
+    assert found.iqr_paise == Fraction(162_500)
+    assert found.lower_fence_paise == Fraction(-328_750)
+    assert found.upper_fence_paise == Fraction(321_250)
+    assert found.count == 0 and found.net_paise == 0
+    assert found.trades == ()
+    assert found.share_of_gross_profit == 0 and found.share_of_gross_loss == 0
+
+
+def test_the_nine_trade_fixture_reproduces_the_hand_computed_fences_and_both_tails() -> None:
+    rows = outlier_rows()
+    found = pf.outliers(rows)
+    assert found.population == 9
+    assert (found.q1_paise, found.q3_paise, found.iqr_paise) == (
+        Fraction(-60_000),
+        Fraction(20_000),
+        Fraction(80_000),
+    )
+    assert found.lower_fence_paise == Fraction(-180_000)
+    assert found.upper_fence_paise == Fraction(140_000)
+    assert found.count == 2
+    assert found.net_paise == 100_000
+    assert (found.above_count, found.above_net_paise) == (1, 1_000_000)
+    assert (found.below_count, found.below_net_paise) == (1, -900_000)
+    assert found.share_of_gross_profit == Fraction(50, 53)
+    assert found.share_of_gross_loss == Fraction(9, 11)
+    assert [(item.net_paise, item.side_of_fence) for item in found.trades] == [
+        (-900_000, "below"),
+        (1_000_000, "above"),
+    ]
+
+
+def test_a_trade_exactly_on_a_fence_is_not_an_outlier() -> None:
+    """The same "exceeds" convention every other threshold in this repo uses."""
+    rows = outlier_rows()
+    on_the_fence = trade(D5, "EDGE", LONG, 10, 100_000, 140_000 + COST)  # net == upper fence
+    found = pf.outliers(rows[:-1] + (on_the_fence,))
+    assert found.upper_fence_paise is not None
+    assert Fraction(140_000) <= found.upper_fence_paise
+    assert all(item.net_paise != 140_000 for item in found.trades)
+
+
+def test_the_outlier_population_is_executed_trades_only() -> None:
+    """A refused day has no net PnL to be an outlier of, and must not enter the quartiles."""
+    refused = LedgerRow(
+        symbol="ZZZ", day=D1, status=STATUS_REFUSED, reason="gate 1 (volume reconciliation)"
+    )
+    assert pf.outliers(outlier_rows() + (refused,)) == pf.outliers(outlier_rows())
+    assert pf.outliers((refused,)).population == 0
+    assert pf.outliers(()).count == 0
+    assert pf.outliers(()).definition == pf.OUTLIER_DEFINITION
+
+
+def test_the_fence_arithmetic_carries_no_float() -> None:
+    """CONTEXT 7-E11: the 1.5 multiplier is Fraction(3, 2), never 1.5."""
+    found = pf.outliers(outlier_rows())
+    for value in (
+        found.q1_paise,
+        found.q3_paise,
+        found.iqr_paise,
+        found.lower_fence_paise,
+        found.upper_fence_paise,
+    ):
+        assert isinstance(value, Fraction)
+    assert pf.TUKEY_MULTIPLIER == Fraction(3, 2)
 
 
 # ==============================================================================================

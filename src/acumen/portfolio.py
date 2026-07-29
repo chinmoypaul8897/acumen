@@ -26,8 +26,11 @@ it -- there is no default here to fall back on (REVIEW_9A finding C1).
 **Money is integer paise; every ratio is a Fraction; the two statistics that need a square
 root are Decimal.** No float is produced anywhere in this file (CONTEXT 7-E11).
 
-**Two E13 metrics are BLOCKED on the architect, not computed silently** -- see
-:data:`OUTLIERS_NOT_COMPUTED` and :data:`INTRA_TRADE_PROVISIONAL` and QUESTIONS.md Q-16.
+**The two E13 entries the build session STOPPED on are now ruled** (QUESTIONS.md Q-16,
+architect 30-Jul-2026). Outliers are Tukey fences on net PnL and the rule travels with the
+number -- see :data:`OUTLIER_DEFINITION` and :func:`outliers`. The intra-trade drawdown and
+run-up are still :data:`INTRA_TRADE_PROVISIONAL` in this commit and are replaced by the true
+15-minute path in the next one.
 
 Source files in this package are ASCII-only on purpose (see src/acumen/config.py).
 """
@@ -47,12 +50,22 @@ from .signals import LONG, SHORT
 #: equity series, risk-free rate 0, annualized x sqrt(252)".
 TRADING_DAYS_PER_YEAR: int = 252
 
-#: CONTEXT 7-E13 lists "outliers" among the report metrics and fixes NO definition for it --
-#: no threshold, no rule, no reference. Under CLAUDE.md rule 1 this module does not invent one.
-OUTLIERS_NOT_COMPUTED: str = (
-    "outliers NOT computed -- CONTEXT 7-E13 names the metric but fixes no definition "
-    "(no threshold, no rule); QUESTIONS.md Q-16(a) is pending with the architect"
+#: CONTEXT 7-E13 lists "outliers" and fixed no definition for it; the architect's Q-16(a)
+#: ruling (30-Jul-2026) does. This sentence IS the definition and the ruling requires it to be
+#: printed beside the number, so the figure never appears without the rule that produced it.
+OUTLIER_DEFINITION: str = (
+    "outliers = executed trades whose NET PnL falls outside the Tukey fences "
+    "[Q1 - 3/2 x IQR, Q3 + 3/2 x IQR], taken over the net PnL of ALL executed trades; "
+    "quartiles by linear interpolation between order statistics (R / numpy type 7), computed "
+    "exactly in Fractions; shares are of the net-basis gross profit and gross loss "
+    "(QUESTIONS.md Q-16(a), architect 30-Jul-2026)"
 )
+
+#: The quartile probabilities the fences are built from, and Tukey's own 1.5 multiplier -- as
+#: exact Fractions, because a float multiplier has no place in this codebase (CONTEXT 7-E11).
+QUARTILE_LOW: Fraction = Fraction(1, 4)
+QUARTILE_HIGH: Fraction = Fraction(3, 4)
+TUKEY_MULTIPLIER: Fraction = Fraction(3, 2)
 
 #: The intra-trade / intrabar drawdown and run-up E13 asks for need an intraday equity PATH,
 #: and a take-all portfolio of concurrent intraday trades does not have an observable one: the
@@ -97,6 +110,154 @@ def walked_days(rows: Sequence[LedgerRow]) -> tuple[date, ...]:
     daily Sharpe, and dropping it would silently annualize a different sample.
     """
     return tuple(sorted({row.day for row in rows}))
+
+
+# --- CONTEXT 7-E13 "outliers" (the Q-16(a) ruling) --------------------------------------------
+
+
+@dataclass(frozen=True)
+class OutlierTrade:
+    """One trade outside the fences: which one, how much, and which tail it fell out of."""
+
+    symbol: str
+    day: date
+    net_paise: int
+    side_of_fence: str  # "above" or "below"
+
+
+@dataclass(frozen=True)
+class Outliers:
+    """CONTEXT 7-E13's "outliers" under the architect's Q-16(a) ruling.
+
+    Everything a reader needs to check the number by hand is in here: the two quartiles, the
+    IQR, both fences, the population they were taken over, and the trades themselves. The
+    ``definition`` travels WITH the record because the ruling requires the rule to be printed
+    beside the figure.
+    """
+
+    definition: str
+    population: int
+    q1_paise: Fraction | None
+    q3_paise: Fraction | None
+    iqr_paise: Fraction | None
+    lower_fence_paise: Fraction | None
+    upper_fence_paise: Fraction | None
+    count: int
+    net_paise: int
+    above_count: int
+    above_net_paise: int
+    below_count: int
+    below_net_paise: int
+    share_of_gross_profit: Fraction | None
+    share_of_gross_loss: Fraction | None
+    trades: tuple[OutlierTrade, ...]
+
+
+def quantile(values: Sequence[int], p: Fraction) -> Fraction | None:
+    """The ``p``-quantile by linear interpolation between order statistics. PURE, exact.
+
+    This is R's and numpy's default estimator (type 7): with ``n`` sorted observations the
+    quantile sits at position ``(n - 1) * p``, interpolated linearly between the two
+    neighbouring order statistics. Fractions throughout, so the result is exact and a reviewer
+    reproduces it with ``numpy.percentile`` to the digit (decision B195).
+    """
+    ordered = sorted(values)
+    n = len(ordered)
+    if n == 0:
+        return None
+    position = Fraction(n - 1) * p
+    lower = position.numerator // position.denominator  # floor; position is never negative
+    if lower >= n - 1:
+        return Fraction(ordered[-1])
+    weight = position - lower
+    return Fraction(ordered[lower]) + weight * (ordered[lower + 1] - ordered[lower])
+
+
+def outliers(rows: Sequence[LedgerRow]) -> Outliers:
+    """CONTEXT 7-E13's outliers by Tukey fences on net PnL (Q-16(a) ruling). PURE.
+
+    The population is every EXECUTED trade's net PnL -- the same single NET basis the rest of
+    the report uses (the E13 presentation ruling). A trade is an outlier when its net PnL is
+    strictly outside ``[Q1 - 3/2 x IQR, Q3 + 3/2 x IQR]``; a trade sitting exactly ON a fence is
+    not an outlier, matching every other "exceeds" rule in this codebase.
+
+    The shares are of the net-basis gross profit (for the upper tail) and gross loss (for the
+    lower tail) -- each tail against the pot it belongs to, which is the only reading under
+    which a share is between 0 and 1.
+    """
+    trades = executed(rows)
+    nets = [row.net_pnl_paise for row in trades]
+    empty = Outliers(
+        definition=OUTLIER_DEFINITION,
+        population=0,
+        q1_paise=None,
+        q3_paise=None,
+        iqr_paise=None,
+        lower_fence_paise=None,
+        upper_fence_paise=None,
+        count=0,
+        net_paise=0,
+        above_count=0,
+        above_net_paise=0,
+        below_count=0,
+        below_net_paise=0,
+        share_of_gross_profit=None,
+        share_of_gross_loss=None,
+        trades=(),
+    )
+    if not nets:
+        return empty
+    q1 = quantile(nets, QUARTILE_LOW)
+    q3 = quantile(nets, QUARTILE_HIGH)
+    iqr = q3 - q1
+    lower_fence = q1 - TUKEY_MULTIPLIER * iqr
+    upper_fence = q3 + TUKEY_MULTIPLIER * iqr
+
+    found: list[OutlierTrade] = []
+    for row in trades:
+        if row.net_pnl_paise > upper_fence:
+            found.append(OutlierTrade(row.symbol, row.day, row.net_pnl_paise, "above"))
+        elif row.net_pnl_paise < lower_fence:
+            found.append(OutlierTrade(row.symbol, row.day, row.net_pnl_paise, "below"))
+
+    above = [item for item in found if item.side_of_fence == "above"]
+    below = [item for item in found if item.side_of_fence == "below"]
+    above_net = sum(item.net_paise for item in above)
+    below_net = sum(item.net_paise for item in below)
+    gross_profit, gross_loss = net_basis_totals(trades)
+    return Outliers(
+        definition=OUTLIER_DEFINITION,
+        population=len(nets),
+        q1_paise=q1,
+        q3_paise=q3,
+        iqr_paise=iqr,
+        lower_fence_paise=lower_fence,
+        upper_fence_paise=upper_fence,
+        count=len(found),
+        net_paise=above_net + below_net,
+        above_count=len(above),
+        above_net_paise=above_net,
+        below_count=len(below),
+        below_net_paise=below_net,
+        share_of_gross_profit=(
+            None if gross_profit == 0 else Fraction(above_net, gross_profit)
+        ),
+        share_of_gross_loss=(None if gross_loss == 0 else Fraction(below_net, gross_loss)),
+        trades=tuple(found),
+    )
+
+
+def net_basis_totals(trades: Sequence[LedgerRow]) -> tuple[int, int]:
+    """``(gross profit, gross loss)`` on the E13 presentation basis: NET sums, NET populations.
+
+    The architect's E13 ruling (30-Jul-2026) fixes ONE basis and ONE population for the whole
+    report: a trade is a winner or a loser by the sign of its NET PnL -- after the CONTEXT 3.5
+    round-trip cost -- and the profit and loss pots are the sums of those same net figures.
+    That is what makes ``winners x avg profit == gross profit`` an identity a reader can check.
+    """
+    profit = sum(row.net_pnl_paise for row in trades if row.net_pnl_paise > 0)
+    loss = sum(row.net_pnl_paise for row in trades if row.net_pnl_paise < 0)
+    return (profit, loss)
 
 
 # --- the daily series and the equity curve --------------------------------------------------
@@ -650,7 +811,7 @@ class Metrics:
     largest_loss_paise: int
     largest_loss_pct_of_notional: Fraction | None
     largest_loss_pct_of_gross_loss: Fraction | None
-    outliers: None
+    outliers: Outliers
     outliers_note: str
     # --- equity
     initial_capital_paise: int
@@ -746,8 +907,8 @@ def metrics(
             if largest_loss is None or gross_loss == 0
             else Fraction(largest_loss.gross_pnl_paise, gross_loss)
         ),
-        outliers=None,
-        outliers_note=OUTLIERS_NOT_COMPUTED,
+        outliers=outliers(rows),
+        outliers_note=OUTLIER_DEFINITION,
         initial_capital_paise=initial_capital_paise,
         final_equity_paise=final_equity,
         return_on_initial_capital=Fraction(

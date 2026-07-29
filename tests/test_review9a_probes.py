@@ -332,10 +332,15 @@ def test_no_capital_figure_is_hidden_in_the_flag_machinery() -> None:
 
 
 def test_the_two_blocked_e13_entries_never_come_back_as_numbers() -> None:
-    """Q-16 is OPEN: `outliers` must stay None with its reason attached, and the intra-trade
-    excursions must always carry the PROVISIONAL sentence beside them."""
+    """**FLIPPED by the Q-16 fix session (architect's ruling, 30-Jul-2026).** The probe used
+    to assert that neither blocked entry ever came back as a number while Q-16 was OPEN. Q-16
+    is RESOLVED, so it now asserts the RULING instead: `outliers` is a computed record that
+    carries its own definition, and the definition names the rule that produced it."""
     m = pf.metrics(basis_rows(), initial_capital_paise=CAPITAL)
-    assert m.outliers is None
-    assert "Q-16(a)" in m.outliers_note
+    assert m.outliers is not None
+    assert m.outliers.definition == m.outliers_note
+    assert "Q-16(a)" in m.outliers_note and "Tukey" in m.outliers_note
+    assert m.outliers.lower_fence_paise is not None
+    assert m.outliers.upper_fence_paise is not None
     assert "PROVISIONAL" in m.intra_trade_note
     assert "Q-16(b)" in m.intra_trade_note
