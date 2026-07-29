@@ -118,6 +118,7 @@ Parallelism allowed (ordering freedom, never simultaneous sessions): {3,4} and {
 **Goal:** the full machine over all stocks × all history. **Spec:** §2, §3.5-portfolio, §7-E3/E5.
 **Build:** orchestrator (per stock-day: bias → POC → signals → simulate; ALL exclusion rules honored and counted: E2 non-standard sessions, E3 gate-flagged days, E4 no-POC days, §3.2 demerger blocks, OPEN-3 logged days); portfolio ledger (take-all, equity curve in trade-close order); disclosures data (max concurrency, max notional, **full distribution of daily concurrent-trade counts** per §3.5, excluded-day counts by reason, survivorship note); outputs `trades.parquet` + `summary.json`.
 **Done when:** full run completes without unhandled errors; internal consistency asserts (Σ trade PnL == equity delta; trade count == ledger count); evidence pack: 3 random trades replayed step-by-step with candle values for manual check.
+**SPLIT (architect, 29-Jul-2026; ruling recorded verbatim in QUESTIONS.md):** "Chunk 9 splits: 9A = runner, ledger, portfolio layer, pilot proof (no trader dependency); 9B = the full-history run + report, gated on the trader's Round-4 answers (Q43 capital figure for the Q40-d flags; Q44 confirmation)."
 
 ### Chunk 10 — Metrics layer
 **Goal:** every number the trader's report shows. **Spec:** §2, §7-E13 (metric conventions — full authoritative list lives THERE, not in a PDF the session cannot read).
