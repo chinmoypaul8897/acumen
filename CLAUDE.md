@@ -38,6 +38,9 @@ Backtester + live screener for one frozen trading strategy. Real money depends o
 - **No AI attribution anywhere** — no "Generated with", no Co-Authored-By lines, nothing. Clean human-standard history.
 - Never commit: `.env`, `data/`, `cache/`, generated artifacts. Never force-push. Single branch `main`.
 - Remote: origin = the private GitHub mirror. EVERY session's final end-of-session duty is: `git push origin main --tags`, and the session's final report block must state the pushed SHA. The remote is a backup mirror ONLY: never commit, edit, or merge via the GitHub web UI; never force-push; if local and remote ever diverge, STOP and ask the architect. If a session dies before pushing, the operator pushes manually before starting the next session. The repo stays private, zero collaborators.
+- Commit messages may cite files (CLAUDE.md, CONTEXT.md) but must never name AI tools or products (REVIEW_7 C4 ruling).
+- Every commit touching src/ or tests/ before its chunk's review carries the (unreviewed) suffix — no exceptions (REVIEW_7 C1).
+- Any session making claims from real store data commits the generating script and its output under docs/evidence/ (REVIEW_7 C3).
 
 ## Code standards
 
