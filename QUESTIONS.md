@@ -2174,7 +2174,7 @@ say so with the Q43 ruling and 9B adjusts the two keys before computing any flag
 
 ---
 
-## Q-16 · chunk 9A · class A · **OPEN -- STOP** · BLOCKS two CONTEXT 7-E13 metrics (nothing else)
+## Q-16 · chunk 9A · class A · **RESOLVED — executed by the chunk-9A fix session (2026-07-30)** · was BLOCKING two CONTEXT 7-E13 metrics (nothing else)
 
 **Question.** CONTEXT 7-E13 is "one authoritative list so the metrics chunk needs no external
 PDF". Two of its entries name a metric without fixing a convention, and neither convention can
@@ -2225,3 +2225,63 @@ does hold exactly) and drop the portfolio-level intrabar drawdown.
 **What is blocked:** exactly these two metric entries, in chunk 9A's portfolio layer and in
 chunk 10's metrics layer. Every other E13 entry is computed and hand-checked against a fixture.
 The chunk-9B report must not print either figure as final until this is ruled.
+
+**ARCHITECT'S RULINGS (30-Jul-2026), relayed to the chunk-9A fix session, recorded VERBATIM:**
+
+> "ARCHITECT'S RULINGS (30-Jul-2026), closing Q-16 and REVIEW_9A Q1/Q2/Q4/Q6/Q7:
+>  Q-16(a): outliers = trades whose net PnL falls outside [Q1 − 1.5×IQR, Q3 +
+>  1.5×IQR] over all executed trades' net PnL (Tukey fences); report count, summed
+>  net PnL, share of gross profit/loss, definition printed beside the number.
+>  Q-16(b): the worst-case coincidence construction is RETIRED — it invents
+>  co-timing, an assumption. Intra-trade drawdown/run-up compute on the TRUE
+>  portfolio equity path at 15-minute resolution: every open position marked to its
+>  15-min candle closes (exit candles at their exit levels), summed across
+>  positions; drawdown/run-up on that path; one disclosed limit: intra-candle
+>  excursions are not represented (per-trade MFE/MAE carry those). Both close-close
+>  daily and 15-min-path figures reported. Nothing PROVISIONAL survives.
+>  E13 PRESENTATION BASIS: single basis, NET of the ₹100/trade cost, throughout —
+>  TradingView semantics, which is what E13 mimics. Winners/losers by NET sign, one
+>  population everywhere; gross profit / gross loss / profit factor computed over
+>  the NET-basis populations from net figures; every average, ratio, largest-win
+>  line and percentage on NET (percent-of-notional = net/notional; share-of-profit
+>  = net/net-basis gross profit). Before-costs totals may appear ONCE, labelled
+>  'before ₹100/trade costs', nowhere else. The pack carries a definitions block
+>  stating: basis, population, drawdown/run-up denominators (running peak/trough
+>  seeded at opening capital), CAGR span convention (endpoint difference / 365).
+>  Q-16 RESOLVED. Architect."
+
+**RESOLVED — executed by the chunk-9A fix session (2026-07-30).** Every clause is code with a
+test behind it; the hand-computed fixtures were written BEFORE the code, as this repo requires.
+
+- **(a) Tukey fences.** `acumen.portfolio.outliers(rows)` returns an `Outliers` record over the
+  net PnL of every EXECUTED trade: the two quartiles, the IQR, both fences, the count, the
+  summed net PnL of the outlying trades, and their share of the (net-basis) gross profit and
+  gross loss. `Metrics.outliers` is that record and `Metrics.outliers_note` now carries the
+  DEFINITION — the fence arithmetic, the population, and the quartile estimator — so the number
+  never appears without the rule that produced it. The estimator itself is the one thing the
+  ruling does not fix and is recorded as a Class-B decision (B195): **linear interpolation
+  between order statistics, R/numpy type 7**, computed in exact `Fraction` arithmetic, chosen
+  because it is what a reviewer reproduces with `numpy.percentile(x, [25, 75])`. `OUTLIERS_NOT_COMPUTED`
+  is gone from the module.
+- **(b) The TRUE 15-minute path.** The coinciding-worst-case construction, the
+  `INTRA_TRADE_PROVISIONAL` constant, `EquityPoint.low_equity_paise` / `high_equity_paise` and
+  the `intrabar=` switch are all DELETED — nothing labelled PROVISIONAL survives anywhere in
+  `src/`, `tests/` or the pack. In their place: `acumen.backtest.assemble_trade_paths` (I/O
+  layer — it is the layer that holds the candles) marks every executed trade at each 15-minute
+  candle close it was held, with the exit candle carried at its EXIT LEVEL rather than its
+  close; `acumen.portfolio.intraday_equity_path` (PURE) sums those marks across every open
+  position onto the running equity, and `path_max_drawdown` / `path_max_run_up` measure the
+  excursion on that path with the running extreme seeded at the opening capital. The round-trip
+  cost is charged at the entry mark (B194), which makes the path continuous into the realized
+  net at the exit mark and makes each day's last path point equal that day's closing equity —
+  asserted as an invariant. The disclosed limit is printed beside the figure in the same words
+  the ruling uses: intra-candle excursions are not represented; per-trade MFE/MAE carry those.
+- **E13 presentation basis.** One population everywhere, keyed on the sign of NET. `gross_profit`
+  and `gross_loss` are now sums of NET PnL over the net-winners and net-losers, so
+  `winners x avg profit == gross profit` is an identity a reader can check — and it is asserted
+  as one. Profit factor, both largest-win/loss lines and every percentage follow the same basis.
+  The before-costs totals appear exactly ONCE in the pack, on one line labelled "before
+  Rs 100/trade costs", and nowhere else. The pack gained the **definitions block** the ruling
+  names (section 7a), stating the basis, the population, the drawdown/run-up denominators, the
+  CAGR span convention and the outlier rule — which closes REVIEW_9A Q1, Q2, Q4, Q6 and Q7 as
+  well.
