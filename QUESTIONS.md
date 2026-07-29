@@ -2135,3 +2135,93 @@ parameter and a designation, nothing else:
 - **Nothing was re-measured.** Every expected value in both pairs is the one the build session
   hand-computed; no fixture byte changed (`tests/fixtures/`, `poc/data/` untouched). F3 and F4
   are unaffected, and **F4 remains the single gap witness**, exactly as the ruling states.
+
+---
+
+## PLAN AMENDMENT (class C, architect-authored) · chunk 9 SPLITS into 9A + 9B · recorded 2026-07-29 by the chunk-9A build session
+
+The architect amended plan.md's chunk-9 card in this session's card. Recorded here VERBATIM,
+as every ruling in this file is; the build session authored none of it:
+
+> "Chunk 9 splits: 9A = runner, ledger, portfolio layer, pilot proof (no trader dependency);
+> 9B = the full-history run + report, gated on the trader's Round-4 answers (Q43 capital figure
+> for the Q40-d flags; Q44 confirmation). Architect, 29-Jul-2026."
+
+**What this session executed under it.** One line appended to plan.md's chunk-9 card recording
+the split and citing this ruling (plan.md is architect-owned -- the line is the architect's
+text, added on the architect's instruction, and nothing else in the file was touched);
+STATUS.md gains a `chunk 9A` line; the chunk-9A scope is the runner, the run ledger + manifest,
+the portfolio layer and the pilot evidence pack, and NOTHING of 9B -- no full-history run, no
+report, and no capital-infeasibility flag VALUES.
+
+**Two Round-4 items are therefore open with the trader, and the code is built to wait for
+them rather than to guess:**
+
+- **Q43** -- which capital figure the Q40-d capital-infeasibility flags must use. `config.yaml`
+  carries `capital_reference` and `margin_basis` as OPTIONAL keys, both NULL. While either is
+  null `acumen.portfolio.capital_flags` computes NOTHING and every output prints, verbatim:
+  "capital-infeasibility flags NOT computed -- the trader's Q43 answer is pending". There is no
+  default anywhere in the module -- not even CONTEXT 3.5's own 1,00,000 capital line, because
+  the question the architect put to him is precisely which figure the FLAGS should use.
+- **Q44** -- the confirmation 9B is gated on.
+
+**One shape question rides along with Q43, non-blocking** (no flag value depends on it until
+the answer arrives): this session modelled `capital_reference` as a rupee amount and
+`margin_basis` as a MULTIPLE of it (CONTEXT 3.5's own example is 1,00,000 cash vs a 5,00,000
+typical-MIS tier, i.e. `margin_basis: 5`), recorded as decision B182. If the trader's answer
+arrives in a different shape -- absolute tier amounts, or several tiers -- the architect should
+say so with the Q43 ruling and 9B adjusts the two keys before computing any flag.
+
+---
+
+## Q-16 · chunk 9A · class A · **OPEN -- STOP** · BLOCKS two CONTEXT 7-E13 metrics (nothing else)
+
+**Question.** CONTEXT 7-E13 is "one authoritative list so the metrics chunk needs no external
+PDF". Two of its entries name a metric without fixing a convention, and neither convention can
+be derived from anything else in CONTEXT.md:
+
+**(a) "outliers".** E13 lists `largest win/loss (INR and % and as % of gross), outliers`. No
+threshold, no rule, no reference. TradingView's own report computes outliers by an
+interquartile-range rule, but that rule is nowhere in CONTEXT.md and this repo may not import a
+number from a product it cannot read. What defines an outlier trade -- and is the report to
+show a COUNT, a list, or a set of metrics recomputed with outliers removed (TV shows the last)?
+
+**(b) the intra-trade / intrabar drawdown and run-up.** E13 asks for "max drawdown (equity
+close-to-close AND intra-trade/intrabar) with durations; run-ups (same forms)". The
+close-to-close form is unambiguous and is computed. The intra-trade form needs an intraday
+equity PATH, and a take-all portfolio (Round-3 Q40-d: every signal, all stocks, concurrently)
+does not have an observable one: the ledger holds each trade's MFE and MAE but not WHEN inside
+the day each occurred, and up to five trades ran concurrently even in the five-symbol pilot. A
+day's true worst equity lies somewhere between "the worst excursions all coincided" and "they
+never overlapped", and the ledger cannot say where.
+
+**Why it matters.** Both are REPORT numbers the trader will read. (a) decides whether a
+headline metric appears at all and, if TV's convention is adopted, changes every OTHER metric
+in the "outliers removed" column. (b) is a drawdown figure -- on the pilot the provisional
+construction gives Rs 18,844.65 against the close-to-close Rs 12,761.75, a 48% difference on
+the number a trader judges risk by.
+
+**What this session did meanwhile (STOP, no silent decision).**
+
+- **(a) is NOT COMPUTED.** `acumen.portfolio.Metrics.outliers` is `None` and carries the reason
+  in `outliers_note`; the evidence pack prints the sentence and no number. A test asserts the
+  pack never prints an outlier count.
+- **(b) IS computed but LABELLED PROVISIONAL everywhere it appears**, under one explicitly
+  stated construction: the day's low equity is the previous close plus the sum of that day's
+  MAEs minus that day's costs (and the high is the mirror with MFEs) -- i.e. every same-day
+  excursion assumed to coincide, the worst case for a drawdown and the best case for a run-up.
+  The constant `acumen.portfolio.INTRA_TRADE_PROVISIONAL` carries that sentence and is printed
+  beside every such figure. Nothing downstream consumes it yet.
+
+**Options for the architect (this session decides neither):**
+(a1) adopt TV's IQR rule, stated in CONTEXT.md with its own arithmetic; (a2) define outliers
+some other way (e.g. |PnL| beyond N x the average); (a3) drop the metric from E13 as
+undefinable without the trader's own reading of it.
+(b1) keep the provisional worst-case construction and state it in E13 as the convention;
+(b2) define the intraday path some other way (e.g. excursions spread pro-rata across the day);
+(b3) report the intra-trade form PER TRADE only (max single-trade MAE / MFE, which the ledger
+does hold exactly) and drop the portfolio-level intrabar drawdown.
+
+**What is blocked:** exactly these two metric entries, in chunk 9A's portfolio layer and in
+chunk 10's metrics layer. Every other E13 entry is computed and hand-checked against a fixture.
+The chunk-9B report must not print either figure as final until this is ruled.
