@@ -383,6 +383,15 @@ def test_a_row_that_oversizes_the_budget_fails_its_invariant() -> None:
         "CONTEXT 7-E2 non-standard session",
         "the adjustment changes the BIAS: **YES**",
         "| **Byte-identical** | **YES** |",
+        # the NET-basis figures, so the pack and the code cannot drift apart silently
+        "| Gross profit (net basis: the winners' net sum) | Rs 96,489.60 |",
+        "| Gross loss (net basis: the losers' net sum) | -Rs 98,424.55 |",
+        "| Profit factor | 0.9803 |",
+        "Rs 101,099.20 / -Rs 88,434.15 -- the only before-costs figures in this pack",
+        # and the two Q-16 figures
+        "NONE of 146 executed trades falls outside the fences",
+        "| Max drawdown (intra-trade, 15-min path) | Rs 14,231.00 (12.98%)",
+        "| Max run-up (intra-trade, 15-min path) | Rs 17,515.10 (19.00%)",
     ],
 )
 def test_the_committed_pack_carries_its_claims(claim: str) -> None:
@@ -396,11 +405,45 @@ def test_the_committed_pack_reports_no_failed_invariant() -> None:
     assert section.count("**PASS**") >= 15
 
 
-def test_the_committed_pack_never_prints_an_outlier_count() -> None:
-    """The metric is BLOCKED on the architect; a pack that printed a number would be deciding."""
+def test_the_committed_pack_prints_the_outlier_rule_beside_its_number() -> None:
+    """**FLIPPED by the Q-16 fix session.** The probe used to assert the pack never printed an
+    outlier count, because the metric was BLOCKED on the architect and a number would have been
+    this repo deciding. Q-16(a) is RULED, so the pack prints the figure -- and the ruling
+    requires the definition beside it, which is what is asserted now."""
     text = PACK.read_text(encoding="utf-8")
-    assert "Q-16(a) is pending" in text
-    assert re.search(r"\| Outliers \| \d", text) is None
+    assert "Q-16(a) is pending" not in text
+    assert "| Outliers |" in text
+    assert "Tukey fences [Q1 - 3/2 x IQR, Q3 + 3/2 x IQR]" in text
+    assert "R / numpy type 7" in text
+    # the fences themselves are printed, so a reader can re-derive the count from the trades
+    assert "IQR Rs" in text
+
+
+def test_the_committed_pack_carries_nothing_provisional() -> None:
+    """Q-16(b): the worst-case coincidence construction is RETIRED, and the pack that used to
+    print it twice must not carry the word anywhere."""
+    text = PACK.read_text(encoding="utf-8")
+    carrying = [line for line in text.splitlines() if "PROVISIONAL" in line.upper()]
+    assert len(carrying) == 1, carrying
+    assert "Nothing in this pack is labelled PROVISIONAL" in carrying[0]
+    assert "Max drawdown (intra-trade, 15-min path)" in text
+    assert "Max run-up (intra-trade, 15-min path)" in text
+    assert "intra-candle excursions are not represented" in text
+
+
+def test_the_committed_pack_opens_its_metrics_with_the_definitions_block() -> None:
+    """The E13 presentation ruling requires a definitions block stating the basis, the
+    population, the drawdown/run-up denominators and the CAGR span convention."""
+    text = PACK.read_text(encoding="utf-8")
+    block = text.split("### 7a. CONTEXT 7-E13 metrics (All)")[1].split("| Metric | Value |")[0]
+    assert "**DEFINITIONS -- read these before the table**" in block
+    assert "single basis, NET of the CONTEXT 3.5 flat Rs 100/trade round-trip cost" in block
+    assert "a trade is a winner or a loser by the sign of its NET PnL" in block
+    assert "RUNNING PEAK" in block and "SEEDED AT THE OPENING CAPITAL" in block
+    assert "ENDPOINT DIFFERENCE" in block and "365-day year" in block
+    # and the before-costs totals appear on exactly ONE line of the metric table
+    table = text.split("### 7a.")[1].split("### 7b.")[0]
+    assert table.count("BEFORE Rs 100/trade costs") == 1
 
 
 def test_the_committed_pack_says_what_chunk_9b_still_owes() -> None:
