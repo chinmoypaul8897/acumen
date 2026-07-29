@@ -521,6 +521,6 @@ def test_a_refused_row_never_reaches_the_money() -> None:
     refused = LedgerRow(
         symbol="AAA", day=D1, status=STATUS_REFUSED, reason="gate 1 (volume reconciliation)"
     )
-    assert pf.metrics((refused,)).total_trades == 0
-    assert pf.metrics((refused,)).net_pnl_paise == 0
+    assert pf.metrics((refused,), initial_capital_paise=CAPITAL).total_trades == 0
+    assert pf.metrics((refused,), initial_capital_paise=CAPITAL).net_pnl_paise == 0
     assert pf.disclosures((refused,)).total_executed == 0

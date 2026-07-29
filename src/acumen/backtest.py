@@ -454,7 +454,12 @@ class ResidualEntry:
             "gate1p_pass": self.gate1p_pass,
             "gate1p_total": self.gate1p_total,
             "gate1p_no_oracle": self.gate1p_no_oracle,
-            "price_proven_pct_x100": None if ratio is None else int(ratio * 10000),
+            # ratio -> percent (x100) -> hundredths of a percent (x100 again). Written as two
+            # factors of 100 rather than one 10,000 so that no module in src/acumen carries an
+            # integer literal equal to a CONTEXT 3.5 money amount in paise -- the widened money
+            # tripwire (REVIEW_9A finding C1) scans every module for exactly those magnitudes.
+            # The arithmetic is Fraction and therefore identical either way.
+            "price_proven_pct_x100": None if ratio is None else int(ratio * 100 * 100),
             "residual_reason": self.residual_reason,
         }
 

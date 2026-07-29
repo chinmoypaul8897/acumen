@@ -15,13 +15,16 @@ call raises :class:`ConfigError` instead of letting a guessed number reach real 
 (OPEN-1 was answered in Round 3 -- 1000 rupees -- and the committed config carries it; the
 guard stays because a config that LOSES the amount must fail loudly, not size on a guess.)
 
-``cost_per_trade`` is the same discipline for the other money number CONTEXT 3.5 fixes: the
-flat 100-rupee round-trip cost (R1-Q23). It lives here, next to the risk amount, rather than
-as a literal in the simulator -- a money constant typed into an engine module is invisible to
-the operator and to the architect's spec sync. Both amounts are declared in RUPEES (the units
+``cost_per_trade`` and ``initial_capital`` are the same discipline for the other two money
+numbers CONTEXT 3.5 fixes: the flat 100-rupee round-trip cost (R1-Q23) and the 1,00,000-rupee
+starting capital (R1-Q21a). They live here, next to the risk amount, rather than as literals in
+the simulator or the portfolio layer -- a money constant typed into an engine module is
+invisible to the operator and to the architect's spec sync, which is exactly what REVIEW_9A
+finding C1 caught. All three amounts are declared in RUPEES (the units
 CONTEXT 3.5 states them in) and are converted ONCE, exactly, to the integer paise the engines
-work in (CONTEXT 7-E11) by :meth:`Config.require_risk_per_trade_paise` and
-:meth:`Config.cost_per_trade_paise`. The conversion goes through ``Decimal`` so a fractional
+work in (CONTEXT 7-E11) by :meth:`Config.require_risk_per_trade_paise`,
+:meth:`Config.cost_per_trade_paise` and :meth:`Config.initial_capital_paise`. The conversion
+goes through ``Decimal`` so a fractional
 rupee amount can never arrive as a float-rounded number of paise: an amount that is not a
 whole number of paise is refused.
 
@@ -56,7 +59,7 @@ DEFAULT_ENV_PATH: Path = REPO_ROOT / ".env"
 #: Every key is also REQUIRED to be present -- a missing money key must not resolve to a
 #: default either.
 _ALLOWED_KEYS: frozenset[str] = frozenset(
-    {"risk_per_trade", "cost_per_trade", "row_size", "paths"}
+    {"risk_per_trade", "cost_per_trade", "initial_capital", "row_size", "paths"}
 )
 
 #: Keys that MAY be absent. Both belong to the Round-3 Q40-d capital-infeasibility flags and
@@ -81,6 +84,7 @@ class Config:
 
     risk_per_trade: float | None
     cost_per_trade: float
+    initial_capital: float
     row_size: int
     paths: Mapping[str, Path]
     source: Path
@@ -132,6 +136,19 @@ class Config:
             ConfigError: the amount is not a whole number of paise.
         """
         return _rupees_to_paise(self.cost_per_trade, "cost_per_trade", self.source)
+
+    def initial_capital_paise(self) -> int:
+        """CONTEXT 3.5's starting capital as exact integer paise (R1-Q21a: 1,00,000 rupees).
+
+        The base of the equity curve and the denominator of return-on-initial-capital, CAGR and
+        the E13 benchmark. There is NO default anywhere in ``src/`` -- ``acumen.portfolio``
+        takes this value as a required argument, so a run whose config lost the amount cannot
+        quietly fall back on a number typed into an engine module (REVIEW_9A finding C1).
+
+        Raises:
+            ConfigError: the amount is not a whole number of paise.
+        """
+        return _rupees_to_paise(self.initial_capital, "initial_capital", self.source)
 
     def capital_reference_paise(self) -> int | None:
         """The Q40-d capital reference as exact integer paise, or ``None`` while Q43 is open.
@@ -234,6 +251,7 @@ def load_config(config_path: Path | None = None, *, include_env: bool = True) ->
     return Config(
         risk_per_trade=_validate_risk_per_trade(raw["risk_per_trade"], path),
         cost_per_trade=_validate_cost_per_trade(raw["cost_per_trade"], path),
+        initial_capital=_validate_initial_capital(raw["initial_capital"], path),
         row_size=_validate_row_size(raw["row_size"], path),
         capital_reference=_validate_capital_reference(raw.get("capital_reference"), path),
         margin_basis=_validate_margin_basis(raw.get("margin_basis"), path),
@@ -274,6 +292,28 @@ def _validate_cost_per_trade(value: Any, path: Path) -> float:
         )
     if value <= 0:
         raise ConfigError(f"cost_per_trade in {path} must be > 0, got {value}.")
+    return value
+
+
+def _validate_initial_capital(value: Any, path: Path) -> float:
+    """CONTEXT 3.5's starting capital -- a positive INR amount, never null.
+
+    Like ``cost_per_trade`` and unlike ``capital_reference``, there is no open item behind this
+    number: CONTEXT 3.5 states it outright (R1-Q21a), so a null here is a config that LOST a
+    spec value rather than a pending trader answer.
+    """
+    if value is None:
+        raise ConfigError(
+            f"initial_capital is null in {path}: CONTEXT 3.5 fixes the starting capital "
+            "(R1-Q21a) and allows no default -- fill the spec amount in config.yaml."
+        )
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ConfigError(
+            f"initial_capital in {path} must be a positive INR number (CONTEXT 3.5), "
+            f"got {type(value).__name__}."
+        )
+    if value <= 0:
+        raise ConfigError(f"initial_capital in {path} must be > 0, got {value}.")
     return value
 
 

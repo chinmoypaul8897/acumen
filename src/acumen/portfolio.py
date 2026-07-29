@@ -18,6 +18,11 @@ from the ledger and only when the config supplies BOTH ``capital_reference`` and
 :func:`capital_flags` computes nothing and returns the pending note verbatim, which every
 output then prints. There is no default figure anywhere in this module.
 
+**The starting capital is an ARGUMENT, never a constant.** CONTEXT 3.5's "Capital: INR
+1,00,000 (R1-Q21a)" reaches this module from ``config.yaml``'s ``initial_capital`` key through
+:meth:`acumen.config.Config.initial_capital_paise`, and every function that needs it REQUIRES
+it -- there is no default here to fall back on (REVIEW_9A finding C1).
+
 **Money is integer paise; every ratio is a Fraction; the two statistics that need a square
 root are Decimal.** No float is produced anywhere in this file (CONTEXT 7-E11).
 
@@ -37,11 +42,6 @@ from typing import Iterable, Mapping, Sequence
 
 from .backtest import LedgerRow
 from .signals import LONG, SHORT
-
-#: CONTEXT 3.5: "Capital: INR 1,00,000 (R1-Q21a)" -- the base of the equity curve and the
-#: denominator of "return on initial capital". It is NOT the Q40-d flag figure (that one is
-#: the trader's pending Q43 answer, and it is config-supplied or absent).
-DEFAULT_INITIAL_CAPITAL_PAISE: int = 10_000_000
 
 #: E13's annualization convention, stated by the spec itself: "Sharpe & Sortino on the DAILY
 #: equity series, risk-free rate 0, annualized x sqrt(252)".
@@ -160,7 +160,7 @@ class EquityPoint:
 
 
 def equity_curve(
-    series: Sequence[DailyPnL], initial_capital_paise: int = DEFAULT_INITIAL_CAPITAL_PAISE
+    series: Sequence[DailyPnL], initial_capital_paise: int
 ) -> tuple[EquityPoint, ...]:
     """``capital + cumulative net PnL`` per day (CONTEXT 3.5). A plain cumulative SUM. PURE.
 
@@ -559,7 +559,7 @@ def buy_and_hold(
     *,
     first_day: date,
     last_day: date,
-    initial_capital_paise: int = DEFAULT_INITIAL_CAPITAL_PAISE,
+    initial_capital_paise: int,
 ) -> Benchmark:
     """CONTEXT 7-E13's buy&hold benchmark, exactly as E13 defines it. PURE.
 
@@ -679,7 +679,7 @@ def metrics(
     rows: Sequence[LedgerRow],
     *,
     label: str = "All",
-    initial_capital_paise: int = DEFAULT_INITIAL_CAPITAL_PAISE,
+    initial_capital_paise: int,
     days: Sequence[date] | None = None,
 ) -> Metrics:
     """The whole E13 list over ``rows``. PURE.
@@ -772,7 +772,7 @@ def metrics(
 
 
 def side_split(
-    rows: Sequence[LedgerRow], *, initial_capital_paise: int = DEFAULT_INITIAL_CAPITAL_PAISE
+    rows: Sequence[LedgerRow], *, initial_capital_paise: int
 ) -> dict[str, Metrics]:
     """E13's All / Long / Short column split. PURE.
 
@@ -800,7 +800,7 @@ def side_split(
 
 
 def per_symbol(
-    rows: Sequence[LedgerRow], *, initial_capital_paise: int = DEFAULT_INITIAL_CAPITAL_PAISE
+    rows: Sequence[LedgerRow], *, initial_capital_paise: int
 ) -> dict[str, Metrics]:
     """E13's per-symbol breakdown table. PURE."""
     symbols = sorted({row.symbol for row in rows})

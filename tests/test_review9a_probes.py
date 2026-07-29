@@ -94,7 +94,7 @@ def test_the_gross_profit_population_is_not_the_winner_population() -> None:
     profit is smaller than the Rs 100 round trip is inside the first set and outside the
     second -- so the two numbers, printed side by side, describe different trades."""
     rows = basis_rows()
-    m = pf.metrics(rows)
+    m = pf.metrics(rows, initial_capital_paise=CAPITAL)
 
     gross_positive = [r for r in rows if r.gross_pnl_paise > 0]
     net_positive = [r for r in rows if r.net_pnl_paise > 0]
@@ -117,7 +117,7 @@ def test_winners_times_avg_profit_does_not_equal_gross_profit() -> None:
     gross profit is GROSS) and the gross of every gross-positive row that the winner set
     excludes (MEMBERSHIP)."""
     rows = basis_rows()
-    m = pf.metrics(rows)
+    m = pf.metrics(rows, initial_capital_paise=CAPITAL)
 
     assert m.avg_profit_paise == Fraction(190_000)  # Rs 1,900.00, a NET average
     naive = m.winners * m.avg_profit_paise
@@ -138,7 +138,7 @@ def test_the_largest_win_line_mixes_a_net_number_with_a_gross_share() -> None:
     percent-of-gross-profit beside them divides that trade's GROSS by gross profit. Three
     numbers, two bases, printed inside one parenthesis in the pack."""
     rows = basis_rows()
-    m = pf.metrics(rows)
+    m = pf.metrics(rows, initial_capital_paise=CAPITAL)
     best = max(rows, key=lambda r: r.net_pnl_paise)
 
     assert m.largest_win_paise == best.net_pnl_paise == 290_000
@@ -234,7 +234,7 @@ def test_metrics_divide_by_the_initial_capital_without_guarding_it() -> None:
 
 def test_every_other_ratio_returns_none_instead_of_dividing_by_zero() -> None:
     """The contrast that makes the probe above a finding rather than a style note."""
-    empty = pf.metrics(())
+    empty = pf.metrics((), initial_capital_paise=CAPITAL)
     assert empty.profit_factor is None
     assert empty.avg_pnl_paise is None
     assert empty.percent_profitable is None
@@ -334,7 +334,7 @@ def test_no_capital_figure_is_hidden_in_the_flag_machinery() -> None:
 def test_the_two_blocked_e13_entries_never_come_back_as_numbers() -> None:
     """Q-16 is OPEN: `outliers` must stay None with its reason attached, and the intra-trade
     excursions must always carry the PROVISIONAL sentence beside them."""
-    m = pf.metrics(basis_rows())
+    m = pf.metrics(basis_rows(), initial_capital_paise=CAPITAL)
     assert m.outliers is None
     assert "Q-16(a)" in m.outliers_note
     assert "PROVISIONAL" in m.intra_trade_note

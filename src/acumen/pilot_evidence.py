@@ -817,13 +817,14 @@ def render_markdown(
     resume: ResumeProof,
     benchmark: pf.Benchmark,
     master_name: str,
+    initial_capital_paise: int,
     command: str,
 ) -> str:
     rows = pilot.result.rows
     manifest = pilot.result.manifest
-    metrics = pf.metrics(rows, initial_capital_paise=pf.DEFAULT_INITIAL_CAPITAL_PAISE)
-    split = pf.side_split(rows)
-    symbols = pf.per_symbol(rows)
+    metrics = pf.metrics(rows, initial_capital_paise=initial_capital_paise)
+    split = pf.side_split(rows, initial_capital_paise=initial_capital_paise)
+    symbols = pf.per_symbol(rows, initial_capital_paise=initial_capital_paise)
     disclosures = pf.disclosures(rows)
     flags = pf.capital_flags(
         rows,
@@ -910,7 +911,7 @@ def render_markdown(
     add(f"| Row Size N | {pilot_runner.spec.row_size} | `config.yaml` (CONTEXT 3.3) |")
     add(
         f"| Capital (equity curve base) | "
-        f"{_money(pf.DEFAULT_INITIAL_CAPITAL_PAISE)} | CONTEXT 3.5 (R1-Q21a) |"
+        f"{_money(initial_capital_paise)} | `config.yaml` (CONTEXT 3.5, R1-Q21a) |"
     )
     add("| capital_reference / margin_basis | null / null | trader Q43 PENDING |")
     add(f"| Instrument master | `{master_name}` | newest cached dump (CONTEXT 4.3 ticks) |")
@@ -1208,7 +1209,9 @@ def render_markdown(
 
     add("## 8. Invariants asserted over this pack")
     add("")
-    for line in invariant_report(pilot, resume, benchmark):
+    for line in invariant_report(
+        pilot, resume, benchmark, initial_capital_paise=initial_capital_paise
+    ):
         add(f"* {line}")
     add("")
     add("## 9. What chunk 9B still owes")
@@ -1231,7 +1234,11 @@ def render_markdown(
 
 
 def invariant_report(
-    pilot: PilotRun, resume: ResumeProof, benchmark: pf.Benchmark
+    pilot: PilotRun,
+    resume: ResumeProof,
+    benchmark: pf.Benchmark,
+    *,
+    initial_capital_paise: int,
 ) -> list[str]:
     """Every invariant this pack claims, each recomputed here and printed with its verdict."""
     rows = pilot.result.rows
@@ -1261,15 +1268,16 @@ def invariant_report(
         ),
     )
     net = sum(row.net_pnl_paise for row in executed)
-    points = pf.equity_curve(pf.daily_pnl(rows), pf.DEFAULT_INITIAL_CAPITAL_PAISE)
+    points = pf.equity_curve(pf.daily_pnl(rows), initial_capital_paise)
     check(
         "sum of trade PnL == equity curve delta",
-        points[-1].equity_paise - pf.DEFAULT_INITIAL_CAPITAL_PAISE == net,
+        points[-1].equity_paise - initial_capital_paise == net,
         f" ({_money(net)})",
     )
     check(
         "trade count == number of executed ledger rows",
-        pf.metrics(rows).total_trades == len(executed),
+        pf.metrics(rows, initial_capital_paise=initial_capital_paise).total_trades
+        == len(executed),
         f" ({len(executed)})",
     )
     check(
@@ -1435,7 +1443,10 @@ def build_everything(
         for symbol in PILOT_SYMBOLS
     }
     benchmark = pf.buy_and_hold(
-        closes, first_day=first_trade_day, last_day=PILOT_END
+        closes,
+        first_day=first_trade_day,
+        last_day=PILOT_END,
+        initial_capital_paise=config.initial_capital_paise(),
     )
     master = bt.latest_cached_master(config.path("cache_dir"))[1].name
     return {
@@ -1450,6 +1461,7 @@ def build_everything(
         "resume": resume,
         "benchmark": benchmark,
         "master_name": master,
+        "initial_capital_paise": config.initial_capital_paise(),
     }
 
 

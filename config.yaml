@@ -20,6 +20,15 @@ risk_per_trade: 1000  # trader answer, Round 3, 25-Jul-2026
 # and to the architect's spec sync.
 cost_per_trade: 100  # CONTEXT 3.5 / R1-Q23
 
+# Starting capital in INR -- CONTEXT 3.5 ("Capital: 1,00,000 (R1-Q21a)"). It is the base of
+# the equity curve (`capital + cumulative PnL`, Round-3 Q40-d) and the denominator of "return
+# on initial capital", of CAGR and of the E13 buy&hold benchmark. It is NOT the Q40-d flag
+# figure -- that one is `capital_reference` below and it is the trader's pending Q43 answer.
+# Wired here, like its two siblings above, rather than typed into the portfolio module: a
+# money constant hidden in an engine module is invisible to the operator and to the
+# architect's spec sync (REVIEW_9A finding C1; the module now carries no default at all).
+initial_capital: 100000  # CONTEXT 3.5 / R1-Q21a
+
 # Q40-d CAPITAL-INFEASIBILITY FLAGS (CONTEXT 3.5's disclosure list). Both keys are OPTIONAL
 # and both are NULL until the trader answers Q43 (which capital figure the flags must use)
 # and Q44. While they are null the backtest computes NO flag and every output says

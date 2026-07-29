@@ -275,11 +275,18 @@ def good_resume() -> pe.ResumeProof:
 def benchmark() -> object:
     from acumen import portfolio as pf
 
-    return pf.buy_and_hold({"TCS": {D: 100}}, first_day=D, last_day=D)
+    return pf.buy_and_hold(
+        {"TCS": {D: 100}}, first_day=D, last_day=D, initial_capital_paise=10_000_000
+    )
 
 
 def verdicts(rows, resume=None) -> dict[str, bool]:
-    lines = pe.invariant_report(fake_pilot(rows), resume or good_resume(), benchmark())
+    lines = pe.invariant_report(
+        fake_pilot(rows),
+        resume or good_resume(),
+        benchmark(),
+        initial_capital_paise=10_000_000,
+    )
     out = {}
     for line in lines:
         label, _, rest = line.partition(": **")
