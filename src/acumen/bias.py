@@ -24,9 +24,10 @@ candle(D-2), both trading days (CONTEXT 3.2). The result is frozen before D's op
 4. **Rule 3 -- double sweep (outside bar)** -- when ``C.high > P.high AND C.low < P.low`` and
    the close is INSIDE the body. Day C's 1-minute data decides which extreme broke FIRST:
    P.high first -> bullish, P.low first -> bearish. **Tie** (both break in the SAME 1-min
-   candle m): ``m.close < m.open`` (red) -> low swept later -> BULLISH; ``m.close > m.open``
-   (green) -> high swept later -> BEARISH (assumed mirror, OPEN-4); ``m.close == m.open``
-   (doji) -> carry and log (OPEN-4).
+   candle): that candle's DIRECTION IS IRRELEVANT -- red, green and doji follow ONE rule
+   (CONTEXT 3.2 v1.3, trader Round-3 Q38/Q39). Resolve on the DAILY close against the body,
+   bullish precedence: ``C.close >= bodyMin`` -> BULLISH, else ``C.close <= bodyMax`` ->
+   BEARISH.
 5. **No rule fires** -> carry. If a bullish and a bearish condition ever both hold (should be
    impossible), bullish takes precedence and the event is logged.
 
@@ -58,9 +59,10 @@ RULE_INSIDE: str = "inside-bar-carry"
 RULE_1: str = "rule-1-breakout"
 RULE_2: str = "rule-2-sweep"
 RULE_3: str = "rule-3-outside-bar"
-RULE_3_TIE_RED: str = "rule-3-tie-red-bullish"
-RULE_3_TIE_GREEN: str = "rule-3-tie-green-bearish"  # OPEN-4 mirror
-RULE_3_TIE_DOJI: str = "rule-3-tie-doji-carry"  # OPEN-4
+#: ONE tag for the same-minute double break. The three colour-keyed tags this replaced
+#: (red-bullish / green-bearish / doji-carry) died with OPEN-4: CONTEXT 3.2 v1.3 makes the
+#: decisive minute's direction irrelevant, so there is nothing left for a colour to key.
+RULE_3_TIE: str = "rule-3-tie"
 RULE_3_NO_MINUTE: str = "rule-3-no-1min-carry"  # documented fallback (R1-Q6)
 RULE_3_NO_BREAK: str = "rule-3-no-break-carry"
 RULE_CARRY: str = "no-rule-carry"
@@ -133,7 +135,11 @@ class BiasResult:
     rule: str
     detail: str
     carried: bool = False
-    open4: bool = False  # touched an OPEN-4 branch (green tie mirror / doji)
+    #: This pair was decided by the Rule-3 TIE -- both of P's extremes broke inside ONE 1-minute
+    #: candle. It is the case OPEN-4 was about; OPEN-4 is now RESOLVED (Round-3 Q38/Q39) and no
+    #: branch here is an assumption any more, but the day is still the rare, hand-checkable one,
+    #: so it stays flagged. This is what plan.md's chunk-12 card calls an "OPEN-4 occurrence".
+    tie_case: bool = False
     log: str | None = None
 
 
@@ -263,46 +269,47 @@ def _rule_3(
             )
         return _carry(last_bias, RULE_3, "Rule 3: P.low first but C.close > bodyMax; carry")
 
-    return _rule_3_tie(minute, C, bmin, bmax, last_bias)
+    return _rule_3_tie(minute, C, bmin, bmax)
 
 
-def _rule_3_tie(minute: Candle, C: Candle, bmin: int, bmax: int, last_bias: str | None) -> BiasResult:
-    """Both extremes broke in the SAME 1-minute candle (CONTEXT 3.2 tie predicate).
+def _rule_3_tie(minute: Candle, C: Candle, bmin: int, bmax: int) -> BiasResult:
+    """Both extremes broke in the SAME 1-minute candle (CONTEXT 3.2 tie predicate, v1.3).
 
-    The codeable operator is close-vs-open on that 1-minute candle (the trader's worked
-    example, R2-Q31, is the authority):
+    **The decisive 1-minute candle's DIRECTION IS IRRELEVANT.** Red, green and doji all follow
+    ONE rule -- the trader's Round-3 Q38/Q39 answers, which OVERTURNED the colour-based
+    predicate this function used to carry (he rejected the green mirror and the doji carry
+    explicitly; QUESTIONS.md ROUND-3 FINAL RECEIPTS, R3F-b). Nothing below reads ``minute.open``
+    or ``minute.close``: the minute is here only to say WHICH minute broke both extremes.
 
-    * red (``close < open``): the low was swept LATER, so the high effectively broke first ->
-      bullish (his answer);
-    * green (``close > open``): mirror -> bearish (OPEN-4, assumed by symmetry);
-    * doji (``close == open``): no decision -> carry and log (OPEN-4).
+    The tie resolves on the DAILY close against the previous candle's body, with BULLISH
+    precedence, exactly as CONTEXT 3.2 writes it:
+
+    * ``C.close >= bodyMin`` -> BULLISH;
+    * else ``C.close <= bodyMax`` -> BEARISH.
+
+    The bearish branch is UNREACHABLE through :func:`evaluate_pair` -- a close inside the body is
+    taken by bullish precedence, and a close outside the body was already decided by Rule 1 --
+    and CONTEXT 3.2 says so itself. It is written out because the spec writes it out; the second
+    condition is a tautology once ``C.close < bodyMin`` (``bodyMin <= bodyMax`` always), so the
+    ``else`` is unconditional rather than a third, genuinely dead, branch.
+
+    Worked example (trader-certified twice, CONTEXT 8 F5): P body 2010-2040, daily close 2020 ->
+    BULLISH, for a RED, a GREEN and a DOJI decisive candle alike.
     """
-    if minute.close < minute.open:  # red
-        if C.close >= bmin:
-            return BiasResult(
-                BULLISH, RULE_3_TIE_RED,
-                f"Rule 3 tie: same-minute double break, 1-min RED (close {minute.close} < open "
-                f"{minute.open}) -> low swept later -> bullish; C.close {C.close} >= bodyMin {bmin}",
-            )
-        return _carry(last_bias, RULE_3_TIE_RED, "Rule 3 tie red but C.close < bodyMin; carry")
-    if minute.close > minute.open:  # green -- OPEN-4 mirror
-        if C.close <= bmax:
-            return BiasResult(
-                BEARISH, RULE_3_TIE_GREEN,
-                f"Rule 3 tie: same-minute double break, 1-min GREEN (close {minute.close} > open "
-                f"{minute.open}) -> high swept later -> bearish [OPEN-4]; C.close {C.close} <= "
-                f"bodyMax {bmax}",
-                open4=True,
-            )
-        return _carry(last_bias, RULE_3_TIE_GREEN, "Rule 3 tie green but C.close > bodyMax; carry", open4=True)
-    # doji -- OPEN-4: no decision, carry and log
-    return _carry(
-        last_bias,
-        RULE_3_TIE_DOJI,
-        f"Rule 3 tie: same-minute double break, 1-min DOJI (close == open == {minute.open}) -> "
-        "no decision -> carry last bias [OPEN-4]",
-        open4=True,
-        log=f"R3 tie doji -> carried {last_bias!r}",
+    broke = (
+        f"same-minute double break in the 1-minute candle high {minute.high} / low {minute.low} "
+        "(its direction is IRRELEVANT -- Round-3 Q38/Q39)"
+    )
+    if C.close >= bmin:
+        return BiasResult(
+            BULLISH, RULE_3_TIE,
+            f"Rule 3 tie: {broke}; C.close {C.close} >= bodyMin {bmin} -> bullish",
+            tie_case=True,
+        )
+    return BiasResult(
+        BEARISH, RULE_3_TIE,
+        f"Rule 3 tie: {broke}; C.close {C.close} < bodyMin {bmin} and <= bodyMax {bmax} -> bearish",
+        tie_case=True,
     )
 
 
@@ -327,9 +334,11 @@ def _first_break(
 
 
 def _carry(
-    last_bias: str | None, rule: str, detail: str, *, open4: bool = False, log: str | None = None
+    last_bias: str | None, rule: str, detail: str, *, tie_case: bool = False, log: str | None = None
 ) -> BiasResult:
-    return BiasResult(bias=last_bias, rule=rule, detail=detail, carried=True, open4=open4, log=log)
+    return BiasResult(
+        bias=last_bias, rule=rule, detail=detail, carried=True, tie_case=tie_case, log=log
+    )
 
 
 def _precedence_guard(rule: str, C: Candle, bmin: int, bmax: int) -> BiasResult:

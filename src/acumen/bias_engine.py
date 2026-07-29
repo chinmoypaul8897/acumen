@@ -59,7 +59,10 @@ class DailyBias:
     current_candle: Candle | None = None  # C, raw
     suppressed: bool = False
     suppression_reason: str | None = None
-    open4: bool = False
+    #: This day's bias came from the Rule-3 TIE (see :attr:`acumen.bias.BiasResult.tie_case`) --
+    #: the case OPEN-4 was about, resolved by Round-3 Q38/Q39 and still worth flagging for the
+    #: chunk-12 pack.
+    tie_case: bool = False
     log: str | None = None
 
 
@@ -195,7 +198,7 @@ class BiasEngine:
                 previous_date=previous_date,
                 previous_candle=previous_adj,
                 current_candle=current,
-                open4=outcome.open4,
+                tie_case=outcome.tie_case,
                 log=outcome.log,
             ),
             new_bias,

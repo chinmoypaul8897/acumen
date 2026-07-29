@@ -36,8 +36,7 @@ from acumen.bias import (
     BEARISH,
     BULLISH,
     RULE_3,
-    RULE_3_TIE_GREEN,
-    RULE_3_TIE_RED,
+    RULE_3_TIE,
     RULE_CARRY,
     RULE_INSIDE,
     RULE_1,
@@ -85,23 +84,46 @@ def test_r3_low_first_close_exactly_on_body_max_is_bearish() -> None:
 
 
 # --- 3-4. tie close guards exactly on the body edge (M15/M16) --------------------------------
+#
+# CONTRACT MOVED BY ARCHITECT RULING, 2026-07-29 (CONTEXT 3.2 (v1.3); trader Round-3 Q38/Q39;
+# QUESTIONS.md ROUND-3 FINAL RECEIPTS R3F-b). When this file was written, OPEN-4 was open and the
+# tie predicate keyed off the decisive minute's COLOUR: red -> bullish, green -> bearish (an
+# assumed mirror), doji -> carry. The trader has now REJECTED that mirror: the colour is
+# irrelevant and the tie resolves on the DAILY close against the body, with bullish precedence.
+# Both probes below are re-pinned to the ruling and NEITHER is weakened -- each still asserts a
+# boundary-equal close (== bodyMin, == bodyMax) with a same-minute double break, which is what
+# M15/M16 mutate; the SECOND one's expected bias flips from BEARISH to BULLISH because the rule
+# it was written against no longer exists.
 
 
-def test_r3_tie_red_close_exactly_on_body_min_is_bullish() -> None:
-    """Same-minute double break, RED 1-min, C.close == bodyMin -> BULLISH (kills M15)."""
+def test_r3_tie_close_exactly_on_body_min_is_bullish_red_minute() -> None:
+    """Same-minute double break, C.close == bodyMin -> BULLISH (kills M15: '>=' -> '>').
+
+    The decisive minute here is RED, which the trader's original Q31 answer already called
+    bullish -- so this case's ANSWER is unchanged by Round-3 Q38/Q39; only its rule tag moved
+    (RULE_3_TIE_RED -> RULE_3_TIE, since there is nothing left for a colour to key)."""
     C = candle(2005, 2060, 1990, 2010)
     minutes = [candle(2020, 2055, 1990, 1995)]  # both extremes in one minute, red (close<open)
     result = evaluate_pair(P, C, lambda: minutes, last_bias=BEARISH)
-    assert result.bias == BULLISH and result.rule == RULE_3_TIE_RED
+    assert result.bias == BULLISH and result.rule == RULE_3_TIE and result.tie_case
 
 
-def test_r3_tie_green_close_exactly_on_body_max_is_bearish() -> None:
-    """Same-minute double break, GREEN 1-min (OPEN-4 mirror), C.close == bodyMax -> BEARISH
-    (kills M16)."""
+def test_r3_tie_close_exactly_on_body_max_is_bullish_even_on_a_green_minute() -> None:
+    """Same-minute double break, GREEN 1-min, C.close == bodyMax 2040 -> **BULLISH**.
+
+    HAND-COMPUTED against CONTEXT 3.2 (v1.3): bodyMin 2010, bodyMax 2040, C.close 2040. The tie
+    rule is "C.close >= bodyMin -> BULLISH", and 2040 >= 2010, so bullish precedence takes it --
+    the green mirror that made this BEARISH was overturned by the trader (Round-3 Q38).
+
+    This still kills M15 at the OTHER end of the body (a '>=' -> '>' mutant leaves 2040 bullish,
+    so M15's kill lives in the test above); M16 ('<=' -> '<' on the bodyMax guard) now sits in
+    the branch CONTEXT itself calls unreachable, and is killed by
+    ``test_bias.py::test_the_tie_bearish_branch_is_written_as_the_spec_writes_it``, which calls
+    the predicate directly."""
     C = candle(2035, 2060, 1990, 2040)
     minutes = [candle(2005, 2055, 1990, 2050)]  # both extremes in one minute, green (close>open)
     result = evaluate_pair(P, C, lambda: minutes, last_bias=BULLISH)
-    assert result.bias == BEARISH and result.rule == RULE_3_TIE_GREEN
+    assert result.bias == BULLISH and result.rule == RULE_3_TIE and result.tie_case
 
 
 # --- 5-6. the first break is STRICT: a touch of P's extreme is not a break (M17/M18) --------

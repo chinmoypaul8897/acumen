@@ -129,6 +129,18 @@ FROZEN_FIXTURES_SHA256: dict[str, str] = {
     "minute/SYNTH_2099-01-06_1min.csv": (
         "d234acb10a959473e7c11671a57172263973c681945b683715a803d8c078ccc9"
     ),
+    # chunk 7 prep (2026-07-29): the F5 tie fixture becomes THREE sub-fixtures. CONTEXT v1.3
+    # section 8's F5 now reads "for RED, GREEN and DOJI decisive candles alike (colour
+    # irrelevant; three sub-fixtures)" -- the architect-signed spec change (Round-3 Q38/Q39)
+    # that licenses adding these two. The 2099-01-06 RED file above is BYTE-UNCHANGED. All three carry the same
+    # decisive-minute high (2055) and low (1995) and differ only in open/close, so the engine's
+    # own result object is identical across them -- which is the colour-irrelevance pin.
+    "minute/SYNTH_2099-01-07_1min.csv": (
+        "3eaa87275eb752538bc98d1ff5609d6f47f8f013cbb964089918b22c08b4e849"
+    ),
+    "minute/SYNTH_2099-01-08_1min.csv": (
+        "f08da715ec9acfbbf87d03e6e70f48004081ab940ca46c2691f73df2133203a1"
+    ),
     # chunk 5A (2026-07-25): a DERIVED instrument-master sample -- five real NSE -EQ rows
     # (the F7 calibration symbols) lifted byte-for-byte out of the daily OpenAPIScripMaster
     # dump, plus two distractors (a BSE row and an NFO option sharing the name 'TCS') that

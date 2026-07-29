@@ -602,7 +602,10 @@ math uses each bar's TOTAL volume, which CONTEXT §3.3 already specifies -- so �
 and no F-fixture moves. OPEN-2's remaining half (reproducing 3 chart POCs against his readings)
 stays chunk 6's TRADER GATE. CONTEXT §9 OPEN-2 narrowing is the architect's.
 
-### R3-c · NEW Q-8 (class A, OPEN) -> POC window length: 8-candle vs 9-candle
+### R3-c · Q-8 (class A) — **RESOLVED by Round-3 Q42 (29-Jul-2026)** — POC window length: 8-candle vs 9-candle
+
+> **CLOSED.** The trader confirmed the 8-candle window; see ROUND-3 FINAL RECEIPTS (29-Jul-2026),
+> receipt R3F-e, at the end of this file. The interim below WAS the spec and needed no change.
 
 **Question.** The trader's Round-3 FRVP screenshot shows Coordinates #1 = 150 and #2 = 158.
 Read as an inclusive bar count that is a **9-candle** box (158 - 150 + 1 = 9), which conflicts
@@ -625,7 +628,11 @@ the calibration days** (8-candle and 9-candle POC) and print them side by side, 
 trader confirms can be checked without a re-run. No code in chunk 5A depends on this (5A ingests
 and aggregates minutes; it does not slice the POC window).
 
-### R3-d · NEW Q-9 (class A, OPEN) -> reference == POC, the ABOVE branch
+### R3-d · Q-9 (class A) — **RESOLVED by Round-3 Q41-A (29-Jul-2026)** — reference == POC, the ABOVE branch
+
+> **CLOSED.** The first distinct close SETS the side only and is never itself the entry; the
+> conservative "log + no-trade" interim below is superseded. See ROUND-3 FINAL RECEIPTS
+> (29-Jul-2026), receipt R3F-d. OPEN-3 is closed with it.
 
 **Question.** The trader's Q34(b) answer arrived: "if the 11:15 reference equals the POC, there
 is NO side yet -- wait; the very first candle that closes distinctly above or below the POC
@@ -1596,7 +1603,14 @@ what the ruling was made on. Executed the same session; the before/after counts 
 
 ---
 
-## Q-13 · chunk 6 · class A · **OPEN** · NON-BLOCKING (interim below is calibrated, not guessed)
+## Q-13 · chunk 6 · class A · **RESOLVED — the FINER profile (29-Jul-2026)** · was NON-BLOCKING
+
+> **CLOSED at the interim.** The trader's BHARTIARTL 2026-07-17 chart reading settled it on the
+> ROW COUNT (his 25 is one row from the finer profile's 26 and three from the coarser profile's
+> 22); the price reading is inconclusive at the two candidates' Rs 0.05 separation. See ROUND-3
+> FINAL RECEIPTS (29-Jul-2026), receipt R3F-f. CONTEXT v1.3 §3.3 now states it as a ruling.
+> The `totalTicks` rounding MODE (the reviewer addendum's point 3) stays a pinned interim with a
+> chunk-12 verification slot.
 
 **Question.** CONTEXT 3.3 fixes the ticks-per-row rounding as *"`tpr = totalTicks/N` rounded to a
 whole number (minimum 1), **direction chosen so the realized row count is closest to requested
@@ -1711,7 +1725,14 @@ so a later session reads it from the repo instead of from a conversation.
 
 ---
 
-## Q-14 · chunk 5B REVIEW · class A · **OPEN -- STOP** · BLOCKS chunk 9 (the backtest run)
+## Q-14 · chunk 5B REVIEW · class A · **RESOLVED — ruled, executed and re-reviewed (relabelled 29-Jul-2026)** · no longer blocks chunk 9
+
+> **CLOSED.** The architect's ruling below was recorded verbatim, executed by chunk-5B FIX-5 and
+> confirmed by a fresh re-review (REVIEW_5B_2, PASS), and its closing addendum accepted the
+> definition of done. Relabelled by the chunk-7 session, the first to consume the ruling
+> downstream (CONTEXT v1.3 §4.6 makes recomputing gate 1P per stock-day a duty of every engine
+> that reads the minute lake). **Only this status line changed -- no word of the question, the
+> measurement, the ruling or the execution notes was altered.**
 
 **Question.** CONTEXT 4.5's gate 1 proves a stored day's **VOLUME** against the bhavcopy. The Q-11
 ruling's price oracle proves an **ERA's price**, over that era's probe days. 1,963 stored symbol-days
@@ -1879,3 +1900,205 @@ it, in `src/acumen/quality_gates.py` (the gate itself, PURE), `src/acumen/vendor
 > residuals; (iii) every excluded day is categorized in the residual register chunk 9
 > carries. The 95% line itself is unchanged for any future data work."
 
+---
+
+## ROUND-3 FINAL RECEIPTS (29-Jul-2026) · recorded by the chunk-7 prep session
+
+The trader's remaining Round-3 answers landed with CONTEXT **v1.3**. Each is recorded here as a
+receipt in the same form the 25-Jul receipts use: what arrived, what it RESOLVES, and what this
+session executed for it. The CONTEXT edits and its §9/§10 bumps are the architect's and are
+already in v1.3 (commit `c941c64`); this session records the receipts and executes the code,
+fixture and ledger changes each one authorises.
+
+**Nothing in this section is a new question.** The one genuine hole this session found is raised
+separately as **Q-15**, below.
+
+### R3F-a · the F9 bias table CONFIRMED -> the chunk-4 TRADER GATE is CLOSED
+
+> "Bias table: confirmed -- that is what I would have called on each of those days."
+
+The chunk-4 evidence pack (`docs/gate_chunk4_bias_evidence.md`, 15 real TCS days in plain
+English) came back CONFIRMED. plan.md §2's first trader gate is **CLOSED**, well inside its
+deadline (before the chunk-9 run). Executed this session: STATUS.md chunk 4 becomes
+`reviewed-PASS · gate-closed(docs/gate_chunk4_bias_evidence.md -- trader CONFIRMED, Round 3)`.
+No number in the pack moved; the pack is the evidence and it is unchanged.
+
+### R3F-b · Q38 + Q39 -> **OPEN-4 RESOLVED** (the tie candle's colour is irrelevant)
+
+> "Q38/Q39 (Round 3): the colour of that one-minute candle does not matter. Red, green or a
+> doji -- I look at where the DAY closed against the previous day's body."
+
+This **OVERTURNS** both assumptions the chunk-4 build carried and flagged (PROGRESS decision B59,
+recorded in the 25-Jul receipt R3-e): the green mirror (assumed BEARISH) and the doji carry
+(assumed no-decision). CONTEXT v1.3 §3.2 rewrites the tie predicate accordingly -- resolve on the
+DAILY close against the body, with bullish precedence:
+`C.close >= bodyMin` -> BULLISH, else `C.close <= bodyMax` -> BEARISH. The bearish branch is
+unreachable for a close INSIDE the body (bullish precedence takes it) and a close OUTSIDE the body
+was already decided by Rule 1, which is why the trader's own worked example -- body 2010-2040,
+daily close 2020 -> BULLISH -- now holds for all three colours.
+
+**EXECUTED this session** (the code change the architect scheduled for chunk-7 prep):
+`src/acumen/bias.py` drops the 1-minute candle's direction from the tie predicate entirely --
+`_rule_3_tie` no longer reads `minute.open` or `minute.close`, the three colour-keyed rule tags
+collapse into one (`RULE_3_TIE`), and the F5 fixture becomes the three sub-fixtures CONTEXT v1.3
+§8 now names (RED, GREEN and DOJI decisive candles, all -> BULLISH at `C.close` 2020). Two frozen
+1-minute fixtures were ADDED for the green and doji sub-fixtures under that §8 change
+(`tests/fixtures/minute/SYNTH_2099-01-07_1min.csv`, `..._2099-01-08_1min.csv`); the existing RED
+fixture is byte-unchanged. F9's 15 REAL TCS days are untouched and still green -- none of them is
+a tie day, which is exactly why the tie needed a synthetic fixture in the first place.
+
+### R3F-c · Q40 option d -> **OPEN-6 and OPEN-7 RESOLVED** (take all, and disclose)
+
+> "Q40 (Round 3): d -- no limits, show me the honest numbers."
+
+No capital constraint and no concurrency cap: the backtest takes ALL signals across all stocks,
+each sized by the fixed-rupee-risk rule, on ONE equity curve in trade-close order. The report owes
+the disclosures CONTEXT v1.3 §3.5 now enumerates -- max concurrent positions, max aggregate
+notional vs Rs 1L, the full distribution of daily concurrent-trade counts, AND per-trade flags
+marking the trades his capital could not actually have taken (notional > Rs 1L cash; > Rs 5L
+typical-MIS tiers). Nothing to execute in chunk 7 (the signal engine emits one stock-day at a
+time and knows nothing about a portfolio); this receipt is the record chunks 8/9/10 build to.
+
+### R3F-d · Q41 option A -> **Q-9 and OPEN-3 RESOLVED** (the first distinct close SETS the side ONLY)
+
+> "Q41 (Round 3): A -- that first candle only tells me which side I am playing. I still wait for
+> the entry."
+
+The above-branch of the `reference == POC` start (raised as **Q-9** in the 25-Jul receipts, R3-d,
+with the conservative interim "log + no-trade") is answered, and the interim is now WRONG rather
+than merely cautious: on a bullish day, `reference == POC` -> wait; the first 15-minute candle
+that closes strictly ABOVE the POC sets the side and puts the day in **WAIT-BELOW** (the Entry-2
+path -- it is never itself the entry), and the first that closes strictly BELOW sets the side and
+ARMS the day directly. Bearish mirrors 1:1. **Q-9 is CLOSED and OPEN-3 is CLOSED**; CONTEXT v1.3
+§3.4 carries the rule.
+
+**EXECUTED this session:** built as specified in `src/acumen/signals.py` (state `side-unset`,
+with the two golden days the chunk-7 card asks for and their short mirrors). The old OPEN-3
+"logged, no trade" fixture the chunk-7 card names is therefore built INVERTED -- the day now
+trades -- and its test docstring quotes this receipt, the same discipline decision B121 used when
+the E4 amendment retired a card fixture.
+
+### R3F-e · Q42 -> **Q-8 RESOLVED** (the profile window is the 8-candle window)
+
+> "Q42 (Round 3): the box is the first two hours -- 9:15 to 11:15. Eight candles."
+
+**Q-8 is CLOSED.** The 9-candle reading of the screenshot's bar coordinates (#1 150, #2 158) is
+dead; the spec's window -- 1-minute stamps 09:15..11:14, i.e. the eight 15-minute bars closing
+09:30..11:15 -- is confirmed by the trader and is what chunk 6 already computes everywhere
+(`poc.SPEC_WINDOW`). Nothing to change in `poc.py`: the interim WAS the spec. The 9-candle
+`ALTERNATE_WINDOW` stays where it is, reachable only from the evidence generator, as the record of
+how the question was settled.
+
+Consequence for chunk 7, recorded because it is load-bearing: the §3.4 reference candle (the
+15-minute candle closing at 11:15) is by construction the LAST candle of the confirmed profile
+window. `signals.py` derives its reference stamp from the same session grid and a test pins the
+two against each other, so the window and the reference cannot drift apart.
+
+### R3F-f · the BHARTIARTL chart oracle -> **Q-13 RESOLVED** (keep the FINER profile)
+
+> "BHARTIARTL 17-Jul: POC reads about 1913.9, and I count 25 rows in the box."
+
+The reading the chunk-6 review asked for (REVIEW_6 finding Q1: one chart with the rows countable
+answers Q42 and Q-13 together) arrived, and it answers Q-13 on the ROW COUNT, not on the price:
+
+| candidate (8-candle window) | POC | rows drawn | distance from his reading |
+|---|---|---|---|
+| **finer profile (the interim)** | 1914.60 | **26** | price 0.70 · rows **1** |
+| coarser profile | 1914.65 | 22 | price 0.75 · rows **3** |
+
+**The price is INCONCLUSIVE** -- 1913.9 sits 0.70/0.75 from the two candidates, which are only
+Rs 0.05 apart, and that gap is inside the feed-noise band CONTEXT §5 already documents for the
+calibration set (residuals Rs 0.05-Rs 3.5). **The ROW COUNT is decisive**: his 25 is ONE row from
+the finer profile's 26 and THREE from the coarser profile's 22. Every other line of evidence the
+interim rested on points the same way (all 25 frozen `poc_prorata` values reproduced to 4e-13,
+the coarser direction moving six of them, and TradingView's own documented non-tie example landing
+finer). **Q-13 is CLOSED at the finer profile**, which is what CONTEXT v1.3 §3.3 now states as a
+RULING rather than an interim, and what `poc.ticks_per_row` already implements and pins.
+
+Two riders the architect kept in v1.3, recorded so a later session does not read Q-13 as fully
+retired: `totalTicks`' rounding MODE stays **half-even as a pinned interim** with its verification
+slot in the chunk-12 pack (REVIEW_6 finding Q2 measured it at 10 POC-moving days per 2,418), and
+**N = 24 is trader-confirmed**. Neither blocks anything.
+
+### R3F-g · the chunk-6 TRADER GATE is CLOSED
+
+Q42 (the window) and the row-count oracle (the tie) are together what
+`docs/gate_chunk6_poc_evidence.md` was built to ask. plan.md §2's second trader gate is
+**CLOSED**, inside its deadline. Executed this session: STATUS.md chunk 6 becomes
+`reviewed-PASS · gate-closed(docs/gate_chunk6_poc_evidence.md -- Q42 + row-count oracle)`. The
+pack itself is unchanged -- every number in it was independently re-derived by the chunk-6 review
+and none of them moved.
+
+### Bookkeeping executed with these receipts
+
+* **Q-14** (the per-day PRICE gate) is relabelled from `OPEN -- STOP · BLOCKS chunk 9` to
+  **RESOLVED**. Its ruling was recorded verbatim, executed by chunk-5B FIX-5 and confirmed by a
+  fresh re-review (REVIEW_5B_2, PASS); the architect's closing addendum accepted the definition of
+  done. Chunk 7 is the first session to consume the ruling downstream (its orchestration recomputes
+  gate 1P per stock-day, CONTEXT v1.3 §4.6), and this file's own rule is that the session which
+  consumes an answer marks the item closed. **No text inside Q-14 was altered** -- only the status
+  line of its heading.
+* **Q-8**, **Q-9** and **Q-13** are marked RESOLVED at their own headings, each pointing here.
+
+---
+
+## Q-15 · chunk 7 · class A · **OPEN -- STOP** · BLOCKS one assertion of fixtures F1 and F2
+
+**Question.** CONTEXT §8's F1 and F2 pin `POC 2030, entry 2037, SL 2032 (risk 5), TP 2052`.
+CONTEXT §3.4 defines a **gap entry** as "entry candle's low > POC" and gives it a DIFFERENT stop:
+"the last traded price before the jump = the previous 15-min candle's close". On a long day the
+only candle that produces `SL 2032` from the NORMAL rule is one whose low IS 2032 -- and
+`2032 > 2030`, so §3.4 routes that very candle to the gap branch instead. **The four numbers in
+F1 and F2 cannot all be true at the same time as §3.4's gap predicate.** Which gives way?
+
+**Why it is a hole, and not a thing a session may pick.** It is a conflict between two sections of
+CONTEXT.md, which §10 says is the architect's to resolve ("any conflict -> QUESTIONS.md, architect
+resolves with trader"), and it moves real money: on the F1 day the two readings give a stop of
+2032 (risk 5) or 2029 (risk 8), i.e. **200 shares vs 125** at the Rs 1,000 fixed risk, and a
+target of 2052 or 2061.
+
+**The arithmetic, in full, so the architect can rule without re-deriving it.** For the entry candle
+E to be a trigger at all, the state must be ARMED when E closes. Every candle between the arming
+candle and E closes at or below the POC (a close strictly above it while ARMED IS the trigger, so
+no such candle can precede E), and the arming candle itself closes strictly below the POC. The
+"previous 15-minute candle" is therefore always at or below the POC, so **the gap branch can only
+ever produce a stop <= POC = 2030, hence a risk >= 7** -- never F1's 5. The single exception is a
+day where the 11:00-stamped reference candle is missing and the E10 fallback supplies the
+reference, which leaves the preceding candle unconstrained; that is not what F1 or F2 describe.
+
+Equivalently: **F1's and F2's four numbers are jointly satisfiable if and only if the entry
+candle's low is NOT above the POC**, i.e. if and only if the POC is at or above 2032.
+
+**Options for the architect** (either is a complete answer; this session decides neither):
+
+(a) **F1/F2's POC moves** to the value that makes the trader's own triple consistent (any POC in
+`[2032, 2037)`; 2032 is the natural one -- the entry candle's low sits ON the POC, which is
+precisely the boundary at which §3.4's strict `low > POC` does not fire). §3.4 is untouched, the
+gap rule keeps its single clean witness in F4, and F1/F2 keep `entry 2037 / SL 2032 / TP 2052`
+exactly.
+
+(b) **The gap predicate narrows** -- e.g. to "the entry candle's low is above the POC **and above
+the previous candle's high**", i.e. an actual discontinuity in the tape rather than any candle that
+merely never traded down to the POC. Then F1/F2 keep POC 2030 and take the NORMAL stop, and F4
+(prior close 2028, gap candle low 2034, i.e. a true jump ACROSS the POC) still takes the gap stop.
+This is a CHANGE to §3.4 and needs the trader, because it is his rule.
+
+**What this session did meanwhile (no silent decision).** The engine implements **§3.4 exactly as
+written** -- `low > POC` is the gap predicate, with no added condition -- because §3.4 is the
+operative rule statement and inventing a narrower one would be exactly the assumption CLAUDE.md
+rule 1 forbids. F1 and F2 are then built **BOTH ways**, so whichever the architect rules is already
+a passing golden and the other is already a recorded measurement:
+
+* `test_f1_at_context_8_poc_2030_...` / `test_f2_at_context_8_poc_2030_...` -- CONTEXT §8's POC,
+  asserting what §8 pins that the conflict does not touch (the POC, the state at 11:15, the arming
+  close, the trigger candle and `entry 2037`) plus the stop and target §3.4's gap branch actually
+  produces;
+* `test_f1_reproduces_context_8_entry_sl_tp_exactly_...` /
+  `test_f2_reproduces_context_8_entry_sl_tp_exactly_...` -- option (a)'s POC, asserting §8's
+  `entry 2037 / SL 2032 (risk 5) / TP 2052` to the paisa.
+
+**No fixture expected value was edited or weakened**, and F3 and F4 are unaffected (F3 carries no
+POC in §8 and is built at a POC that makes its own triple exact; F4 IS the gap fixture and
+reproduces `SL 2028 / TP 2084` exactly). If the architect rules (b), the second pair of tests
+becomes the F1/F2 goldens under a corrected engine and the first pair is deleted; if (a), the
+first pair is deleted and §8's F1/F2 rows gain their POC. Either way nothing is re-measured.

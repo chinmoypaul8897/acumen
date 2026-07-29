@@ -228,6 +228,22 @@ market prices only, no credential of any kind.
   real 1-minute data and lands in chunk 12 (per plan.md chunk-4 card); these drive the engine's
   Rule-3 and tie branches offline until then.
 
+### The F5 tie sub-fixtures (chunk 7 prep, 2026-07-29)
+
+- **`minute/SYNTH_2099-01-07_1min.csv`** (GREEN) and **`minute/SYNTH_2099-01-08_1min.csv`**
+  (DOJI), both SYNTHETIC, same shape and same far-future/`SYNTH` labelling as the two above.
+  They exist because CONTEXT **v1.3** §8 turned F5 into THREE sub-fixtures: the trader's Round-3
+  Q38/Q39 answers made the decisive 1-minute candle's colour irrelevant, so the fixture must now
+  show a RED, a GREEN and a DOJI decisive candle all resolving to BULLISH at `C.close` 2020.
+  That architect-signed §8 change is what licenses the addition (CLAUDE.md rule 3); the RED file
+  `SYNTH_2099-01-06_1min.csv` was NOT touched and its digest is unchanged.
+  Each file is two minutes: a first minute that breaks NEITHER of P's extremes
+  (`2049.00 <= P.high 2050`, `2001.00 >= P.low 2000`), then the decisive minute that breaks
+  BOTH. All three decisive minutes carry the SAME high (`2055.00`) and low (`1995.00`) and
+  differ only in open/close -- RED `2018.00 -> 2005.00`, GREEN `2005.00 -> 2018.00`, DOJI
+  `2010.00 -> 2010.00` -- so a colour-blind engine returns a byte-identical result object on
+  all three, and `test_bias.py` asserts exactly that.
+
 ### The instrument-master sample (chunk 5A, 2026-07-25)
 
 - **`instrument_master_sample.json`** (DERIVED) -- 7 rows lifted byte-for-byte out of the daily
