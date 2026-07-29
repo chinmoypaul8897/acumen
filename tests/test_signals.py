@@ -9,14 +9,22 @@ Every long fixture has a full SHORT mirror. CONTEXT 3.4 writes the bearish machi
 explicitly ("Bearish-day mirror, explicit") precisely so it is not hand-derived, so the mirrors
 are asserted, never inferred.
 
-**Q-15, an OPEN class-A conflict, touches F1 and F2 and nothing else.** CONTEXT 8 pins
-`POC 2030, entry 2037, SL 2032 (risk 5), TP 2052`, but CONTEXT 3.4's gap predicate is
-"entry candle's low > POC", and the only candle that yields SL 2032 from the NORMAL rule is one
-whose low IS 2032 -- which is above 2030, so 3.4 routes it to the gap branch and a different
-stop. The two cannot both hold. Each of F1 and F2 is therefore built TWICE off the SAME
-candles: once at CONTEXT 8's POC 2030 (asserting everything the conflict does not touch, plus
-what 3.4's gap branch actually produces) and once at the POC that makes the trader's own triple
-consistent (2032), where CONTEXT 8's entry/SL/TP reproduce to the paisa. See QUESTIONS.md Q-15.
+**Q-15 is RESOLVED -- option (a), architect, 29-Jul-2026 -- and it touched F1 and F2 only.**
+The conflict was between CONTEXT 8's F1/F2 numbers (`POC 2030, entry 2037, SL 2032 (risk 5),
+TP 2052`) and CONTEXT 3.4's gap predicate "entry candle's low > POC": the only candle that
+yields SL 2032 from the NORMAL rule has low 2032, which is above 2030, so 3.4 routed it to the
+gap branch and a different stop. The ruling moves F1/F2's ILLUSTRATIVE POC to 2032 (CONTEXT
+v1.4 8) and leaves 3.4 untouched -- every number the trader stated survives, and no rule of his
+changes. So each of F1 and F2 is evaluated on ONE set of candles at TWO POCs, with the two
+designated differently:
+
+* **the GOLDEN is the ruled POC 2032** -- CONTEXT 8's entry/SL/TP reproduce to the paisa on the
+  NORMAL branch, because the entry candle's low TOUCHES the POC and `low > POC` is FALSE. This
+  is the boundary the fixture now teaches;
+* **the superseded POC 2030 is kept as a recorded MEASUREMENT** of the gap branch on the same
+  candles (prior-close stop, risk >= 7) -- not a golden, and no longer a claim about CONTEXT 8.
+
+F4 remains the single gap witness. See QUESTIONS.md Q-15.
 
 ASCII-only, like every other source file in this repo (chunk-0 B7).
 """
@@ -109,10 +117,11 @@ def test_the_bias_decides_the_side_and_an_unseeded_day_has_none() -> None:
 
 
 # ==============================================================================================
-# F1 -- CONTEXT 8: TCS bullish Entry-1. POC 2030, entry 2037, SL 2032 (risk 5), TP 2052.
+# F1 -- CONTEXT 8: TCS bullish Entry-1. POC 2032, entry 2037, SL 2032 (risk 5), TP 2052.
 # ==============================================================================================
 #
-# ONE set of candles, TWO POCs -- see the module docstring and QUESTIONS.md Q-15.
+# ONE set of candles, TWO POCs: the ruled 2032 (the GOLDEN) and the superseded 2030 (a recorded
+# MEASUREMENT of the gap branch) -- see the module docstring and QUESTIONS.md Q-15.
 #
 #   ord  8 (closes 11:15)  O 2028  H 2029  L 2024  C 2025   <- the reference candle
 #   ord  9 (closes 11:30)  O 2033  H 2038  L 2032  C 2037   <- closes above the POC: TRIGGER
@@ -127,11 +136,13 @@ F1_BARS = (
 )
 
 
-def test_f1_reproduces_context_8_entry_sl_tp_exactly_at_a_poc_the_gap_rule_leaves_alone() -> None:
-    """**F1 at signal level, CONTEXT 8's entry/SL/TP to the paisa.**
+def test_f1_golden_context_8_entry_sl_tp_to_the_paisa_at_the_ruled_poc_2032() -> None:
+    """**THE F1 GOLDEN at signal level: CONTEXT 8's entry/SL/TP to the paisa.**
 
-    HAND-COMPUTED at POC 2032 (Q-15 option (a) -- the lowest POC at which CONTEXT 3.4's strict
-    "low > POC" gap predicate does NOT fire on this candle):
+    HAND-COMPUTED at POC 2032 -- the POC CONTEXT v1.4 8 pins for F1, per the Q-15 ruling
+    (option (a), 29-Jul-2026: the illustrative POC moves, CONTEXT 3.4 is untouched). It is the
+    boundary POC: CONTEXT 3.4's strict "low > POC" gap predicate does NOT fire on this candle
+    because its low TOUCHES the POC exactly:
 
     * reference = the 11:15 close 2025 < POC 2032 -> ARMED (CONTEXT 3.4-1);
     * the candle closing 11:30 closes 2037, strictly above 2032, while ARMED -> TRIGGER;
@@ -158,22 +169,25 @@ def test_f1_reproduces_context_8_entry_sl_tp_exactly_at_a_poc_the_gap_rule_leave
     assert result.exit_event.close_stamp == sig.bar_close_stamp(DAY, 11)
 
 
-def test_f1_at_context_8_poc_2030_the_gap_predicate_takes_the_previous_close() -> None:
-    """**F1 at CONTEXT 8's own POC 2030 -- the Q-15 conflict, measured rather than decided.**
+def test_measurement_f1_candles_at_the_superseded_poc_2030_take_the_gap_branch() -> None:
+    """**A MEASUREMENT, not a golden: F1's candles at the superseded illustrative POC 2030.**
 
-    Same candles. HAND-COMPUTED under CONTEXT 3.4 as written:
+    The Q-15 ruling moved F1's POC to 2032, so 2030 is no longer CONTEXT 8's F1 and this test
+    claims nothing about that fixture. What it still measures is worth keeping: what CONTEXT
+    3.4's gap branch -- unchanged by the ruling -- does to these same candles when the POC sits
+    below the entry candle's low. HAND-COMPUTED, values unchanged from the build session:
 
-    * reference 2025 < POC 2030 -> ARMED; the 11:30 close 2037 > 2030 -> TRIGGER, entry 2037
-      (all of this is what CONTEXT 8 pins and the conflict does not touch);
+    * reference 2025 < POC 2030 -> ARMED; the 11:30 close 2037 > 2030 -> TRIGGER, entry 2037;
     * the entry candle's low is 2032, which IS above the POC 2030, so 3.4's gap predicate
       fires: **SL = the previous 15-minute candle's close = 2025**, risk 12,
-      **TP = 2037 + 36 = 2073** -- NOT CONTEXT 8's 2032/2052.
+      **TP = 2037 + 36 = 2073**;
     * exit: neither 2025 nor 2073 is touched by 12:00, and no candle trades after it, so the
       day squares off at the last traded candle's close (R1-Q18).
 
-    This test asserts the ENGINE, which implements CONTEXT 3.4 verbatim. It is not a claim that
-    2025 is the right stop -- QUESTIONS.md Q-15 asks the architect which sentence gives way, and
-    the test above already pins the other answer.
+    The two properties Q-15's arithmetic rests on are asserted as properties, not just as these
+    numbers: the gap stop is a PRIOR CLOSE and it can never be above the POC (while ARMED every
+    close is at or below it), so on a day whose entry is 2037 the gap risk is at least 7 -- never
+    CONTEXT 8's 5. That is why the fixture's own POC had to be the thing that moved.
     """
     result = sig.evaluate_day(F1_BARS, day=DAY, side=sig.LONG, poc_paise=POC(2030))
 
@@ -184,6 +198,7 @@ def test_f1_at_context_8_poc_2030_the_gap_predicate_takes_the_previous_close() -
     assert entry.entry_paise == R(2037) and closes_at(result, 9)
     assert entry.gap_entry and entry.stop_source == sig.STOP_FROM_PREVIOUS_CLOSE
     assert (entry.stop_paise, entry.risk_paise, entry.target_paise) == (R(2025), R(12), R(2073))
+    assert entry.stop_paise <= R(2030) and entry.risk_paise >= R(7)
     assert result.exit_event is not None and result.exit_event.kind == sig.EXIT_SQUARE_OFF
 
 
@@ -208,8 +223,9 @@ F2_BARS = (
 )
 
 
-def test_f2_reproduces_context_8_entry_sl_tp_exactly_at_a_poc_the_gap_rule_leaves_alone() -> None:
-    """**F2 at signal level, CONTEXT 8's entry/SL/TP to the paisa** (POC 2032, Q-15 option (a)).
+def test_f2_golden_context_8_entry_sl_tp_to_the_paisa_at_the_ruled_poc_2032() -> None:
+    """**THE F2 GOLDEN at signal level: CONTEXT 8's entry/SL/TP to the paisa** (POC 2032, the
+    POC CONTEXT v1.4 8 pins for F2 per the Q-15 ruling, option (a), 29-Jul-2026).
 
     HAND-COMPUTED, and it walks the whole Entry-2 path CONTEXT 8 describes:
 
@@ -245,14 +261,19 @@ def test_f2_reproduces_context_8_entry_sl_tp_exactly_at_a_poc_the_gap_rule_leave
     assert result.exit_event.close_stamp == sig.bar_close_stamp(DAY, 13)
 
 
-def test_f2_at_context_8_poc_2030_the_gap_predicate_takes_the_previous_close() -> None:
-    """**F2 at CONTEXT 8's own POC 2030** -- the Q-15 conflict again, on the Entry-2 path.
+def test_measurement_f2_candles_at_the_superseded_poc_2030_take_the_gap_branch() -> None:
+    """**A MEASUREMENT, not a golden**: F2's candles at the superseded illustrative POC 2030 --
+    the same gap-branch measurement as its F1 counterpart, on the Entry-2 path.
 
-    HAND-COMPUTED under CONTEXT 3.4 as written: the state walk is identical (2034 > 2030 ->
-    WAIT-BELOW; 2038 above while waiting consumes nothing; 2027 < 2030 arms; 2037 > 2030
-    triggers at entry 2037), but the entry candle's low 2032 is above the POC 2030, so the gap
-    branch takes **SL = the previous candle's close = 2027**, risk 10, **TP = 2037 + 30 = 2067**
-    -- not CONTEXT 8's 2032/2052. Exit: nothing touches 2027 or 2067, so the day squares off.
+    HAND-COMPUTED under CONTEXT 3.4, which the Q-15 ruling left untouched; values unchanged from
+    the build session. The state walk is identical to the golden's (2034 > 2030 -> WAIT-BELOW;
+    2038 above while waiting consumes nothing; 2027 < 2030 arms; 2037 > 2030 triggers at entry
+    2037), but the entry candle's low 2032 is above the POC 2030, so the gap branch takes
+    **SL = the previous candle's close = 2027**, risk 10, **TP = 2037 + 30 = 2067**. Exit:
+    nothing touches 2027 or 2067, so the day squares off.
+
+    The same two properties are asserted here: the stop is a prior close at or below the POC, so
+    the risk is at least 7 -- the arming path cannot produce CONTEXT 8's 5 on this branch.
     """
     result = sig.evaluate_day(F2_BARS, day=DAY, side=sig.LONG, poc_paise=POC(2030))
 
@@ -260,7 +281,9 @@ def test_f2_at_context_8_poc_2030_the_gap_predicate_takes_the_previous_close() -
     entry = result.entry
     assert entry is not None and closes_at(result, 11)
     assert entry.entry_paise == R(2037) and entry.gap_entry
+    assert entry.stop_source == sig.STOP_FROM_PREVIOUS_CLOSE
     assert (entry.stop_paise, entry.risk_paise, entry.target_paise) == (R(2027), R(10), R(2067))
+    assert entry.stop_paise <= R(2030) and entry.risk_paise >= R(7)
     assert result.exit_event is not None and result.exit_event.kind == sig.EXIT_SQUARE_OFF
 
 

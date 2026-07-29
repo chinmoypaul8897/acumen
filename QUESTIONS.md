@@ -2042,7 +2042,7 @@ and none of them moved.
 
 ---
 
-## Q-15 · chunk 7 · class A · **OPEN -- STOP** · BLOCKS one assertion of fixtures F1 and F2
+## Q-15 · chunk 7 · class A · **RESOLVED — ruled (a) and executed, chunk-7 fix (2026-07-29)** · was BLOCKING one assertion of fixtures F1 and F2
 
 **Question.** CONTEXT §8's F1 and F2 pin `POC 2030, entry 2037, SL 2032 (risk 5), TP 2052`.
 CONTEXT §3.4 defines a **gap entry** as "entry candle's low > POC" and gives it a DIFFERENT stop:
@@ -2102,3 +2102,36 @@ POC in §8 and is built at a POC that makes its own triple exact; F4 IS the gap 
 reproduces `SL 2028 / TP 2084` exactly). If the architect rules (b), the second pair of tests
 becomes the F1/F2 goldens under a corrected engine and the first pair is deleted; if (a), the
 first pair is deleted and §8's F1/F2 rows gain their POC. Either way nothing is re-measured.
+
+**ARCHITECT'S RULING (relayed to the chunk-7 fix session, 2026-07-29), verbatim:**
+
+> "ARCHITECT'S RULING (option a): F1/F2's illustrative POC moves to 2032; CONTEXT 3.4 is
+> untouched. Rationale: option (b) would change the trader's own rule; option (a) changes only
+> an example parameter while preserving every number the trader ever stated (entry 2037, SL
+> 2032, risk 5, TP 2052) and every rule he ever gave. Precedence (CONTEXT 10: later answers
+> correct earlier text): his R1-Q13/R2-Q33 gap formalization ('never trades AT the POC price at
+> all') supersedes the PDF's loosely chosen 2030. The result teaches the boundary: with POC 2032
+> the entry candle's low TOUCHES the POC exactly → low > POC is FALSE → NORMAL branch → SL = low
+> = 2032. F4 remains the gap witness. Q-15 RESOLVED."
+
+**RESOLVED — executed by the chunk-7 fix session (2026-07-29).** The ruling touches an example
+parameter and a designation, nothing else:
+
+- **CONTEXT v1.4** (architect-authored text, applied by this session exactly as supplied): §8's
+  F1 and F2 rows now read POC **2032**, and §10 carries the v1.4 log entry. §3.4 is UNCHANGED —
+  `low > POC` remains the gap predicate, with no added condition, which is what the engine
+  already implements. No engine line changed under this ruling.
+- **The golden is now the POC-2032 parametrization** of F1 and F2 (`test_f1_golden_...` /
+  `test_f2_golden_...` in `tests/test_signals.py`, docstrings citing this ruling): CONTEXT §8's
+  `entry 2037 / SL 2032 (risk 5) / TP 2052` reproduces to the paisa, by the NORMAL branch,
+  because the entry candle's low TOUCHES the POC and `low > POC` is therefore FALSE — the
+  boundary the ruling says the fixture now teaches.
+- **The POC-2030 parametrization is KEPT, relabelled a MEASUREMENT** (`test_measurement_...`),
+  not deleted — which is where execution departs from this item's own closing sentence above.
+  It measures the same candles on the gap branch: prior-close stop, and the risk floor this item
+  derived (`>= 7`, since while ARMED every close is at or below the POC) is now asserted as a
+  property rather than left as prose. It is no longer a golden and no longer claims to be
+  CONTEXT §8.
+- **Nothing was re-measured.** Every expected value in both pairs is the one the build session
+  hand-computed; no fixture byte changed (`tests/fixtures/`, `poc/data/` untouched). F3 and F4
+  are unaffected, and **F4 remains the single gap witness**, exactly as the ruling states.
