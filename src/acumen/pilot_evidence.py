@@ -735,7 +735,6 @@ def ledger_table(rows: Sequence[bt.LedgerRow]) -> list[str]:
 def metrics_table(label: str, metrics: pf.Metrics) -> list[str]:
     excursion = metrics.max_drawdown
     run_up = metrics.max_run_up
-    intra_dd = metrics.intra_trade_max_drawdown
     return [
         f"| Net PnL | {_money(metrics.net_pnl_paise)} |",
         f"| Gross profit | {_money(metrics.gross_profit_paise)} |",
@@ -772,14 +771,8 @@ def metrics_table(label: str, metrics: pf.Metrics) -> list[str]:
             f"({pf.format_pct(run_up.pct)}), {run_up.trough_day or 'opening capital'} -> "
             f"{run_up.peak_day}, {run_up.duration_days} observation(s) |"
         ),
-        (
-            f"| Max drawdown (intra-trade, PROVISIONAL) | {_money(intra_dd.amount_paise)}, "
-            f"{intra_dd.peak_day} -> {intra_dd.trough_day} |"
-        ),
-        (
-            f"| Max run-up (intra-trade, PROVISIONAL) | "
-            f"{_money(metrics.intra_trade_max_run_up.amount_paise)} |"
-        ),
+        _path_line("Max drawdown", metrics.intraday_max_drawdown, metrics),
+        _path_line("Max run-up", metrics.intraday_max_run_up, metrics),
         f"| Return on initial capital | {pf.format_pct(metrics.return_on_initial_capital)} |",
         f"| CAGR | {_decimal_pct(metrics.cagr)} |",
         f"| Sharpe (daily, rf 0, x sqrt 252) | {_decimal(metrics.sharpe)} |",
@@ -788,6 +781,41 @@ def metrics_table(label: str, metrics: pf.Metrics) -> list[str]:
         f"| Largest MFE / largest MAE | {_money(metrics.largest_mfe_paise)} / {_money(metrics.largest_mae_paise)} |",
         f"| Trading days in the series | {metrics.trading_days} |",
     ]
+
+
+def _path_stamp(point: pf.PathPoint | None) -> str:
+    """A path observation as ``YYYY-MM-DD HH:MM``, or what ``None`` means on that column."""
+    if point is None:
+        return "opening capital"
+    if point.stamp is None:
+        return f"{point.day} close"
+    return point.stamp.strftime("%Y-%m-%d %H:%M")
+
+
+def _path_line(label: str, excursion: pf.PathExcursion | None, metrics: pf.Metrics) -> str:
+    """The intra-trade form of E13's drawdown/run-up, measured on the 15-minute path.
+
+    Q-16(b) RULED (architect, 30-Jul-2026): the worst-case coincidence construction is retired.
+    The ruling's single disclosed limit is printed with the figure, so nothing is implied.
+    """
+    if excursion is None:
+        return f"| {label} (intra-trade, 15-min path) | NOT COMPUTED -- {metrics.intraday_note} |"
+    first, second = (
+        (excursion.peak, excursion.trough)
+        if label.startswith("Max drawdown")
+        else (excursion.trough, excursion.peak)
+    )
+    recovered = (
+        "recovered " + _path_stamp(excursion.recovered)
+        if excursion.recovered is not None
+        else "never recovered in the window"
+    )
+    return (
+        f"| {label} (intra-trade, 15-min path) | {_money(excursion.amount_paise)} "
+        f"({pf.format_pct(excursion.pct)}), {_path_stamp(first)} -> {_path_stamp(second)}, "
+        f"{excursion.observations} observation(s) of {metrics.intraday_observations}, "
+        f"{recovered}. LIMIT: {excursion.note} |"
+    )
 
 
 def _outlier_line(found: pf.Outliers) -> str:
@@ -846,13 +874,20 @@ def render_markdown(
     benchmark: pf.Benchmark,
     master_name: str,
     initial_capital_paise: int,
+    trade_paths: tuple[bt.TradePath, ...],
     command: str,
 ) -> str:
     rows = pilot.result.rows
     manifest = pilot.result.manifest
-    metrics = pf.metrics(rows, initial_capital_paise=initial_capital_paise)
-    split = pf.side_split(rows, initial_capital_paise=initial_capital_paise)
-    symbols = pf.per_symbol(rows, initial_capital_paise=initial_capital_paise)
+    metrics = pf.metrics(
+        rows, initial_capital_paise=initial_capital_paise, paths=trade_paths
+    )
+    split = pf.side_split(
+        rows, initial_capital_paise=initial_capital_paise, paths=trade_paths
+    )
+    symbols = pf.per_symbol(
+        rows, initial_capital_paise=initial_capital_paise, paths=trade_paths
+    )
     disclosures = pf.disclosures(rows)
     flags = pf.capital_flags(
         rows,
@@ -1238,7 +1273,11 @@ def render_markdown(
     add("## 8. Invariants asserted over this pack")
     add("")
     for line in invariant_report(
-        pilot, resume, benchmark, initial_capital_paise=initial_capital_paise
+        pilot,
+        resume,
+        benchmark,
+        initial_capital_paise=initial_capital_paise,
+        trade_paths=trade_paths,
     ):
         add(f"* {line}")
     add("")
@@ -1267,6 +1306,7 @@ def invariant_report(
     benchmark: pf.Benchmark,
     *,
     initial_capital_paise: int,
+    trade_paths: tuple[bt.TradePath, ...] = (),
 ) -> list[str]:
     """Every invariant this pack claims, each recomputed here and printed with its verdict."""
     rows = pilot.result.rows
@@ -1385,6 +1425,30 @@ def invariant_report(
         "the benchmark is built from the first trade date's closes",
         benchmark.total_return is not None,
     )
+    series = pf.daily_pnl(rows)
+    path_points = pf.intraday_equity_path(
+        series, trade_paths, initial_capital_paise=initial_capital_paise
+    )
+    check(
+        "every 15-minute path reconciles with the ledger (last mark == realized net PnL)",
+        len(trade_paths) == len(executed)
+        and all(pf.path_reconciles(path) for path in trade_paths),
+        f" ({len(trade_paths)} paths, {sum(len(p.marks) for p in trade_paths):,} marks)",
+    )
+    closes = {point.day: point.equity_paise for point in path_points if point.stamp is None}
+    check(
+        "each day's last 15-minute observation equals that day's closing equity",
+        closes == {point.day: point.equity_paise for point in points},
+        f" ({len(path_points):,} path observations)",
+    )
+    check(
+        "the 15-minute path never rests on a mark outside the session (CONTEXT 3.1)",
+        all(
+            bt.is_standard_session_stamp(mark.stamp - timedelta(minutes=15))
+            for path in trade_paths
+            for mark in path.marks
+        ),
+    )
     return lines
 
 
@@ -1476,6 +1540,9 @@ def build_everything(
         last_day=PILOT_END,
         initial_capital_paise=config.initial_capital_paise(),
     )
+    trade_paths = bt.assemble_trade_paths(
+        pilot.result.rows, bars_for=bt.minute_store_bars(pilot_runner.minute_store)
+    )
     master = bt.latest_cached_master(config.path("cache_dir"))[1].name
     return {
         "pilot": pilot,
@@ -1490,6 +1557,7 @@ def build_everything(
         "benchmark": benchmark,
         "master_name": master,
         "initial_capital_paise": config.initial_capital_paise(),
+        "trade_paths": trade_paths,
     }
 
 

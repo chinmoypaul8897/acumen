@@ -28,9 +28,13 @@ root are Decimal.** No float is produced anywhere in this file (CONTEXT 7-E11).
 
 **The two E13 entries the build session STOPPED on are now ruled** (QUESTIONS.md Q-16,
 architect 30-Jul-2026). Outliers are Tukey fences on net PnL and the rule travels with the
-number -- see :data:`OUTLIER_DEFINITION` and :func:`outliers`. The intra-trade drawdown and
-run-up are still :data:`INTRA_TRADE_PROVISIONAL` in this commit and are replaced by the true
-15-minute path in the next one.
+number -- see :data:`OUTLIER_DEFINITION` and :func:`outliers`. The intra-trade / intrabar
+drawdown and run-up are measured on the TRUE portfolio equity path at 15-minute resolution --
+:func:`intraday_equity_path`, :func:`path_max_drawdown`, :func:`path_max_run_up` -- and the
+worst-case coincidence construction that stood in for them is GONE, with nothing provisional
+left in its place. The path's marks are assembled in the I/O layer
+(:func:`acumen.backtest.assemble_trade_paths`), because assembling them needs the stored
+candles; everything here stays pure.
 
 Source files in this package are ASCII-only on purpose (see src/acumen/config.py).
 """
@@ -43,7 +47,7 @@ from decimal import Decimal
 from fractions import Fraction
 from typing import Iterable, Mapping, Sequence
 
-from .backtest import LedgerRow
+from .backtest import LedgerRow, TradePath
 from .signals import LONG, SHORT
 
 #: E13's annualization convention, stated by the spec itself: "Sharpe & Sortino on the DAILY
@@ -67,16 +71,22 @@ QUARTILE_LOW: Fraction = Fraction(1, 4)
 QUARTILE_HIGH: Fraction = Fraction(3, 4)
 TUKEY_MULTIPLIER: Fraction = Fraction(3, 2)
 
-#: The intra-trade / intrabar drawdown and run-up E13 asks for need an intraday equity PATH,
-#: and a take-all portfolio of concurrent intraday trades does not have an observable one: the
-#: ledger holds each trade's MFE and MAE but not WHEN inside the day each occurred. The
-#: construction below is the honest WORST/BEST case (every same-day excursion assumed to
-#: coincide), it is labelled provisional everywhere it is printed, and the convention is with
-#: the architect as QUESTIONS.md Q-16(b).
-INTRA_TRADE_PROVISIONAL: str = (
-    "PROVISIONAL construction -- the intraday equity path of concurrent trades is not "
-    "observable from the ledger; this assumes every same-day excursion coincides (worst case "
-    "for the drawdown, best case for the run-up). QUESTIONS.md Q-16(b) is pending"
+#: The architect's Q-16(b) ruling (30-Jul-2026) RETIRED the worst-case coincidence
+#: construction -- it invented co-timing, which is an assumption -- and replaced it with the
+#: true portfolio equity path at 15-minute resolution. This sentence is the ruling's own single
+#: disclosed limit and is printed beside every figure taken from the path.
+INTRADAY_PATH_LIMIT: str = (
+    "measured on the TRUE portfolio equity path at 15-minute resolution: every open position "
+    "marked to its 15-min candle closes, exit candles at their exit levels, summed across "
+    "positions. ONE disclosed limit: intra-candle excursions are not represented -- the "
+    "per-trade MFE/MAE figures carry those (QUESTIONS.md Q-16(b), architect 30-Jul-2026)"
+)
+
+#: What a metric set says when no path was handed to it. The path cannot be invented here: it
+#: is a function of the stored candles, and this module opens no file.
+INTRADAY_PATH_NOT_SUPPLIED: str = (
+    "15-minute path NOT supplied to this metric set -- it is assembled in the I/O layer by "
+    "acumen.backtest.assemble_trade_paths, which is the layer that holds the candles"
 )
 
 #: What every output says while the trader's Q43 answer is outstanding (same words as the
@@ -272,8 +282,6 @@ class DailyPnL:
     gross_paise: int
     cost_paise: int
     net_paise: int
-    mfe_paise: int
-    mae_paise: int
 
 
 def daily_pnl(
@@ -302,8 +310,6 @@ def daily_pnl(
                 gross_paise=sum(row.gross_pnl_paise for row in day_rows),
                 cost_paise=sum(row.cost_paise for row in day_rows),
                 net_paise=sum(row.net_pnl_paise for row in day_rows),
-                mfe_paise=sum(row.mfe_paise or 0 for row in day_rows),
-                mae_paise=sum(row.mae_paise or 0 for row in day_rows),
             )
         )
     return tuple(series)
@@ -311,13 +317,11 @@ def daily_pnl(
 
 @dataclass(frozen=True)
 class EquityPoint:
-    """One day of the equity curve, plus the PROVISIONAL intraday band (Q-16(b))."""
+    """One day of the equity curve: the day's net PnL and the closing equity after it."""
 
     day: date
     net_paise: int
     equity_paise: int
-    low_equity_paise: int
-    high_equity_paise: int
 
 
 def equity_curve(
@@ -326,24 +330,16 @@ def equity_curve(
     """``capital + cumulative net PnL`` per day (CONTEXT 3.5). A plain cumulative SUM. PURE.
 
     The fixed-INR-risk rule means the position size never depends on the running equity, so
-    compounding would be a fiction: the curve adds, it does not multiply. The low/high band on
-    each point is the provisional intraday envelope described in
-    :data:`INTRA_TRADE_PROVISIONAL` -- the day's costs are charged in both, because a trade
-    that opened has paid its round trip whichever way the price went.
+    compounding would be a fiction: the curve adds, it does not multiply. This is E13's
+    "equity close-to-close" series exactly; what happened INSIDE a day is the 15-minute path's
+    subject (:func:`intraday_equity_path`), not this curve's.
     """
     points: list[EquityPoint] = []
     equity = int(initial_capital_paise)
     for day in series:
-        opening = equity
         equity = equity + day.net_paise
         points.append(
-            EquityPoint(
-                day=day.day,
-                net_paise=day.net_paise,
-                equity_paise=equity,
-                low_equity_paise=min(equity, opening + day.mae_paise - day.cost_paise),
-                high_equity_paise=max(equity, opening + day.mfe_paise - day.cost_paise),
-            )
+            EquityPoint(day=day.day, net_paise=day.net_paise, equity_paise=equity)
         )
     return tuple(points)
 
@@ -367,13 +363,12 @@ class Excursion:
         return self.amount_paise == 0
 
 
-def max_drawdown(points: Sequence[EquityPoint], *, intrabar: bool = False) -> Excursion:
+def max_drawdown(points: Sequence[EquityPoint]) -> Excursion:
     """The largest peak-to-trough fall of the equity curve. PURE.
 
-    ``intrabar=False`` is E13's "equity close-to-close" form: both the peak and the trough are
-    daily CLOSING equity. ``intrabar=True`` is the provisional intra-trade form -- the peak is
-    still a closing equity (a peak that never closed is not an equity anyone held) and the
-    trough is the day's provisional LOW (:data:`INTRA_TRADE_PROVISIONAL`).
+    This is E13's "equity close-to-close" form: both the peak and the trough are daily CLOSING
+    equity. The intra-trade / intrabar form is measured on the 15-minute path instead -- see
+    :func:`path_max_drawdown` -- and not on a band bolted onto this curve.
 
     The running peak starts at the run's OPENING capital -- the equity before the first day --
     not at the first day's close, because a fall measured from a close that came after the low
@@ -392,8 +387,7 @@ def max_drawdown(points: Sequence[EquityPoint], *, intrabar: bool = False) -> Ex
     best = Excursion(0, Fraction(0), peak_day, peak_day, 0, None)
     peak_index = -1
     for index, point in enumerate(points):
-        low = point.low_equity_paise if intrabar else point.equity_paise
-        fall = peak - low
+        fall = peak - point.equity_paise
         if fall > best.amount_paise:
             best = Excursion(
                 amount_paise=fall,
@@ -420,7 +414,7 @@ def max_drawdown(points: Sequence[EquityPoint], *, intrabar: bool = False) -> Ex
     return best
 
 
-def max_run_up(points: Sequence[EquityPoint], *, intrabar: bool = False) -> Excursion:
+def max_run_up(points: Sequence[EquityPoint]) -> Excursion:
     """The largest trough-to-peak rise -- the mirror of :func:`max_drawdown`. PURE.
 
     Symmetrically, the running trough starts at the opening capital and a ``trough_day`` of
@@ -433,8 +427,7 @@ def max_run_up(points: Sequence[EquityPoint], *, intrabar: bool = False) -> Excu
     trough_index = -1
     best = Excursion(0, Fraction(0), trough_day, trough_day, 0, None)
     for index, point in enumerate(points):
-        high = point.high_equity_paise if intrabar else point.equity_paise
-        rise = high - trough
+        rise = point.equity_paise - trough
         if rise > best.amount_paise:
             best = Excursion(
                 amount_paise=rise,
@@ -463,6 +456,242 @@ def _first_recovery(points: Sequence[EquityPoint], excursion: Excursion) -> date
         if seen_trough and peak_equity is not None and point.equity_paise >= peak_equity:
             return point.day
     return None
+
+
+# --- the 15-minute portfolio equity path (E13's intra-trade form, Q-16(b) ruling) ------------
+
+
+@dataclass(frozen=True)
+class PathPoint:
+    """One observation of the portfolio's equity inside the run, at 15-minute resolution.
+
+    ``stamp`` is the 15-minute candle close the observation was taken at; ``None`` marks the
+    day's CLOSING observation, which is there for every walked day -- including days that
+    traded nothing, so a drawdown can span them.
+    """
+
+    day: date
+    stamp: datetime | None
+    equity_paise: int
+    open_positions: int
+
+
+@dataclass(frozen=True)
+class PathExcursion:
+    """A drawdown or run-up measured on the 15-minute path, with the points that made it."""
+
+    amount_paise: int
+    pct: Fraction | None
+    peak: PathPoint | None
+    trough: PathPoint | None
+    observations: int
+    recovered: PathPoint | None
+    note: str = INTRADAY_PATH_LIMIT
+
+    @property
+    def is_empty(self) -> bool:
+        return self.amount_paise == 0
+
+
+def mark_pnl_paise(path: TradePath, price_paise: int) -> int:
+    """A position's PnL if it were marked at ``price_paise``, NET of its round-trip cost. PURE.
+
+    The cost is charged from the ENTRY mark onward (decision B194): the round trip is committed
+    the moment the position opens, and charging it there is what makes the last mark of a trade
+    equal its realized net PnL exactly, so the path runs continuously into the closed position
+    instead of stepping by Rs 100 at the exit.
+    """
+    if path.side == SHORT:
+        gross = (path.entry_paise - price_paise) * path.qty
+    else:
+        gross = (price_paise - path.entry_paise) * path.qty
+    return gross - path.cost_paise
+
+
+def path_reconciles(path: TradePath) -> bool:
+    """Does the trade's LAST mark reproduce its ledger net PnL exactly? PURE.
+
+    The invariant that makes the path trustworthy: if the exit mark is the exit LEVEL and the
+    arithmetic is the simulator's own, then marking the last observation must land on the money
+    the ledger recorded. A False here means the assembly and the ledger disagree.
+    """
+    if not path.marks:
+        return path.net_pnl_paise == 0
+    return mark_pnl_paise(path, path.marks[-1].price_paise) == path.net_pnl_paise
+
+
+def _contribution(path: TradePath, stamp: datetime) -> tuple[int, int]:
+    """``(PnL contribution, 1 if still open)`` of one trade at one 15-minute stamp. PURE."""
+    if stamp < path.marks[0].stamp:
+        return (0, 0)
+    price = path.marks[0].price_paise
+    for mark in path.marks:
+        if mark.stamp > stamp:
+            break
+        price = mark.price_paise
+    live = 0 if stamp >= path.marks[-1].stamp else 1
+    return (mark_pnl_paise(path, price), live)
+
+
+def intraday_equity_path(
+    series: Sequence[DailyPnL],
+    paths: Sequence[TradePath],
+    *,
+    initial_capital_paise: int,
+) -> tuple[PathPoint, ...]:
+    """The TRUE portfolio equity path at 15-minute resolution (Q-16(b) ruling). PURE.
+
+    At every 15-minute stamp of a day, every position open at that stamp is marked to its own
+    candle close (its exit candle to its exit level) and the marks are SUMMED across positions
+    onto the equity the day opened with. A position already closed contributes its realized net;
+    one not yet opened contributes nothing. Every walked day also contributes its CLOSING
+    observation, so the path spans days that traded nothing and a multi-day drawdown is
+    measurable on it.
+
+    Because CONTEXT 3.1 squares everything off at 15:15, no trade straddles a day: each day's
+    last observation therefore equals that day's closing equity on the daily curve, which is the
+    invariant that ties this path to :func:`equity_curve`.
+
+    The disclosed limit is :data:`INTRADAY_PATH_LIMIT`: a mark is a candle CLOSE, so an
+    excursion that happened inside a candle and reversed before it closed is not on this path.
+    The per-trade MFE/MAE figures are exactly what carry those.
+    """
+    by_day: dict[date, list[TradePath]] = {}
+    for path in paths:
+        by_day.setdefault(path.day, []).append(path)
+
+    points: list[PathPoint] = []
+    equity = int(initial_capital_paise)
+    for day in series:
+        opening = equity
+        day_paths = by_day.get(day.day, ())
+        stamps = sorted({mark.stamp for path in day_paths for mark in path.marks})
+        for stamp in stamps:
+            total = 0
+            live = 0
+            for path in day_paths:
+                contribution, open_now = _contribution(path, stamp)
+                total += contribution
+                live += open_now
+            points.append(PathPoint(day.day, stamp, opening + total, live))
+        equity = opening + day.net_paise
+        points.append(PathPoint(day.day, None, equity, 0))
+    return tuple(points)
+
+
+def path_max_drawdown(
+    points: Sequence[PathPoint], *, initial_capital_paise: int
+) -> PathExcursion:
+    """The largest peak-to-trough fall of the 15-minute path. PURE.
+
+    The running peak is seeded at the run's OPENING capital, exactly as the close-to-close form
+    is (decision B185): a ``peak`` of ``None`` means the fall started from the opening capital.
+    ``observations`` counts path points from the peak to the trough, and ``recovered`` is the
+    first later observation to reach the peak again.
+    """
+    if not points:
+        return PathExcursion(0, None, None, None, 0, None)
+    peak = int(initial_capital_paise)
+    peak_point: PathPoint | None = None
+    peak_index = -1
+    best = PathExcursion(0, Fraction(0), None, None, 0, None)
+    for index, point in enumerate(points):
+        fall = peak - point.equity_paise
+        if fall > best.amount_paise:
+            best = PathExcursion(
+                amount_paise=fall,
+                pct=Fraction(fall, peak) if peak != 0 else None,
+                peak=peak_point,
+                trough=point,
+                observations=index - peak_index,
+                recovered=None,
+            )
+        if point.equity_paise > peak:
+            peak, peak_point, peak_index = point.equity_paise, point, index
+    if best.amount_paise == 0:
+        return best
+    return _with_recovery(points, best, peak_level=peak_of(best, initial_capital_paise))
+
+
+def path_max_run_up(
+    points: Sequence[PathPoint], *, initial_capital_paise: int
+) -> PathExcursion:
+    """The largest trough-to-peak rise of the 15-minute path -- the exact mirror. PURE.
+
+    E13 asks for run-ups "in the same forms", so this fills ``recovered`` too: the first later
+    observation to fall back to the trough level (REVIEW_9A finding Q5).
+    """
+    if not points:
+        return PathExcursion(0, None, None, None, 0, None)
+    trough = int(initial_capital_paise)
+    trough_point: PathPoint | None = None
+    trough_index = -1
+    best = PathExcursion(0, Fraction(0), None, None, 0, None)
+    for index, point in enumerate(points):
+        rise = point.equity_paise - trough
+        if rise > best.amount_paise:
+            best = PathExcursion(
+                amount_paise=rise,
+                pct=Fraction(rise, trough) if trough != 0 else None,
+                peak=point,
+                trough=trough_point,
+                observations=index - trough_index,
+                recovered=None,
+            )
+        if point.equity_paise < trough:
+            trough, trough_point, trough_index = point.equity_paise, point, index
+    if best.amount_paise == 0:
+        return best
+    level = (
+        initial_capital_paise if best.trough is None else best.trough.equity_paise
+    )
+    after = _points_after(points, best.peak)
+    for point in after:
+        if point.equity_paise <= level:
+            return PathExcursion(
+                best.amount_paise,
+                best.pct,
+                best.peak,
+                best.trough,
+                best.observations,
+                point,
+            )
+    return best
+
+
+def peak_of(excursion: PathExcursion, initial_capital_paise: int) -> int:
+    """The equity the drawdown fell FROM -- the opening capital when the peak is ``None``."""
+    if excursion.peak is None:
+        return int(initial_capital_paise)
+    return excursion.peak.equity_paise
+
+
+def _with_recovery(
+    points: Sequence[PathPoint], excursion: PathExcursion, *, peak_level: int
+) -> PathExcursion:
+    for point in _points_after(points, excursion.trough):
+        if point.equity_paise >= peak_level:
+            return PathExcursion(
+                excursion.amount_paise,
+                excursion.pct,
+                excursion.peak,
+                excursion.trough,
+                excursion.observations,
+                point,
+            )
+    return excursion
+
+
+def _points_after(
+    points: Sequence[PathPoint], marker: PathPoint | None
+) -> tuple[PathPoint, ...]:
+    """Every observation strictly after ``marker`` (all of them when it is ``None``)."""
+    if marker is None:
+        return tuple(points)
+    for index, point in enumerate(points):
+        if point is marker or (point.day == marker.day and point.stamp == marker.stamp):
+            return tuple(points[index + 1 :])
+    return ()  # pragma: no cover -- the marker always comes from `points`
 
 
 # --- risk-adjusted return (E13's own conventions) --------------------------------------------
@@ -780,9 +1009,11 @@ class Metrics:
     """CONTEXT 7-E13's authoritative list, computed over one set of ledger rows.
 
     Every money field is integer paise; every ratio is an exact :class:`~fractions.Fraction`;
-    Sharpe and Sortino are :class:`~decimal.Decimal` because they need a square root. Two
-    entries are deliberately NOT numbers -- ``outliers`` and the two ``intra_*`` excursions --
-    see :data:`OUTLIERS_NOT_COMPUTED` and :data:`INTRA_TRADE_PROVISIONAL`.
+    Sharpe and Sortino are :class:`~decimal.Decimal` because they need a square root. The two
+    entries the build session had to leave blank are both computed now, under the architect's
+    Q-16 ruling: ``outliers`` carries its own definition, and the ``intraday_*`` excursions are
+    measured on the true 15-minute path when one is supplied (:data:`INTRADAY_PATH_LIMIT`) and
+    are ``None``, with :data:`INTRADAY_PATH_NOT_SUPPLIED` said out loud, when one is not.
     """
 
     label: str
@@ -820,9 +1051,10 @@ class Metrics:
     cagr: Decimal | None
     max_drawdown: Excursion
     max_run_up: Excursion
-    intra_trade_max_drawdown: Excursion
-    intra_trade_max_run_up: Excursion
-    intra_trade_note: str
+    intraday_max_drawdown: PathExcursion | None
+    intraday_max_run_up: PathExcursion | None
+    intraday_observations: int
+    intraday_note: str
     sharpe: Decimal | None
     sortino: Decimal | None
     # --- excursions
@@ -842,6 +1074,7 @@ def metrics(
     label: str = "All",
     initial_capital_paise: int,
     days: Sequence[date] | None = None,
+    paths: Sequence[TradePath] = (),
 ) -> Metrics:
     """The whole E13 list over ``rows``. PURE.
 
@@ -854,6 +1087,11 @@ def metrics(
     index = tuple(days) if days is not None else walked_days(rows)
     series = daily_pnl(rows, days=index)
     points = equity_curve(series, initial_capital_paise)
+    path_points = (
+        intraday_equity_path(series, paths, initial_capital_paise=initial_capital_paise)
+        if paths
+        else ()
+    )
     trades = executed(rows)
     wins = [row for row in trades if row.net_pnl_paise > 0]
     losses = [row for row in trades if row.net_pnl_paise < 0]
@@ -917,9 +1155,18 @@ def metrics(
         cagr=_cagr(initial_capital_paise, final_equity, span),
         max_drawdown=max_drawdown(points),
         max_run_up=max_run_up(points),
-        intra_trade_max_drawdown=max_drawdown(points, intrabar=True),
-        intra_trade_max_run_up=max_run_up(points, intrabar=True),
-        intra_trade_note=INTRA_TRADE_PROVISIONAL,
+        intraday_max_drawdown=(
+            None
+            if not path_points
+            else path_max_drawdown(path_points, initial_capital_paise=initial_capital_paise)
+        ),
+        intraday_max_run_up=(
+            None
+            if not path_points
+            else path_max_run_up(path_points, initial_capital_paise=initial_capital_paise)
+        ),
+        intraday_observations=len(path_points),
+        intraday_note=INTRADAY_PATH_LIMIT if path_points else INTRADAY_PATH_NOT_SUPPLIED,
         sharpe=sharpe(points),
         sortino=sortino(points),
         avg_mfe_paise=_ratio(sum(row.mfe_paise or 0 for row in trades), len(trades)),
@@ -933,35 +1180,58 @@ def metrics(
 
 
 def side_split(
-    rows: Sequence[LedgerRow], *, initial_capital_paise: int
+    rows: Sequence[LedgerRow],
+    *,
+    initial_capital_paise: int,
+    paths: Sequence[TradePath] = (),
 ) -> dict[str, Metrics]:
     """E13's All / Long / Short column split. PURE.
 
     A side's subset keeps every walked day, so its daily series has the same index as the
-    portfolio's and its Sharpe is annualized over the same sample.
+    portfolio's and its Sharpe is annualized over the same sample. Each column's 15-minute path
+    is built from that column's own trades, so a side's intraday drawdown is that side's, never
+    a slice of the portfolio's.
     """
     index = walked_days(rows)
     return {
         "All": metrics(
-            rows, label="All", initial_capital_paise=initial_capital_paise, days=index
+            rows,
+            label="All",
+            initial_capital_paise=initial_capital_paise,
+            days=index,
+            paths=paths,
         ),
         "Long": metrics(
             for_side(rows, LONG),
             label="Long",
             initial_capital_paise=initial_capital_paise,
             days=index,
+            paths=paths_for_side(paths, LONG),
         ),
         "Short": metrics(
             for_side(rows, SHORT),
             label="Short",
             initial_capital_paise=initial_capital_paise,
             days=index,
+            paths=paths_for_side(paths, SHORT),
         ),
     }
 
 
+def paths_for_side(paths: Sequence[TradePath], side: str) -> tuple[TradePath, ...]:
+    return tuple(path for path in paths if path.side == side)
+
+
+def paths_for_symbol(paths: Sequence[TradePath], symbol: str) -> tuple[TradePath, ...]:
+    wanted = symbol.strip().upper()
+    return tuple(path for path in paths if path.symbol == wanted)
+
+
 def per_symbol(
-    rows: Sequence[LedgerRow], *, initial_capital_paise: int
+    rows: Sequence[LedgerRow],
+    *,
+    initial_capital_paise: int,
+    paths: Sequence[TradePath] = (),
 ) -> dict[str, Metrics]:
     """E13's per-symbol breakdown table. PURE."""
     symbols = sorted({row.symbol for row in rows})
@@ -972,6 +1242,7 @@ def per_symbol(
             label=symbol,
             initial_capital_paise=initial_capital_paise,
             days=index,
+            paths=paths_for_symbol(paths, symbol),
         )
         for symbol in symbols
     }

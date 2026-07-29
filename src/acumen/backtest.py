@@ -50,7 +50,7 @@ from . import corp_actions as ca
 from . import signal_engine as se
 from . import signals as sig
 from . import simulate as sim
-from .aggregate import Bar
+from .aggregate import Bar, aggregate_15min
 from .atomic_io import atomic_write_text
 from .bias import RULE_3_NO_MINUTE
 from .bias_engine import BiasEngine, BiasEngineError, DailyBias
@@ -356,6 +356,102 @@ def trade_excursion_paise(
     else:
         favourable, adverse = entry_paise - lowest, entry_paise - highest
     return (max(0, favourable) * qty, min(0, adverse) * qty)
+
+
+# --- the 15-minute portfolio path (Q-16(b)): ASSEMBLY here, the METRIC in portfolio.py -------
+
+
+@dataclass(frozen=True)
+class TradeMark:
+    """One 15-minute observation of an open position: when, and at what price it was marked."""
+
+    stamp: datetime
+    price_paise: int
+
+
+@dataclass(frozen=True)
+class TradePath:
+    """One executed trade's marks, from its entry candle's close to its exit.
+
+    This is the raw material of the architect's Q-16(b) ruling: "every open position marked to
+    its 15-min candle closes (exit candles at their exit levels), summed across positions". The
+    summation and the drawdown live in :mod:`acumen.portfolio`, which is pure; the marks are
+    assembled HERE because assembling them needs the stored candles.
+    """
+
+    symbol: str
+    day: date
+    side: str
+    qty: int
+    entry_paise: int
+    cost_paise: int
+    net_pnl_paise: int
+    marks: tuple[TradeMark, ...]
+
+
+def minute_store_bars(store: MinuteStore) -> Callable[[str, date], tuple[Bar, ...]]:
+    """A ``bars_for(symbol, day)`` over the stored minutes, aggregated per CONTEXT 7-E1/E12.
+
+    The same aggregation the signal engine ran, so a mark is taken from the very candle the
+    strategy saw -- there is no second source of 15-minute bars anywhere in this repo.
+    """
+
+    def bars_for(symbol: str, day: date) -> tuple[Bar, ...]:
+        minutes = store.minutes(symbol, day)
+        return aggregate_15min(minutes) if minutes else ()
+
+    return bars_for
+
+
+def assemble_trade_paths(
+    rows: Sequence[LedgerRow],
+    *,
+    bars_for: Callable[[str, date], Sequence[Bar]],
+) -> tuple[TradePath, ...]:
+    """Mark every executed trade at each 15-minute candle close it was held. I/O via ``bars_for``.
+
+    The marks run from the ENTRY candle's close (where the position opened at that candle's
+    close, CONTEXT 3.4) through the EXIT candle's close stamp, and the last mark carries the
+    trade's EXIT LEVEL rather than that candle's close -- a target or a stop fills at its level
+    even when the candle ran past it (CONTEXT 3.4-5), so marking the exit candle at its close
+    would report an excursion the trade never had.
+
+    A missing candle cannot invent a mark: the entry and exit observations are supplied from
+    the ledger's own prices when the aggregation has no bar on those stamps, and nothing between
+    them is interpolated.
+    """
+    paths: list[TradePath] = []
+    for row in rows:
+        if not row.executed or row.entry_paise is None or row.entry_close_stamp is None:
+            continue
+        entry_stamp = row.entry_close_stamp
+        exit_stamp = row.exit_close_stamp or entry_stamp
+        exit_paise = row.exit_paise if row.exit_paise is not None else row.entry_paise
+        marks: list[TradeMark] = []
+        for bar in bars_for(row.symbol, row.day):
+            if bar.close_stamp < entry_stamp or bar.close_stamp > exit_stamp:
+                continue
+            marks.append(TradeMark(bar.close_stamp, int(bar.close_paise)))
+        marks.sort(key=lambda mark: mark.stamp)
+        if not marks or marks[0].stamp != entry_stamp:
+            marks.insert(0, TradeMark(entry_stamp, row.entry_paise))
+        if marks[-1].stamp == exit_stamp:
+            marks[-1] = TradeMark(exit_stamp, exit_paise)  # the LEVEL, not the candle's close
+        else:
+            marks.append(TradeMark(exit_stamp, exit_paise))
+        paths.append(
+            TradePath(
+                symbol=row.symbol,
+                day=row.day,
+                side=row.side or sig.LONG,
+                qty=row.qty,
+                entry_paise=row.entry_paise,
+                cost_paise=row.cost_paise,
+                net_pnl_paise=row.net_pnl_paise,
+                marks=tuple(marks),
+            )
+        )
+    return tuple(paths)
 
 
 # --- the run spec ---------------------------------------------------------------------------

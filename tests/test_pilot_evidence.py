@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import replace
-from datetime import date
+from datetime import date, datetime, time
 from decimal import Decimal
 from pathlib import Path
 
@@ -65,6 +65,13 @@ def executed_row(
         cost_paise=10_000,
         net_pnl_paise=gross - 10_000,
         exit_kind=exit_kind,
+        # stamps and an exit price CONSISTENT with the gross, so the row can be marked on the
+        # 15-minute path the Q-16(b) ruling requires (the real ledger always carries these)
+        entry_close_stamp=datetime.combine(day, time(12, 0)),
+        exit_close_stamp=datetime.combine(day, time(14, 0)),
+        exit_paise=(
+            200_000 + gross // qty if side == LONG else 200_000 - gross // qty
+        ),
         mfe_paise=max(0, gross),
         mae_paise=min(0, gross),
         gate1_passed=True,
@@ -286,6 +293,7 @@ def verdicts(rows, resume=None) -> dict[str, bool]:
         resume or good_resume(),
         benchmark(),
         initial_capital_paise=10_000_000,
+        trade_paths=bt.assemble_trade_paths(rows, bars_for=lambda symbol, day: ()),
     )
     out = {}
     for line in lines:

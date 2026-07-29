@@ -161,8 +161,6 @@ def _points(nets: list[int]) -> tuple[pf.EquityPoint, ...]:
             gross_paise=n,
             cost_paise=0,
             net_paise=n,
-            mfe_paise=0,
-            mae_paise=0,
         )
         for i, n in enumerate(nets)
     ]
@@ -243,7 +241,7 @@ def test_every_other_ratio_returns_none_instead_of_dividing_by_zero() -> None:
 
 
 # ==============================================================================================
-# The excursions the PROVISIONAL band is built from (Q-16(b))
+# The per-trade excursions -- what carries intra-candle moves under the Q-16(b) ruling
 # ==============================================================================================
 
 
@@ -253,10 +251,10 @@ def _bar(hour: int, minute: int, high: int, low: int) -> Bar:
 
 
 def test_the_ledger_excursions_are_position_scaled_not_per_share() -> None:
-    """Load-bearing for Q-16(b): the provisional intraday band adds a day's MFE and MAE
-    straight onto the equity curve, so the ledger's excursions must already be in portfolio
-    rupees. Doubling the position doubles both -- if they were per-share the band would be
-    wrong by a factor of qty on every day."""
+    """Still load-bearing for Q-16(b), for a NEW reason: the ruling's one disclosed limit is
+    that the 15-minute path cannot see inside a candle, and it names the per-trade MFE/MAE as
+    what carries those excursions instead. So they must be in portfolio rupees, not per share.
+    Doubling the position doubles both."""
     bars = (_bar(11, 15, 105_000, 95_000), _bar(11, 30, 108_000, 99_000))
     entry_stamp = bars[0].close_stamp - timedelta(minutes=15)
 
@@ -342,5 +340,11 @@ def test_the_two_blocked_e13_entries_never_come_back_as_numbers() -> None:
     assert "Q-16(a)" in m.outliers_note and "Tukey" in m.outliers_note
     assert m.outliers.lower_fence_paise is not None
     assert m.outliers.upper_fence_paise is not None
-    assert "PROVISIONAL" in m.intra_trade_note
-    assert "Q-16(b)" in m.intra_trade_note
+
+    # ...and the intra-trade form is now the TRUE 15-minute path, with the worst-case
+    # coincidence construction retired outright: nothing here is PROVISIONAL any more.
+    assert not hasattr(pf, "INTRA_TRADE_PROVISIONAL")
+    assert "PROVISIONAL" not in m.intraday_note
+    assert "Q-16(b)" in pf.INTRADAY_PATH_LIMIT
+    assert m.intraday_note == pf.INTRADAY_PATH_NOT_SUPPLIED  # no path was handed to it
+    assert m.intraday_max_drawdown is None and m.intraday_max_run_up is None

@@ -31,8 +31,6 @@ Rs 100.00 = 10,000 paise per executed trade:
   18/1027 of the peak, duration 2 observations, never recovered. Max run-up runs from the
   OPENING capital 100,000 to 102,700 (01-05) = **Rs 2,700.00**, 27/1000, duration 3
   observations (the opening counts as the one before the first day).
-* provisional intra-trade drawdown: peak 102,700 (01-05 close) -> 01-06's provisional low
-  102,700 - 2,600 - 300 - 200 = 99,600 = **Rs 3,100.00**.
 * daily returns 0, 9/1018, -17/1027, -1/1010 -- four observations, so Sharpe and Sortino exist.
 * concurrency: 01-01 holds two positions worth 200,000 + 50,000 = **Rs 250,000.00** at once,
   01-06 two worth 100,000 -- so max concurrent **2** and peak simultaneous notional
@@ -76,6 +74,61 @@ that both tails fire:
 * share of gross profit = 1,000,000 / 1,060,000 = **50/53**; share of gross loss =
   -900,000 / -1,100,000 = **9/11**.
 
+**Q-16(b) THE 15-MINUTE PATH FIXTURE** (:func:`path_rows`), worked by hand step by step. The
+architect's ruling: "every open position marked to its 15-min candle closes (exit candles at
+their exit levels), summed across positions". Two symbols, OVERLAPPING, and the first of them
+exits MID-PATH at a LEVEL its candle ran past -- which is the case that separates a correct
+path from one marked at candle closes. Capital Rs 1,00,000.00 = 10,000,000 paise, cost 10,000
+paise per trade, charged from the ENTRY mark (decision B194).
+
+*Trade A -- AAA, LONG, 100 shares, entry Rs 2,000.00 (200,000 paise) on the candle closing
+12:00; target Rs 2,030.00 (203,000); the 12:45 candle blows through it and CLOSES at
+Rs 2,020.00 (202,000), so the fill is the LEVEL 203,000.* Marks, PnL = (mark - 200,000) x 100
+- 10,000:
+
+| 12:00 close 200,000 | 12:15 close 201,000 | 12:30 close 199,000 | 12:45 LEVEL 203,000 |
+|---|---|---|---|
+| **-10,000** | **+90,000** | **-110,000** | **+290,000** |
+
+The last mark reproduces the ledger's net (+Rs 2,900.00) exactly -- the invariant. Marked at
+the candle's CLOSE instead it would read +190,000, which is the Rs 1,000.00 error the level
+rule exists to prevent.
+
+*Trade B -- BBB, SHORT, 50 shares, entry Rs 1,000.00 (100,000) on the candle closing 12:15;
+squared off at the 13:15 candle's close Rs 996.00 (99,600).* Marks, PnL =
+(100,000 - mark) x 50 - 10,000:
+
+| 12:15 close 100,000 | 12:30 close 101,000 | 12:45 close 100,500 | 13:00 close 99,000 | 13:15 EXIT 99,600 |
+|---|---|---|---|---|
+| **-10,000** | **-60,000** | **-35,000** | **+40,000** | **+10,000** |
+
+Day net = 290,000 + 10,000 = **+300,000** (Rs 3,000.00). **The portfolio path**, opening equity
+10,000,000, each stamp summing every position open at it (a closed one contributes its realized
+net, an unopened one nothing):
+
+| stamp | A | B | equity | open |
+|---|---|---|---|---|
+| 12:00 | -10,000 | - | **9,990,000** | 1 |
+| 12:15 | +90,000 | -10,000 | **10,080,000** | 2 |
+| 12:30 | -110,000 | -60,000 | **9,830,000** | 2 |
+| 12:45 | +290,000 (closed) | -35,000 | **10,255,000** | 1 |
+| 13:00 | +290,000 | +40,000 | **10,330,000** | 1 |
+| 13:15 | +290,000 | +10,000 | **10,300,000** | 0 |
+| day close | | | **10,300,000** | 0 |
+
+* the day's last observation equals the day's CLOSING equity (10,000,000 + 300,000) -- the
+  invariant that ties this path to the daily curve.
+* **max drawdown on the path**: the running peak starts at the opening capital, is raised to
+  10,080,000 at 12:15, and the 12:30 observation falls to 9,830,000 -> **250,000**
+  (Rs 2,500.00), 25/1008 of that peak, 1 observation, RECOVERED at 12:45 (10,255,000 is the
+  first observation back at or above 10,080,000).
+* **max run-up on the path**: the running trough drops to 9,830,000 at 12:30 and the peak
+  after it is 10,330,000 at 13:00 -> **500,000** (Rs 5,000.00), 50/983, 2 observations, and it
+  never falls back to the trough, so `recovered` is None.
+* the CLOSE-TO-CLOSE forms of the same day see none of this: one day, equity 10,300,000 above
+  the opening capital, so the daily drawdown is **0** and the daily run-up is 300,000. That
+  gap -- Rs 2,500.00 against Rs 0.00 -- is exactly what E13's intra-trade form is for.
+
 ASCII-only, like every other source file in this repo (chunk-0 B7).
 """
 
@@ -87,7 +140,9 @@ from fractions import Fraction
 
 import pytest
 
+from acumen import backtest as bt
 from acumen import portfolio as pf
+from acumen.aggregate import Bar
 from acumen.backtest import LedgerRow, STATUS_EVALUATED, STATUS_REFUSED
 from acumen.signals import EXIT_TARGET, LONG, SHORT
 
@@ -205,13 +260,16 @@ def test_the_equity_delta_equals_the_sum_of_the_trade_pnls(tmp_path=None) -> Non
     assert len(pf.executed(ROWS)) == 6
 
 
-def test_the_intraday_band_is_the_provisional_worst_and_best_case() -> None:
-    """01-01: opening equity 100,000, MAE -50,000 + -120,000 = -170,000 paise, costs 20,000 ->
-    low 10,000,000 - 170,000 - 20,000 = 9,810,000; MFE 400,000 + 20,000 -> high 10,400,000."""
-    points = pf.equity_curve(pf.daily_pnl(ROWS), CAPITAL)
-    assert points[0].low_equity_paise == 9_810_000
-    assert points[0].high_equity_paise == 10_400_000
-    assert pf.INTRA_TRADE_PROVISIONAL.startswith("PROVISIONAL")
+def test_the_retired_worst_case_band_is_gone_from_the_equity_curve() -> None:
+    """**Q-16(b) RULED (architect, 30-Jul-2026): the coinciding worst case is RETIRED** -- it
+    invented co-timing, which is an assumption. The daily curve carries closing equity and
+    nothing else; the intraday question is answered by the true 15-minute path instead."""
+    point = pf.equity_curve(pf.daily_pnl(ROWS), CAPITAL)[0]
+    assert not hasattr(point, "low_equity_paise")
+    assert not hasattr(point, "high_equity_paise")
+    assert not hasattr(pf, "INTRA_TRADE_PROVISIONAL")
+    assert "PROVISIONAL" not in pf.INTRADAY_PATH_LIMIT
+    assert "Q-16(b)" in pf.INTRADAY_PATH_LIMIT
 
 
 # ==============================================================================================
@@ -250,14 +308,12 @@ def test_a_drawdown_that_recovers_names_the_day_it_recovered() -> None:
     assert excursion.amount_paise == 0 or excursion.recovered_on in (None, D2)
 
 
-def test_the_intrabar_drawdown_uses_the_provisional_low(tmp_path=None) -> None:
-    points = pf.equity_curve(pf.daily_pnl(ROWS), CAPITAL)
-    close_to_close = pf.max_drawdown(points)
-    intrabar = pf.max_drawdown(points, intrabar=True)
-    assert intrabar.amount_paise >= close_to_close.amount_paise
-    # peak 10,270,000 (01-05 close) -> 01-06 low = 10,270,000 - 260,000 - 30,000 - 20,000
-    assert intrabar.amount_paise == 10_270_000 - 9_960_000
-    assert (intrabar.peak_day, intrabar.trough_day) == (D3, D4)
+def test_the_intrabar_switch_is_gone_from_both_daily_excursions() -> None:
+    """The retired construction's entry point. Both daily forms are close-to-close only now."""
+    import inspect
+
+    for name in ("max_drawdown", "max_run_up"):
+        assert "intrabar" not in inspect.signature(getattr(pf, name)).parameters
 
 
 # ==============================================================================================
@@ -365,7 +421,7 @@ def test_the_equity_metrics_match_the_hand_computation() -> None:
     assert m.return_on_initial_capital == Fraction(9, 1000)
     assert m.max_drawdown.amount_paise == 180_000
     assert m.max_run_up.amount_paise == 270_000
-    assert m.intra_trade_note == pf.INTRA_TRADE_PROVISIONAL
+    assert m.intraday_note == pf.INTRADAY_PATH_NOT_SUPPLIED  # no path handed to it
     assert m.cagr is not None and m.cagr > 0  # 0.9% over 6 calendar days annualizes up
 
 
@@ -407,6 +463,252 @@ def test_metrics_on_an_empty_ledger_report_nothing_rather_than_dividing_by_zero(
     assert m.final_equity_paise == CAPITAL
     assert m.max_drawdown.amount_paise == 0
     assert m.cagr is None and m.sharpe is None
+
+
+# ==============================================================================================
+# Q-16(b) -- the TRUE 15-minute portfolio equity path (architect's ruling, 30-Jul-2026)
+# ==============================================================================================
+
+
+def at(hour: int, minute: int) -> datetime:
+    return datetime.combine(D1, datetime.min.time()) + timedelta(hours=hour, minutes=minute)
+
+
+def path_trade(
+    symbol: str,
+    side: str,
+    qty: int,
+    entry_paise: int,
+    exit_paise: int,
+    entry_stamp: datetime,
+    exit_stamp: datetime,
+) -> LedgerRow:
+    """One executed row whose money is CONSISTENT with its prices -- the path's own fixture."""
+    gross = (
+        (exit_paise - entry_paise) * qty
+        if side == LONG
+        else (entry_paise - exit_paise) * qty
+    )
+    return LedgerRow(
+        symbol=symbol,
+        day=D1,
+        status=STATUS_EVALUATED,
+        reason="evaluated",
+        side=side,
+        outcome="entered",
+        consumed=True,
+        signalled=True,
+        executed=True,
+        entry_paise=entry_paise,
+        entry_close_stamp=entry_stamp,
+        exit_kind=EXIT_TARGET,
+        exit_paise=exit_paise,
+        exit_close_stamp=exit_stamp,
+        qty=qty,
+        notional_paise=qty * entry_paise,
+        gross_pnl_paise=gross,
+        cost_paise=COST,
+        net_pnl_paise=gross - COST,
+    )
+
+
+def path_rows() -> tuple[LedgerRow, ...]:
+    """The two OVERLAPPING trades of the module docstring's 15-minute path fixture."""
+    return (
+        path_trade("AAA", LONG, 100, 200_000, 203_000, at(12, 0), at(12, 45)),
+        path_trade("BBB", SHORT, 50, 100_000, 99_600, at(12, 15), at(13, 15)),
+    )
+
+
+def path_bars() -> dict[str, tuple[Bar, ...]]:
+    """The 15-minute candles the marks are taken from, OPEN-stamped (CONTEXT 7-E12).
+
+    AAA's exit candle CLOSES at 202,000 while the trade filled at its 203,000 level -- the
+    discriminating case.
+    """
+
+    def bar(hour: int, minute: int, close: int, high: int | None = None) -> Bar:
+        stamp = at(hour, minute) - timedelta(minutes=15)  # open-stamp; closes at (hour, minute)
+        return Bar(
+            stamp=stamp,
+            open_paise=close,
+            high_paise=high if high is not None else close,
+            low_paise=close,
+            close_paise=close,
+            volume=1,
+        )
+
+    return {
+        "AAA": (
+            bar(12, 0, 200_000),
+            bar(12, 15, 201_000),
+            bar(12, 30, 199_000),
+            bar(12, 45, 202_000, high=204_000),  # ran PAST the 203,000 target and closed under
+        ),
+        "BBB": (
+            bar(12, 15, 100_000),
+            bar(12, 30, 101_000),
+            bar(12, 45, 100_500),
+            bar(13, 0, 99_000),
+            bar(13, 15, 99_600),
+        ),
+    }
+
+
+def built_paths() -> tuple[bt.TradePath, ...]:
+    bars = path_bars()
+    return bt.assemble_trade_paths(path_rows(), bars_for=lambda symbol, day: bars[symbol])
+
+
+def test_the_marks_run_from_the_entry_candle_to_the_exit_candles_LEVEL() -> None:
+    """The hand-computed mark table, both trades, straight from the docstring."""
+    long_path, short_path = built_paths()
+
+    assert [(m.stamp.strftime("%H:%M"), m.price_paise) for m in long_path.marks] == [
+        ("12:00", 200_000),
+        ("12:15", 201_000),
+        ("12:30", 199_000),
+        ("12:45", 203_000),  # the LEVEL, not the 202,000 candle close
+    ]
+    assert [pf.mark_pnl_paise(long_path, m.price_paise) for m in long_path.marks] == [
+        -10_000,
+        90_000,
+        -110_000,
+        290_000,
+    ]
+    assert [pf.mark_pnl_paise(short_path, m.price_paise) for m in short_path.marks] == [
+        -10_000,
+        -60_000,
+        -35_000,
+        40_000,
+        10_000,
+    ]
+
+
+def test_marking_the_exit_candle_at_its_close_would_have_been_wrong_by_a_thousand_rupees() -> None:
+    """Why the exit LEVEL rule exists: a target fills at its level even when the candle ran
+    past it (CONTEXT 3.4-5), so a close-marked exit reports money the trade never made."""
+    long_path = built_paths()[0]
+    assert pf.mark_pnl_paise(long_path, 202_000) == 190_000  # the candle's close
+    assert pf.mark_pnl_paise(long_path, 203_000) == 290_000  # the fill level == the ledger net
+    assert long_path.net_pnl_paise == 290_000
+
+
+def test_every_assembled_path_reconciles_with_the_ledgers_own_money() -> None:
+    """The invariant that makes the path trustworthy: the last mark reproduces the net PnL."""
+    assert all(pf.path_reconciles(path) for path in built_paths())
+
+
+def test_the_portfolio_path_is_the_hand_computed_table() -> None:
+    rows = path_rows()
+    series = pf.daily_pnl(rows)
+    points = pf.intraday_equity_path(series, built_paths(), initial_capital_paise=CAPITAL)
+
+    assert [
+        (point.stamp.strftime("%H:%M") if point.stamp else "close", point.equity_paise, point.open_positions)
+        for point in points
+    ] == [
+        ("12:00", 9_990_000, 1),
+        ("12:15", 10_080_000, 2),
+        ("12:30", 9_830_000, 2),
+        ("12:45", 10_255_000, 1),
+        ("13:00", 10_330_000, 1),
+        ("13:15", 10_300_000, 0),
+        ("close", 10_300_000, 0),
+    ]
+
+
+def test_the_days_last_path_point_equals_the_days_closing_equity() -> None:
+    """The invariant that ties the path to the daily curve: nothing straddles a day, because
+    CONTEXT 3.1 squares everything off at 15:15."""
+    rows = path_rows()
+    series = pf.daily_pnl(rows)
+    curve = pf.equity_curve(series, CAPITAL)
+    points = pf.intraday_equity_path(series, built_paths(), initial_capital_paise=CAPITAL)
+    closes = {point.day: point.equity_paise for point in points if point.stamp is None}
+    assert closes == {point.day: point.equity_paise for point in curve}
+
+
+def test_the_path_drawdown_and_run_up_are_hand_computed() -> None:
+    series = pf.daily_pnl(path_rows())
+    points = pf.intraday_equity_path(series, built_paths(), initial_capital_paise=CAPITAL)
+
+    fall = pf.path_max_drawdown(points, initial_capital_paise=CAPITAL)
+    assert fall.amount_paise == 250_000
+    assert fall.pct == Fraction(25, 1008)
+    assert fall.peak is not None and fall.peak.stamp == at(12, 15)
+    assert fall.trough is not None and fall.trough.stamp == at(12, 30)
+    assert fall.observations == 1
+    assert fall.recovered is not None and fall.recovered.stamp == at(12, 45)
+    assert fall.note == pf.INTRADAY_PATH_LIMIT
+
+    rise = pf.path_max_run_up(points, initial_capital_paise=CAPITAL)
+    assert rise.amount_paise == 500_000
+    assert rise.pct == Fraction(50, 983)
+    assert rise.trough is not None and rise.trough.stamp == at(12, 30)
+    assert rise.peak is not None and rise.peak.stamp == at(13, 0)
+    assert rise.observations == 2
+    assert rise.recovered is None  # it never falls back to the trough
+
+
+def test_the_daily_close_to_close_forms_cannot_see_the_intraday_fall() -> None:
+    """Rs 2,500.00 on the path against Rs 0.00 on the daily curve -- which is the whole reason
+    E13 asks for both forms."""
+    series = pf.daily_pnl(path_rows())
+    curve = pf.equity_curve(series, CAPITAL)
+    points = pf.intraday_equity_path(series, built_paths(), initial_capital_paise=CAPITAL)
+    assert pf.max_drawdown(curve).amount_paise == 0
+    assert pf.path_max_drawdown(points, initial_capital_paise=CAPITAL).amount_paise == 250_000
+    assert pf.max_run_up(curve).amount_paise == 300_000
+
+
+def test_a_day_that_traded_nothing_still_appears_on_the_path() -> None:
+    """So that a drawdown can span it -- the path is not a trade log."""
+    rows = path_rows() + (no_trade(D2, "AAA"), no_trade(D3, "AAA"))
+    series = pf.daily_pnl(rows)
+    points = pf.intraday_equity_path(series, built_paths(), initial_capital_paise=CAPITAL)
+    days = [point.day for point in points if point.stamp is None]
+    assert days == [D1, D2, D3]
+    assert points[-1].equity_paise == 10_300_000
+
+
+def test_the_metric_set_reports_both_forms_and_refuses_to_invent_a_path() -> None:
+    rows = path_rows()
+    with_path = pf.metrics(rows, initial_capital_paise=CAPITAL, paths=built_paths())
+    without = pf.metrics(rows, initial_capital_paise=CAPITAL)
+
+    assert with_path.max_drawdown.amount_paise == 0  # close-to-close, unchanged
+    assert with_path.intraday_max_drawdown is not None
+    assert with_path.intraday_max_drawdown.amount_paise == 250_000
+    assert with_path.intraday_max_run_up is not None
+    assert with_path.intraday_max_run_up.amount_paise == 500_000
+    assert with_path.intraday_observations == 7
+    assert with_path.intraday_note == pf.INTRADAY_PATH_LIMIT
+
+    assert without.intraday_max_drawdown is None and without.intraday_max_run_up is None
+    assert without.intraday_observations == 0
+    assert without.intraday_note == pf.INTRADAY_PATH_NOT_SUPPLIED
+    assert "assembled in the I/O layer" in without.intraday_note
+
+
+def test_each_side_column_gets_its_own_path_not_a_slice_of_the_portfolios() -> None:
+    split = pf.side_split(path_rows(), initial_capital_paise=CAPITAL, paths=built_paths())
+    assert split["Long"].intraday_max_drawdown is not None
+    assert split["Short"].intraday_max_drawdown is not None
+    # AAA alone: marks 9,990,000 / 10,090,000 / 9,890,000 / 10,290,000 -- the fall from the
+    # 12:15 peak is 200,000, which the PORTFOLIO path never shows, because BBB was open too.
+    assert split["Long"].intraday_max_drawdown.amount_paise == 200_000
+    # BBB alone: 9,990,000 / 9,940,000 / 9,965,000 / 10,040,000 / 10,010,000 -- 60,000 below
+    # the opening capital at 12:30.
+    assert split["Short"].intraday_max_drawdown.amount_paise == 60_000
+
+
+def test_the_path_carries_no_float_anywhere() -> None:
+    series = pf.daily_pnl(path_rows())
+    points = pf.intraday_equity_path(series, built_paths(), initial_capital_paise=CAPITAL)
+    assert all(isinstance(point.equity_paise, int) for point in points)
+    fall = pf.path_max_drawdown(points, initial_capital_paise=CAPITAL)
+    assert isinstance(fall.amount_paise, int) and isinstance(fall.pct, Fraction)
 
 
 # ==============================================================================================
