@@ -961,11 +961,20 @@ def render_markdown(
         "figure anywhere in it."
     )
     add(
-        "* **Two CONTEXT 7-E13 metrics are BLOCKED on the architect, not guessed** -- "
-        "`outliers` (E13 names it and fixes no definition) and the intra-trade / intrabar "
-        "drawdown and run-up (a take-all portfolio of concurrent intraday trades has no "
-        "observable intraday equity path). QUESTIONS.md **Q-16**. The provisional construction "
-        "is printed and labelled; the outlier count is not printed at all."
+        "* **The two CONTEXT 7-E13 metrics the build session STOPPED on are RULED and "
+        "computed** (QUESTIONS.md **Q-16**, architect 30-Jul-2026). `outliers` is Tukey fences "
+        "on net PnL, printed with its definition beside it. The intra-trade / intrabar "
+        "drawdown and run-up are measured on the TRUE portfolio equity path at 15-minute "
+        "resolution -- the earlier worst-case coincidence construction is RETIRED, because it "
+        "invented co-timing -- with one disclosed limit: intra-candle excursions are not "
+        "represented, and the per-trade MFE/MAE figures carry those. Nothing in this pack is "
+        "labelled PROVISIONAL."
+    )
+    add(
+        "* **One presentation basis: NET.** Every metric in section 7 is after the CONTEXT 3.5 "
+        "Rs 100/trade round trip, over one population keyed on the sign of NET (the E13 "
+        "presentation ruling, 30-Jul-2026). The before-costs totals appear on exactly one "
+        "labelled line. Section 7a opens with the definitions block that ruling requires."
     )
     add(
         "* **Idealized fills (CONTEXT 7-E9)** and **read-only stores**: no order, no network "
@@ -1343,8 +1352,23 @@ def render_markdown(
         "deliberately absent here;"
     )
     add(
-        "* the two E13 conventions QUESTIONS.md Q-16 asks the architect for (the outlier "
-        "definition, and the intra-trade drawdown construction under concurrency)."
+        "* a **DISCRIMINATING CONTEXT 7-E2 witness** (REVIEW_9A finding Q8, recorded here as a "
+        "9B duty). This pack's witness -- 2024-11-04's bias pair reaching back past NSE's "
+        "Muhurat session to (2024-10-30, 2024-10-31) -- proves the MECHANISM, but both "
+        "readings, with and without the E2 removal, land on `inside-bar-carry` and the same "
+        "carried bias, so it does not show E2 changing an answer. 9B's pack owes a day where "
+        "the removal changes the bias, the rule or the trade;"
+    )
+    add(
+        "* **non-standard sessions from the PUBLISHED calendar on the live path** (REVIEW_9A "
+        "finding C5, recorded here as a chunk-9B/13 duty). `scan_non_standard_sessions` "
+        "decides a market-wide calendar property by scanning stored candles across the run's "
+        "universe and span, which is correct and self-evidencing for a backtest -- but chunk "
+        "13 has no future candles to scan, and CONTEXT 6's replay invariant requires the two "
+        "paths to agree. The live path must take non-standard sessions from the published NSE "
+        "calendar (CONTEXT 4.1) and keep this store scan as the backtest-side cross-check; 9B "
+        "should also cache the scan beside its ledger (decision B181). No code change was made "
+        "here: the change belongs on the live path, which chunk 13 owns."
     )
     add("")
     return "\n".join(out) + "\n"
