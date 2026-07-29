@@ -20,10 +20,21 @@ rule: every decision it prints was made by a pure engine it calls.
    (CONTEXT 4.6's own words); both stores are local, so the gates are recomputed exactly.
 4. **POC** (chunk 6), **signals** (chunk 7), **money** (chunk 8).
 
-**One reason per day, in a fixed order.** A day can fail several ways at once. The order is
-E2 -> no minutes -> gate 1 -> gate 2 -> gate 1P -> suppressed -> no bias -> no POC -> the
-signal outcome (chunk-7 decision B162, extended at the front by E2 and the bias failure).
-The counts therefore PARTITION the walked days instead of double-counting them.
+**One reason per day, in a fixed order.** A day can fail several ways at once. The order,
+written out in full and in the order the code actually executes it (REVIEW_9A finding C4 --
+the earlier version left one of its own reasons out of the chain and only mentioned it in a
+parenthesis):
+
+    CONTEXT 7-E2 non-standard session
+      -> BIAS UNRESOLVABLE (:data:`REASON_BIAS_UNRESOLVED`: the calendar cannot answer for the
+         date, the symbol's whole bias series could not be assembled, or this particular day
+         has no CONTEXT 3.2 pair inside the run's own history)
+      -> no minutes -> gate 1 -> gate 2 -> gate 1P -> suppressed -> no bias yet (seeding)
+      -> no POC -> the signal outcome
+
+The first three are decided by :meth:`BacktestRunner.walk_symbol`; the rest are
+:mod:`acumen.signal_engine`'s own order (chunk-7 decision B162). The counts therefore PARTITION
+the walked days instead of double-counting them.
 
 **The ledger is resumable, idempotent and byte-identical on a re-run.** One row per walked
 symbol-day -- a priced trade or a no-trade row carrying its reason -- written through

@@ -395,11 +395,14 @@ def max_drawdown(points: Sequence[EquityPoint]) -> Excursion:
     ``duration_days`` counts the observations from the peak to the trough; it is a count of
     daily observations, which is what a daily series can honestly report. ``recovered_on`` is
     the first later day whose closing equity reaches the peak again, or ``None`` if the series
-    ends under water.
+    ends under water -- and that holds when the peak IS the opening capital, which B185 makes a
+    normal case for any run that goes down from its first day (REVIEW_9A finding Q3: the level
+    to recover is passed in, never looked up by a date no point carries).
     """
     if not points:
         return Excursion(0, None, None, None, 0, None)
-    peak = points[0].equity_paise - points[0].net_paise  # the opening capital
+    opening = points[0].equity_paise - points[0].net_paise  # the equity before the first day
+    peak = opening
     peak_day: date | None = None
     best = Excursion(0, Fraction(0), peak_day, peak_day, 0, None)
     peak_index = -1
@@ -419,7 +422,7 @@ def max_drawdown(points: Sequence[EquityPoint]) -> Excursion:
             peak_day = point.day
             peak_index = index
     if best.trough_day is not None and best.amount_paise > 0:
-        recovery = _first_recovery(points, best)
+        recovery = _first_recovery(points, best, opening_paise=opening)
         best = Excursion(
             best.amount_paise,
             best.pct,
@@ -435,11 +438,16 @@ def max_run_up(points: Sequence[EquityPoint]) -> Excursion:
     """The largest trough-to-peak rise -- the mirror of :func:`max_drawdown`. PURE.
 
     Symmetrically, the running trough starts at the opening capital and a ``trough_day`` of
-    ``None`` means the run started there.
+    ``None`` means the run started there. E13 asks for run-ups "in the same forms" as
+    drawdowns, so ``recovered_on`` is filled here too: the first day AFTER the peak whose
+    closing equity falls back to the trough level, i.e. the day the rise was given back. It was
+    structurally always ``None`` before, which is a dead field rather than a meaningfully empty
+    one (REVIEW_9A finding Q5).
     """
     if not points:
         return Excursion(0, None, None, None, 0, None)
-    trough = points[0].equity_paise - points[0].net_paise  # the opening capital
+    opening = points[0].equity_paise - points[0].net_paise  # the equity before the first day
+    trough = opening
     trough_day: date | None = None
     trough_index = -1
     best = Excursion(0, Fraction(0), trough_day, trough_day, 0, None)
@@ -458,19 +466,57 @@ def max_run_up(points: Sequence[EquityPoint]) -> Excursion:
             trough = point.equity_paise
             trough_day = point.day
             trough_index = index
+    if best.peak_day is not None and best.amount_paise > 0:
+        given_back = _first_giveback(points, best, opening_paise=opening)
+        best = Excursion(
+            best.amount_paise,
+            best.pct,
+            best.peak_day,
+            best.trough_day,
+            best.duration_days,
+            given_back,
+        )
     return best
 
 
-def _first_recovery(points: Sequence[EquityPoint], excursion: Excursion) -> date | None:
-    seen_trough = False
-    peak_equity = None
+def _first_giveback(
+    points: Sequence[EquityPoint], excursion: Excursion, *, opening_paise: int
+) -> date | None:
+    """The first day after the peak whose closing equity is back down at the trough level."""
+    trough_equity = opening_paise
+    for point in points:
+        if point.day == excursion.trough_day:
+            trough_equity = point.equity_paise
+    seen_peak = False
+    for point in points:
+        if point.day == excursion.peak_day:
+            seen_peak = True
+            continue
+        if seen_peak and point.equity_paise <= trough_equity:
+            return point.day
+    return None
+
+
+def _first_recovery(
+    points: Sequence[EquityPoint], excursion: Excursion, *, opening_paise: int
+) -> date | None:
+    """The first day after the trough whose closing equity is back at the peak level. PURE.
+
+    The level is resolved BEFORE the walk: a ``peak_day`` of ``None`` means the opening capital
+    (B185), and the old implementation learned the level only from a point whose ``day``
+    matched, so in that case no point ever matched and a drawdown that demonstrably recovered
+    reported "recovered never" (REVIEW_9A finding Q3).
+    """
+    peak_equity = opening_paise
     for point in points:
         if point.day == excursion.peak_day:
             peak_equity = point.equity_paise
+    seen_trough = False
+    for point in points:
         if point.day == excursion.trough_day:
             seen_trough = True
             continue
-        if seen_trough and peak_equity is not None and point.equity_paise >= peak_equity:
+        if seen_trough and point.equity_paise >= peak_equity:
             return point.day
     return None
 
@@ -1006,7 +1052,11 @@ def buy_and_hold(
         symbols=usable,
         start_value_paise=initial_capital_paise,
         end_value_paise=end_value,
-        total_return=(end_value - initial_capital_paise) / initial_capital_paise,
+        total_return=(
+            None
+            if initial_capital_paise == 0
+            else (end_value - initial_capital_paise) / initial_capital_paise
+        ),
         note=note,
     )
 
@@ -1069,7 +1119,7 @@ class Metrics:
     # --- equity
     initial_capital_paise: int
     final_equity_paise: int
-    return_on_initial_capital: Fraction
+    return_on_initial_capital: Fraction | None
     cagr: Decimal | None
     max_drawdown: Excursion
     max_run_up: Excursion
@@ -1181,8 +1231,10 @@ def metrics(
         outliers_note=OUTLIER_DEFINITION,
         initial_capital_paise=initial_capital_paise,
         final_equity_paise=final_equity,
-        return_on_initial_capital=Fraction(
-            final_equity - initial_capital_paise, initial_capital_paise
+        return_on_initial_capital=(
+            None
+            if initial_capital_paise == 0
+            else Fraction(final_equity - initial_capital_paise, initial_capital_paise)
         ),
         cagr=_cagr(initial_capital_paise, final_equity, span),
         max_drawdown=max_drawdown(points),

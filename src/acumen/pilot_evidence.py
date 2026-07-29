@@ -782,7 +782,8 @@ def metrics_table(label: str, metrics: pf.Metrics) -> list[str]:
         (
             f"| Max run-up (equity close-to-close) | {_money(run_up.amount_paise)} "
             f"({pf.format_pct(run_up.pct)}), {run_up.trough_day or 'opening capital'} -> "
-            f"{run_up.peak_day}, {run_up.duration_days} observation(s) |"
+            f"{run_up.peak_day}, {run_up.duration_days} observation(s), given back "
+            f"{run_up.recovered_on or 'never in the window'} |"
         ),
         _path_line("Max drawdown", metrics.intraday_max_drawdown, metrics),
         _path_line("Max run-up", metrics.intraday_max_run_up, metrics),

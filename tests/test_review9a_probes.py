@@ -1,9 +1,16 @@
 """REVIEW_9A reviewer probes -- kept in the repo per the persona process (step 4).
 
 These close holes the chunk-9A build left open. Nothing here weakens or replaces an existing
-test; every assertion is new. Three of them PIN A DEFECT rather than assert correct behaviour
-(REVIEW_9A findings Q3, Q4 and C2): they are green today and must be deliberately flipped by
-whoever fixes the defect, which is exactly the tripwire a silent regression needs.
+test; every assertion is new.
+
+**FLIPPED by the chunk-9A fix session (2026-07-30).** Six of these probes were written to PIN A
+DEFECT rather than assert correct behaviour -- the E13 basis pair, the mixed largest-win line,
+the lost drawdown recovery date, the dead run-up recovery field and the unguarded capital
+division -- with the instruction "flip this when it is fixed". The architect's Q-16 and E13
+rulings and REVIEW_9A's conditions have now been executed, so each of those probes asserts the
+RULE instead, citing the ruling, and its docstring records what it used to pin. That is the
+tripwire working as designed: the defect could not be fixed silently, and the rule cannot now
+regress silently either.
 
 **The E13 basis fixture**, hand-computed here before coding -- four executed trades, cost
 Rs 100.00 = 10,000 paise each. Trade 3 is the discriminating row: it made money BEFORE the
@@ -191,14 +198,14 @@ def test_a_drawdown_from_a_real_peak_names_the_day_it_recovered() -> None:
     assert fall.recovered_on == DAY + timedelta(days=3)
 
 
-def test_a_drawdown_whose_peak_is_the_opening_capital_loses_its_recovery_date() -> None:
-    """**REVIEW_9A finding Q3 -- PINS A DEFECT, flip this test when it is fixed.**
+def test_a_drawdown_whose_peak_is_the_opening_capital_keeps_its_recovery_date() -> None:
+    """**FLIPPED -- REVIEW_9A finding Q3 is FIXED.**
 
-    Decision B185 makes ``peak_day is None`` a first-class case meaning "the run's opening
-    capital", and a strategy that goes down from its first day lands there. But
-    `_first_recovery` only learns the peak equity from a point whose ``day`` equals
-    ``peak_day``; with ``peak_day`` None no point ever matches, so it returns None and the
-    report says "recovered never" for a drawdown that demonstrably recovered.
+    This probe used to pin the defect: decision B185 makes ``peak_day is None`` a first-class
+    case meaning "the run's opening capital", and a strategy that goes down from its first day
+    lands there -- but `_first_recovery` only learned the peak equity from a point whose ``day``
+    equalled ``peak_day``, so no point ever matched and the report said "recovered never" for a
+    drawdown that demonstrably recovered. The level is now resolved before the walk.
 
     Here equity falls to 92,000 and is back above the opening 100,000 two days later."""
     points = _points([-500_000, -300_000, +900_000, +100_000])
@@ -207,20 +214,32 @@ def test_a_drawdown_whose_peak_is_the_opening_capital_loses_its_recovery_date() 
     assert fall.peak_day is None  # B185: the peak IS the opening capital
     assert fall.amount_paise == 800_000
     assert fall.trough_day == DAY + timedelta(days=1)
-    # the equity really does recover, on the third day:
-    assert points[2].equity_paise > CAPITAL
-    # ...but the metric cannot say so:
-    assert fall.recovered_on is None  # <-- the defect. Should be DAY + 2 days.
+    assert points[2].equity_paise > CAPITAL  # the equity really does recover...
+    assert fall.recovered_on == DAY + timedelta(days=2)  # ...and the metric says which day
+
+    # and a run that never gets back above its opening capital still reports None, so the
+    # fix did not turn "never recovered" into a date that is always there:
+    under_water = pf.max_drawdown(_points([-500_000, -300_000, +100_000]))
+    assert under_water.peak_day is None and under_water.recovered_on is None
 
 
-def test_the_max_run_up_never_reports_a_recovery_date() -> None:
-    """**REVIEW_9A finding Q4 -- PINS A DEFECT (severity INFO), flip when fixed.**
+def test_the_max_run_up_reports_when_its_rise_was_given_back() -> None:
+    """**FLIPPED -- REVIEW_9A finding Q5 is FIXED.**
 
-    E13 asks for run-ups in the "same forms" as drawdowns. `max_drawdown` fills
-    `recovered_on`; `max_run_up` never does, on any input, so the field is structurally
-    dead rather than meaningfully empty."""
-    for nets in ([+200_000, -500_000, -300_000, +900_000], [+100_000, +100_000, +100_000]):
-        assert pf.max_run_up(_points(nets)).recovered_on is None
+    E13 asks for run-ups in the "same forms" as drawdowns. `max_drawdown` filled
+    `recovered_on`; `max_run_up` never did, on any input, so the field was structurally dead
+    rather than meaningfully empty. It is now the mirror: the first day AFTER the peak whose
+    closing equity falls back to the trough level -- the day the rise was given back."""
+    # rises from the opening capital to +300,000 on day 3, then hands it all back on day 4:
+    given_back = pf.max_run_up(_points([+100_000, +100_000, +100_000, -300_000]))
+    assert given_back.trough_day is None  # the trough IS the opening capital
+    assert given_back.amount_paise == 300_000
+    assert given_back.peak_day == DAY + timedelta(days=2)
+    assert given_back.recovered_on == DAY + timedelta(days=3)
+
+    # a rise that is never given back still reports None -- meaningfully empty, not dead:
+    kept = pf.max_run_up(_points([+100_000, +100_000, +100_000]))
+    assert kept.amount_paise == 300_000 and kept.recovered_on is None
 
 
 # ==============================================================================================
@@ -228,20 +247,21 @@ def test_the_max_run_up_never_reports_a_recovery_date() -> None:
 # ==============================================================================================
 
 
-def test_metrics_divide_by_the_initial_capital_without_guarding_it() -> None:
-    """**REVIEW_9A finding C2 -- PINS A DEFECT (severity LOW), flip when fixed.**
+def test_metrics_guard_the_initial_capital_like_every_other_ratio() -> None:
+    """**FLIPPED -- REVIEW_9A finding C2 is FIXED.**
 
-    Every other ratio in the module returns None rather than dividing by zero (`_ratio`,
-    `profit_factor`, `_pct_of_notional`, the drawdown percent). `return_on_initial_capital`
-    and the benchmark's `total_return` do not: a zero capital reaches `Fraction(x, 0)`.
-    Not reachable through the runner -- CONTEXT 3.5 fixes the capital -- but it is the one
-    unguarded division left in a module whose whole point is that it has none."""
-    with pytest.raises(ZeroDivisionError):
-        pf.metrics(basis_rows(), initial_capital_paise=0)
-    with pytest.raises(ZeroDivisionError):
-        pf.buy_and_hold(
-            {"AAA": {DAY: 100_000}}, first_day=DAY, last_day=DAY, initial_capital_paise=0
-        )
+    This used to pin the two divisions that raised `ZeroDivisionError` where every other ratio
+    in the module returned None (`_ratio`, `profit_factor`, `_pct_of_notional`, the drawdown
+    percent). Both now return None, so the module keeps its one property: an undefined ratio is
+    reported as undefined and never as an exception or a zero."""
+    m = pf.metrics(basis_rows(), initial_capital_paise=0)
+    assert m.return_on_initial_capital is None
+    assert m.net_pnl_paise == 164_000  # the money is unaffected by the degenerate capital
+
+    benchmark = pf.buy_and_hold(
+        {"AAA": {DAY: 100_000}}, first_day=DAY, last_day=DAY, initial_capital_paise=0
+    )
+    assert benchmark.total_return is None
 
 
 def test_every_other_ratio_returns_none_instead_of_dividing_by_zero() -> None:

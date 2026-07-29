@@ -310,6 +310,25 @@ def test_max_run_up_close_to_close_is_hand_computed() -> None:
     assert excursion.duration_days == 3
 
 
+def test_the_six_trade_run_up_is_never_given_back_inside_the_window() -> None:
+    """E13's "same forms" (REVIEW_9A finding Q5): the run-up now reports the day its rise was
+    handed back. This ledger's equity never returns to the opening capital, so the honest
+    answer is None -- meaningfully empty rather than structurally dead."""
+    points = pf.equity_curve(pf.daily_pnl(ROWS), CAPITAL)
+    assert pf.max_run_up(points).recovered_on is None
+    assert min(point.equity_paise for point in points) > CAPITAL
+
+
+def test_the_capital_denominators_are_guarded_like_every_other_ratio() -> None:
+    """REVIEW_9A finding C2: the two divisions that used to raise instead of returning None."""
+    degenerate = pf.metrics(ROWS, initial_capital_paise=0)
+    assert degenerate.return_on_initial_capital is None
+    assert degenerate.cagr is None
+    assert pf.buy_and_hold(
+        {"AAA": {D1: 200_000}}, first_day=D1, last_day=D5, initial_capital_paise=0
+    ).total_return is None
+
+
 def test_a_drawdown_that_recovers_names_the_day_it_recovered() -> None:
     rows = (
         trade(D1, "AAA", LONG, 1, 100_000, -100_000),
