@@ -1,6 +1,6 @@
 # CONTEXT.md — ACUMEN INTELLIGENCE · Master Specification
 
-**Version 1.3 · 29 July 2026 · THIS FILE IS LAW.**
+**Version 1.4 · 29 July 2026 · THIS FILE IS LAW.**
 Every build/review session reads this before touching code. Nothing here may be changed by any Claude Code session — spec changes flow only through the architect (the Cowork chat), arrive as a new version of this file, and are logged in §10. If reality and this file disagree, STOP and write it to QUESTIONS.md.
 
 ## Table of contents
@@ -247,8 +247,8 @@ Everything below was proven by build + adversarial review (REVIEW_5A, REVIEW_5B,
 
 | Fixture | Source | Asserts |
 |---|---|---|
-| F1 TCS bullish Entry-1 | trader's PDF worked example | POC 2030, entry 2037, SL 2032 (risk 5), TP 2052 |
-| F2 TCS bullish Entry-2 | PDF example | initial state WAIT-BELOW (reference above POC 2030) → close below at 2027 arms → re-cross close 2037 → entry 2037/SL 2032/TP 2052 |
+| F1 TCS bullish Entry-1 | trader's PDF worked example, POC per Q-15 ruling | **POC 2032** (the PDF's illustrative 2030 is provably inconsistent with the trader's own later gap rule — see Q-15; 2032 preserves all four trader numbers and teaches the boundary: low == POC → traded AT the POC → NORMAL branch), entry 2037, SL 2032 (risk 5), TP 2052 |
+| F2 TCS bullish Entry-2 | PDF example, POC per Q-15 | initial state WAIT-BELOW (reference above POC 2032) → close below arms → re-cross close 2037 → entry 2037/SL 2032/TP 2052 |
 | F3 TCS bearish Entry-1 | PDF example + R1-Q1/Q2 corrections | entry 1980, SL 1988 (candle HIGH, risk 8), **TP 1956** (not 2004) |
 | F4 Gap entry SL | R2-Q33 worked numbers | prior close 2028 → gap candle low 2034, close 2042 → entry 2042, SL **2028**, TP 2084 |
 | F5 Rule-3 tie day | R2-Q31 + Round-3 Q38/Q39 | P: O2010 H2050 L2000 C2040; same-minute double break; C.close 2020 → BULLISH — for RED, GREEN and DOJI decisive candles alike (color irrelevant; three sub-fixtures) |
@@ -286,6 +286,7 @@ Precedence if conflict is ever found: trader's R2 answers > R1 answers > PDF tex
 
 | Version | Date | Change |
 |---|---|---|
+| 1.4 | 29-Jul-2026 | Q-15 ruling (option a): F1/F2's illustrative POC → 2032 (PDF's 2030 provably inconsistent with the trader's own gap rule — while ARMED no prior close exceeds the POC, so a gap-branch stop can never be 2032; precedence §10: later answers correct earlier text). §3.4 untouched; F4 remains the gap witness; low == POC → NORMAL branch is the taught boundary |
 | 1.3 | 29-Jul-2026 | Round-3 answers + data-era close, batched: §3.2 tie rule rewritten (color irrelevant — trader overturned green-mirror + doji-carry; bullish-precedence close-vs-body rule); §3.3 window confirmed 8-candle, tpr-tie → finer (Q-13 ruled), rounding half-even pinned, N=24 confirmed; §3.4 ==POC wait rule + side-only first distinct close (Q34b/Q41-A); §3.5 risk ₹1,000 + take-all confirmed (Q40-d) with capital-infeasibility flags; NEW §4.6 minute-lake final state (measured adjustment maps, floors per event per side, 3-gate battery incl. gate 1P, coverage 94.69% architect-accepted, residual register, chunk-9 duties, next-data-work list); §8 F5 extended to 3 sub-fixtures; §9 registry: everything resolved except OPEN-5 (v2); both trader gates recorded CLOSED |
 | 1.2 | 23-Jul-2026 | Added E13 (authoritative report-metric list & conventions incl. buy&hold benchmark definition — plan.md chunk 10 depends on it); repo layout gains STATUS.md ledger + docs/reviews/; DESIGN.md corrected to chunk 11 |
 | 1.1 | 23-Jul-2026 | Post-adversarial-review fixes: outside-bar precedence note; exact tie-case operators (+doji→OPEN-4); demerger day-blocking + resume; row remainder/containment/top-inclusive/point-bar rules; POC off-grid note; ARMED/==POC/consumption semantics; WAIT-BELOW strictness; reference fallback (E10); explicit bearish mirror; portfolio default + OPEN-7; SmartAPI adjustment status OPEN-8 + gate-3 check; gate bands fixed (F10/§4.5); gate-2 vs E4 thresholds separated; F2 initial state; F6 corrected (33×3+1×1); F7 semantics precise; price domains E11; bar stamping E12; dividend dual-reference note |
