@@ -463,19 +463,23 @@ def test_the_percent_rewrite_moved_no_value() -> None:
 
 
 def test_walk_symbol_decides_exactly_two_of_the_documented_refusal_reasons() -> None:
-    """**PINS A DEFECT (REVIEW_9A_2 finding C1, severity LOW) -- flip when it is fixed.**
+    """**FLIPPED by the chunk-9B PREP session (REVIEW_9A_2 finding C1, closed).**
 
-    REVIEW_9A C4 was that the documented chain omitted `REASON_BIAS_UNRESOLVED`. The rewritten
-    chain names it correctly and in the right position -- and then adds a sentence saying "the
-    first three are decided by `BacktestRunner.walk_symbol`". Exactly TWO are: E2 and the bias
-    failure. "No minutes" is `acumen.signal_engine`'s first reason, not the runner's. The chain
-    itself is right; the attribution beneath it is off by one, which is the same class of slip
-    C4 was."""
+    This probe used to pin the defect: REVIEW_9A C4 was that the documented chain omitted
+    `REASON_BIAS_UNRESOLVED`, and the rewrite that closed it then said "The first three are
+    decided by `BacktestRunner.walk_symbol`" where exactly TWO are. It now asserts the
+    corrected attribution, and it still measures the truth from the CODE -- `walk_symbol` emits
+    E2 and the bias failure and nothing else, and this module owns no "no minutes" reason at
+    all -- so the sentence cannot drift away from the layer boundary again.
+
+    Fails on the pre-fix code (`6b0436d`) on its own assertion: the docstring there reads "The
+    first three are decided by", so `"The first TWO are decided by" in module_doc` is False."""
     module_doc = bt.__doc__ or ""
     assert "CONTEXT 7-E2 non-standard session" in module_doc
     assert "REASON_BIAS_UNRESOLVED" in module_doc
     assert module_doc.index("REASON_BIAS_UNRESOLVED") < module_doc.index("no minutes")
-    assert "The first three are decided by" in module_doc  # <-- the claim
+    assert "The first TWO are decided by" in module_doc  # <-- the corrected claim
+    assert "The first three are decided by" not in module_doc
 
     # ...and what the code actually does: walk_symbol emits E2 and BIAS_UNRESOLVED, nothing else
     source = inspect.getsource(bt.BacktestRunner.walk_symbol)

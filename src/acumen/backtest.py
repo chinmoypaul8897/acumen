@@ -32,9 +32,11 @@ parenthesis):
       -> no minutes -> gate 1 -> gate 2 -> gate 1P -> suppressed -> no bias yet (seeding)
       -> no POC -> the signal outcome
 
-The first three are decided by :meth:`BacktestRunner.walk_symbol`; the rest are
-:mod:`acumen.signal_engine`'s own order (chunk-7 decision B162). The counts therefore PARTITION
-the walked days instead of double-counting them.
+The first TWO are decided by :meth:`BacktestRunner.walk_symbol` -- it emits
+:data:`REASON_E2_NON_STANDARD` and :data:`REASON_BIAS_UNRESOLVED` and nothing else. Every
+reason from "no minutes" onward, that one included, is :mod:`acumen.signal_engine`'s own order
+(chunk-7 decision B162); this module owns no "no minutes" reason at all. The counts therefore
+PARTITION the walked days instead of double-counting them.
 
 **The ledger is resumable, idempotent and byte-identical on a re-run.** One row per walked
 symbol-day -- a priced trade or a no-trade row carrying its reason -- written through
