@@ -854,25 +854,26 @@ def _outlier_line(found: pf.Outliers) -> str:
 
     The ruling requires the definition beside the number, and the fences are printed with it so
     a reader can re-derive the count from the trade list without rerunning anything.
+
+    **ONE FORMAT ON BOTH BRANCHES** (architect's GO ruling, 31-Jul-2026, condition 3, closing
+    REVIEW_9A_2 finding Q4). The zero case used to print "NONE of N ... " and omit three of the
+    four quantities the ruling names, on the reasoning that three zeros are noise. They are not:
+    a reader comparing this run's row against the next run's must see the same four fields in
+    the same places, and on a fixed-rupee-risk strategy a zero count is a structural PROPERTY
+    (every trade is bounded between -1R and +3R) rather than an empty result. So the branch is
+    gone -- count, summed net, and both tails with their fences, amounts and shares are printed
+    either way, with zeros printed as zeros.
     """
-    if found.count == 0:
-        headline = (
-            f"NONE of {found.population} executed trades falls outside the fences "
-            f"[{_money(found.lower_fence_paise)}, {_money(found.upper_fence_paise)}]"
-        )
-    else:
-        headline = (
-            f"**{found.count}** of {found.population} executed trades, summed net "
-            f"{_money(found.net_paise)} -- {found.above_count} above "
-            f"{_money(found.upper_fence_paise)} "
-            f"({_money(found.above_net_paise)}, "
-            f"{pf.format_pct(found.share_of_gross_profit)} of gross profit) and "
-            f"{found.below_count} below {_money(found.lower_fence_paise)} "
-            f"({_money(found.below_net_paise)}, "
-            f"{pf.format_pct(found.share_of_gross_loss)} of gross loss)"
-        )
     return (
-        f"| Outliers | {headline}. Q1 {_money(found.q1_paise)}, Q3 {_money(found.q3_paise)}, "
+        f"| Outliers | **{found.count}** of {found.population} executed trades, summed net "
+        f"{_money(found.net_paise)} -- {found.above_count} above "
+        f"{_money(found.upper_fence_paise)} "
+        f"({_money(found.above_net_paise)}, "
+        f"{pf.format_pct(found.share_of_gross_profit)} of gross profit) and "
+        f"{found.below_count} below {_money(found.lower_fence_paise)} "
+        f"({_money(found.below_net_paise)}, "
+        f"{pf.format_pct(found.share_of_gross_loss)} of gross loss). "
+        f"Q1 {_money(found.q1_paise)}, Q3 {_money(found.q3_paise)}, "
         f"IQR {_money(found.iqr_paise)}. DEFINITION: {found.definition} |"
     )
 

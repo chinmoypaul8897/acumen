@@ -429,6 +429,33 @@ def test_the_committed_pack_prints_the_outlier_rule_beside_its_number() -> None:
     assert "IQR Rs" in text
 
 
+def test_the_outlier_line_prints_all_four_ruled_quantities_on_the_ZERO_branch() -> None:
+    """**The GO ruling's condition (3), 31-Jul-2026 (closes REVIEW_9A_2 finding Q4).**
+
+    Q-16(a) names four things to report: count, summed net PnL, both shares, and the definition.
+    The zero case used to print "NONE of N ..." and omit three of them. The ruling requires ONE
+    FORMAT ON BOTH BRANCHES, so a reader comparing two runs' rows finds the same fields in the
+    same places. This asserts the zero branch carries all four -- as zeros -- and that it is
+    rendered by the SAME sentence as the non-zero branch, field for field.
+    """
+    from acumen import portfolio as pf
+    from tests.test_portfolio import fixture_rows, outlier_rows
+
+    zero = pe._outlier_line(pf.outliers(fixture_rows()))
+    assert zero.startswith("| Outliers | **0** of 6 executed trades, summed net Rs 0.00 --")
+    assert "0 above Rs 3,212.50 (Rs 0.00, 0.00% of gross profit)" in zero
+    assert "0 below -Rs 3,287.50 (Rs 0.00, 0.00% of gross loss)" in zero
+    assert "Q1 -Rs 850.00, Q3 Rs 775.00, IQR Rs 1,625.00" in zero
+    assert pf.OUTLIER_DEFINITION in zero
+    assert "NONE of" not in zero  # the retired branch
+
+    # ...and the two branches really are one sentence: same skeleton, different numbers
+    def skeleton(line: str) -> str:
+        return re.sub(r"-?(Rs [\d,]+\.\d\d|\d+(\.\d\d)?%|\*\*\d+\*\*|\b\d+\b)", "#", line)
+
+    assert skeleton(zero) == skeleton(pe._outlier_line(pf.outliers(outlier_rows())))
+
+
 def test_the_committed_pack_carries_nothing_provisional() -> None:
     """Q-16(b): the worst-case coincidence construction is RETIRED, and the pack that used to
     print it twice must not carry the word anywhere."""
