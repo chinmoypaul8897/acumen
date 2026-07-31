@@ -41,7 +41,7 @@ from typing import Sequence
 from . import poc as poc_engine
 from . import quality_gates as gates
 from . import signals as sig
-from .aggregate import Bar, aggregate_15min
+from .aggregate import Bar, aggregate_15min, in_session_bars
 from .bias_engine import DailyBias
 from .daily_store import DailyStore
 from .instrument_master import InstrumentMaster
@@ -119,6 +119,10 @@ class StockDay:
     bars: tuple[Bar, ...] = ()
     minute_count: int = 0
     signal: sig.SignalDay | None = None
+    #: 1-minute bars stamped outside 09:15..15:29 that were DROPPED before the engines ran --
+    #: CONTEXT 7-E2 at the candle level, which is the reading gate 2 already applies (chunk 5B).
+    #: Zero on every day the vendor stamped cleanly; carried so a drop is never silent.
+    out_of_session_dropped: int = 0
 
     @property
     def traded(self) -> bool:
@@ -184,8 +188,14 @@ class SignalPipeline:
                 bias=bias, gates=day_gates, minute_count=len(minutes),
             )
 
+        # CONTEXT 7-E2 at the CANDLE level -- gate 2's own reading, applied where the engines
+        # consume the day. Gate 1 and gate 1P above deliberately fold the WHOLE stored day
+        # (chunk-5B semantics: the vendor's pre-open print is part of the volume the bhavcopy
+        # reconciles against), so the filter starts here and nowhere earlier. Zero on almost
+        # every day; when it is not zero the count reaches the ledger row (QUESTIONS.md Q-17).
+        session, dropped = in_session_bars(minutes)
         profile = poc_engine.day_profile(
-            minutes,
+            session,
             day,
             row_size=self.row_size,
             tick_paise=self.master.instrument(symbol).tick_size_paise,
@@ -196,17 +206,17 @@ class SignalPipeline:
                 symbol=symbol, day=day, evaluated=False,
                 reason=f"{NOT_EVALUATED_NO_POC}: {profile.reason}",
                 bias=bias, side=side, gates=day_gates, profile=profile,
-                minute_count=len(minutes),
+                minute_count=len(minutes), out_of_session_dropped=dropped,
             )
 
-        bars = aggregate_15min(minutes)
+        bars = aggregate_15min(session)
         signal = sig.evaluate_day(
-            bars, day=day, side=side, poc_paise=profile.poc_paise, minute_bars=minutes
+            bars, day=day, side=side, poc_paise=profile.poc_paise, minute_bars=session
         )
         return StockDay(
             symbol=symbol, day=day, evaluated=True, reason=EVALUATED,
             bias=bias, side=side, gates=day_gates, profile=profile, bars=bars,
-            minute_count=len(minutes), signal=signal,
+            minute_count=len(minutes), signal=signal, out_of_session_dropped=dropped,
         )
 
     def gate_day(

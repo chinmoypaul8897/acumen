@@ -63,7 +63,7 @@ from . import corp_actions as ca
 from . import signal_engine as se
 from . import signals as sig
 from . import simulate as sim
-from .aggregate import Bar, aggregate_15min
+from .aggregate import Bar, aggregate_15min, in_session_bars
 from .atomic_io import atomic_write_text
 from .bias import RULE_3_NO_MINUTE
 from .bias_engine import BiasEngine, BiasEngineError, DailyBias
@@ -405,13 +405,17 @@ class TradePath:
 def minute_store_bars(store: MinuteStore) -> Callable[[str, date], tuple[Bar, ...]]:
     """A ``bars_for(symbol, day)`` over the stored minutes, aggregated per CONTEXT 7-E1/E12.
 
-    The same aggregation the signal engine ran, so a mark is taken from the very candle the
-    strategy saw -- there is no second source of 15-minute bars anywhere in this repo.
+    The same aggregation the signal engine ran -- INCLUDING its CONTEXT 7-E2 candle-level drop
+    of an out-of-session stamp -- so a mark is taken from the very candle the strategy saw, and
+    there is no second source of 15-minute bars anywhere in this repo. Filtering here rather
+    than only in the engine is what keeps that true: a day whose vendor feed carries a pre-open
+    print would otherwise aggregate differently on this path (or raise), and the 15-minute
+    equity path would stop reconciling with the ledger it is built from.
     """
 
-    def bars_for(symbol: str, day: date) -> tuple[Bar, ...]:
-        minutes = store.minutes(symbol, day)
-        return aggregate_15min(minutes) if minutes else ()
+    def bars_for(symbol: str, day: date) -> tuple[Bar, ...]:  # noqa: D401 -- see the wrapper
+        session, _dropped = in_session_bars(store.minutes(symbol, day))
+        return aggregate_15min(session) if session else ()
 
     return bars_for
 
@@ -795,6 +799,9 @@ class BacktestRunner:
             gate2_passed=None if gates is None else gates.gate2.passed,
             gate1p_passed=None if gates is None else gates.gate1p.passed,
             poc_half_paise=None if poc is None else int(poc * 2),
+            flags=(
+                (FLAG_OUT_OF_SESSION_DROPPED,) if stock_day.out_of_session_dropped else ()
+            ),
         )
         if record is None:
             return base
@@ -835,7 +842,7 @@ class BacktestRunner:
             net_pnl_paise=record.net_pnl_paise,
             mfe_paise=mfe,
             mae_paise=mae,
-            flags=record.flags,
+            flags=base.flags + record.flags,
         )
 
     def _span_days(self) -> tuple[date, ...]:
@@ -1026,6 +1033,13 @@ class BacktestRunner:
             "per_symbol": entries,
             "not_in_register": missing,
         }
+
+
+#: Set on a ledger row whose day carried a 1-minute stamp outside 09:15..15:29 that was DROPPED
+#: before the engines ran (CONTEXT 7-E2 at the candle level -- gate 2's own reading, chunk 5B).
+#: Carried as a FLAG rather than as a new column so a day without one writes the same bytes it
+#: always did: the chunk-9A pilot ledger's published sha256 does not move (REVIEW_9A section 7).
+FLAG_OUT_OF_SESSION_DROPPED: str = "out-of-session 1-minute bar(s) dropped (CONTEXT 7-E2)"
 
 
 #: What every output says while the trader's Q43 answer is outstanding. Verbatim, everywhere.

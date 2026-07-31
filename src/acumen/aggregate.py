@@ -106,6 +106,36 @@ def bucket_open_stamp(stamp: datetime) -> datetime:
     return open_dt + timedelta(minutes=FIFTEEN_MINUTES * bucket_index)
 
 
+def in_session_bars(
+    one_minute_bars: Sequence[_HasBarFields],
+) -> tuple[tuple[_HasBarFields, ...], int]:
+    """Split 1-minute bars into ``(the session ones, how many were dropped)``. PURE.
+
+    CONTEXT 7-E2 as CONTEXT 4.5's gate 2 already reads it, in gate 2's own words: an
+    out-of-session candle is excluded **at the CANDLE level (drop the stray bar), not at the
+    day level** -- a day that is ENTIRELY a non-standard session is caught by gate 1 and by the
+    missing-minutes trigger instead, so nothing slips through.
+
+    This helper exists so the CONSUMERS apply that same rule. :func:`aggregate_15min` keeps its
+    refusal (a stray stamp belongs to no 15-minute bucket and guessing one would be an invented
+    candle), and every caller that reads a real store filters first. Before this existed, a
+    single vendor pre-open print -- RELIANCE 2017-04-28 09:14, one bar, 25,015 shares -- killed
+    a whole full-history run with an ``AggregateError`` on a day gate 2 had deliberately
+    admitted (found by the chunk-9B smoke run; QUESTIONS.md Q-17).
+
+    The COUNT is returned rather than swallowed: a caller that drops candles silently would
+    hide vendor damage, and this number is what the run records on the day's ledger row.
+    """
+    kept: list[_HasBarFields] = []
+    dropped = 0
+    for bar in one_minute_bars:
+        if is_session_time(bar.stamp, minutes=1):
+            kept.append(bar)
+        else:
+            dropped += 1
+    return tuple(kept), dropped
+
+
 def aggregate_15min(one_minute_bars: Sequence[_HasBarFields]) -> tuple[Bar, ...]:
     """Aggregate one day's 1-minute bars into 15-minute bars, oldest first. PURE.
 

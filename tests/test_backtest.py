@@ -805,3 +805,76 @@ def test_the_ledger_carries_no_clock_read(tmp_path: Path) -> None:
     stamps = [key for key in payload if key.endswith("stamp")]
     assert stamps == ["entry_close_stamp", "exit_close_stamp"]  # both are CANDLE stamps
     assert "generated_at" not in result.manifest and "timestamp" not in result.manifest
+
+# ==============================================================================================
+# The out-of-session candle: a full run must survive one (QUESTIONS.md Q-17)
+# ==============================================================================================
+
+
+def world_with_a_pre_open_print(tmp_path: Path):
+    """The synthetic trade day plus ONE bar stamped 09:14 -- the real shape the chunk-9B smoke
+    hit on RELIANCE 2017-04-28 (one bar, 25,015 shares, a plausible price). The daily row is
+    built over ALL the stored minutes, because that is what the vendor and the bhavcopy agree
+    on: NSE's daily volume includes the pre-open auction, which is why gate 1 wants it."""
+    minutes = synthetic_minutes(TRADE_DAY)
+    stray = Minute(at(time(9, 14), TRADE_DAY), R(2000.00), R(2000.20), R(1999.80), R(2000.00), 250)
+    everything = [stray] + minutes
+    rows = {
+        LEAD_A: daily_row(LEAD_A, R(1980), R(1990), R(1970), R(1985), 1000),
+        LEAD_A + timedelta(days=1): daily_row(
+            LEAD_A + timedelta(days=1), R(1985), R(1995), R(1975), R(1990), 1000
+        ),
+        SEED_A: daily_row(SEED_A, R(1990), R(2000), R(1980), R(1995), 1000),
+        SEED_A + timedelta(days=1): daily_row(
+            SEED_A + timedelta(days=1), R(1995), R(2010), R(1990), R(2008), 1000
+        ),
+        TRADE_DAY: row_for_minutes(TRADE_DAY, everything),
+    }
+    return build_stores(
+        tmp_path, minute_days={TRADE_DAY: everything}, daily_rows=rows, symbols=(SYMBOL,)
+    )
+
+
+def test_a_pre_open_print_no_longer_kills_the_run(tmp_path: Path) -> None:
+    """**The chunk-9B smoke run's finding, pinned.** Before this, ONE vendor bar stamped 09:14
+    raised `AggregateError` out of `aggregate_15min` and took the whole full-history run with
+    it -- on a day CONTEXT 4.5's gate 2 had deliberately ADMITTED, because gate 2's own reading
+    of CONTEXT 7-E2 is that a stray candle is dropped at the CANDLE level and is "not a
+    day-killer". The engines now apply that same reading, so the day walks."""
+    runner = make_runner(tmp_path, stores=world_with_a_pre_open_print(tmp_path))
+    rows = runner.walk_symbol(SYMBOL).rows
+    traded = [row for row in rows if row.executed]
+
+    assert len(traded) == 1  # it did not raise, and it did not silently refuse either
+    row = traded[0]
+    assert row.status == bt.STATUS_EVALUATED
+    assert bt.FLAG_OUT_OF_SESSION_DROPPED in row.flags  # ...and the drop is NOT silent
+    assert row.minute_count == 125  # the stored count still reports every stored bar
+
+
+def test_the_dropped_candle_changes_no_price_the_strategy_reads(tmp_path: Path) -> None:
+    """The stray bar is outside the 09:15..11:14 profile window and outside the 15-minute grid,
+    so dropping it must reproduce the clean day's numbers to the paisa. If it ever did move
+    one, that would mean an out-of-session print had been feeding the strategy."""
+    dirty = make_runner(tmp_path / "dirty", stores=world_with_a_pre_open_print(tmp_path / "dirty"))
+    clean = make_runner(tmp_path / "clean")
+
+    dirty_row = next(row for row in dirty.walk_symbol(SYMBOL).rows if row.executed)
+    clean_row = next(row for row in clean.walk_symbol(SYMBOL).rows if row.executed)
+
+    for field in ("poc_half_paise", "entry_paise", "stop_paise", "target_paise", "qty",
+                  "gross_pnl_paise", "net_pnl_paise", "exit_kind", "mfe_paise", "mae_paise"):
+        assert getattr(dirty_row, field) == getattr(clean_row, field), field
+    assert clean_row.flags == ()  # and a clean day carries no flag, so the bytes do not move
+
+
+def test_the_fifteen_minute_path_reader_applies_the_same_drop(tmp_path: Path) -> None:
+    """`assemble_trade_paths` reads the store a SECOND time to mark open positions. If it did
+    not drop the stray bar too, it would raise on exactly the days the engine survived -- and
+    the 15-minute equity path would stop reconciling with the ledger it is built from."""
+    stores = world_with_a_pre_open_print(tmp_path)
+    runner = make_runner(tmp_path, stores=stores)
+    rows = runner.walk_symbol(SYMBOL).rows
+    paths = bt.assemble_trade_paths(rows, bars_for=bt.minute_store_bars(stores[0]))
+    assert len(paths) == 1
+    assert paths[0].marks  # it produced marks rather than raising

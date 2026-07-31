@@ -16,7 +16,14 @@ from pathlib import Path
 import pytest
 
 from acumen import aggregate
-from acumen.aggregate import AggregateError, Bar, aggregate_15min, bucket_open_stamp, grid_open_stamps
+from acumen.aggregate import (
+    AggregateError,
+    Bar,
+    aggregate_15min,
+    bucket_open_stamp,
+    grid_open_stamps,
+    in_session_bars,
+)
 
 POC_DATA = Path(__file__).resolve().parents[1] / "poc" / "data"
 
@@ -161,3 +168,38 @@ def test_out_of_session_minute_is_rejected() -> None:
     a = M(datetime(2026, 7, 14, 9, 14), 100, 100, 100, 100, 1)
     with pytest.raises(AggregateError, match="outside the 09:15"):
         aggregate_15min([a])
+
+
+# ==============================================================================================
+# in_session_bars -- CONTEXT 7-E2 at the candle level (QUESTIONS.md Q-17)
+# ==============================================================================================
+
+
+def test_in_session_bars_keeps_the_session_and_counts_what_it_dropped() -> None:
+    """The aggregator still REFUSES a stray stamp (a bar outside the session belongs to no
+    15-minute bucket, and inventing one would invent a candle). What changed is that the
+    CONSUMERS filter first, exactly as CONTEXT 4.5's gate 2 already reads CONTEXT 7-E2: "an
+    out-of-session candle is excluded at the CANDLE level (drop the stray bar), not at the day
+    level". The count comes back so a caller can record the drop instead of hiding it."""
+    early = M(datetime(2026, 7, 14, 9, 14), 100, 100, 100, 100, 25_015)
+    first = M(datetime(2026, 7, 14, 9, 15), 100, 100, 100, 100, 10)
+    last = M(datetime(2026, 7, 14, 15, 29), 100, 100, 100, 100, 10)
+    late = M(datetime(2026, 7, 14, 15, 30), 100, 100, 100, 100, 5)
+
+    kept, dropped = in_session_bars([early, first, last, late])
+    assert [bar.stamp for bar in kept] == [first.stamp, last.stamp]
+    assert dropped == 2
+    # ...and what is kept now aggregates, where the raw day would have raised
+    assert len(aggregate_15min(kept)) == 2
+    with pytest.raises(AggregateError, match="outside the 09:15"):
+        aggregate_15min([early, first, last, late])
+
+
+def test_in_session_bars_on_a_clean_day_changes_nothing_and_drops_nothing() -> None:
+    bars = [M(datetime(2026, 7, 14, 9, 15 + i), 100, 100, 100, 100, 1) for i in range(5)]
+    kept, dropped = in_session_bars(bars)
+    assert list(kept) == bars and dropped == 0
+
+
+def test_in_session_bars_of_nothing_is_nothing() -> None:
+    assert in_session_bars([]) == ((), 0)
