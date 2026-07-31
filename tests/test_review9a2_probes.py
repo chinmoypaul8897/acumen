@@ -561,32 +561,46 @@ def test_the_path_line_prints_a_recovery_and_says_so_when_no_path_was_supplied()
     assert pe._path_stamp(stamped) == "2026-03-02 13:15"
 
 
-def test_the_corporate_action_day_cache_refuses_a_stale_cache_offline(tmp_path) -> None:
-    """**PINS A MEASURED FACT (REVIEW_9A_2 finding C3, severity LOW).**
+def test_the_day_cache_is_served_at_any_age_offline_and_a_missing_one_still_raises(
+    tmp_path,
+) -> None:
+    """**FLIPPED by the chunk-9B PREP session (REVIEW_9A_2 finding C3, closed by ruling).**
 
-    `fetch_corp_action_history`'s docstring promises that "with allow_network=False this reads
-    only the day-cache, so a reviewer with the frozen cache gets a deterministic history and a
-    bare clone gets an empty one". Neither half holds: a cache written on any EARLIER day
-    raises, and a missing cache raises too. That is why the committed pack -- whose own header
-    says "Regenerate with: python docs/evidence/chunk9a_pilot.py" -- cannot be regenerated on
-    any day after its cache's `fetched_on`, which is the day REVIEW_8 finding C2's rule has to
-    be checked on. Flip this when the evidence path is made age-independent."""
+    This probe used to pin the defect: offline, `cached_json` served a cache only when
+    `fetched_on == today`, so the committed pack -- whose own header says "Regenerate with:
+    python docs/evidence/chunk9a_pilot.py" -- could not be regenerated on any day after its
+    cache was written, which is exactly the day REVIEW_8 finding C2's byte-identity rule has to
+    be checked on.
+
+    ARCHITECT'S RULING (31-Jul-2026): offline means "use exactly what is on disk"; an age check
+    inside an offline path is a contradiction. Both halves are asserted here -- a STALE cache
+    now SERVES the same frozen bytes at any age, and a MISSING cache still RAISES, because
+    "nothing on disk" is not a deterministic answer and an empty corporate-action history is
+    indistinguishable from a market with no splits.
+
+    Fails on the pre-fix code (`6b0436d`) on its own assertions: the one-day-later and
+    one-year-later reads raise `NseFetchError` there instead of returning the payload."""
     from acumen import nse_http
 
     cache = tmp_path / "probe.json"
     nse_http.write_cache(cache, {"rows": []}, url="https://example.invalid/x",
                          fetched_on=date(2026, 7, 29))
 
-    # same day: served offline, no network
+    # same day: served offline, no network (unchanged)
     assert nse_http.cached_json(
         "https://example.invalid/x", cache, today=date(2026, 7, 29), allow_network=False
     ) == {"rows": []}
 
-    # ONE day later, the same frozen bytes: refused rather than served or emptied
-    with pytest.raises(nse_http.NseFetchError, match="the cache is from 2026-07-29"):
-        nse_http.cached_json(
-            "https://example.invalid/x", cache, today=date(2026, 7, 30), allow_network=False
-        )
+    # ONE day later, and a YEAR later: the same frozen bytes come back, not an exception
+    for today in (date(2026, 7, 30), date(2027, 7, 29)):
+        assert nse_http.cached_json(
+            "https://example.invalid/x", cache, today=today, allow_network=False
+        ) == {"rows": []}
+
+    # ...and nothing was rewritten on the way past: the envelope still says 2026-07-29
+    assert nse_http.read_cache(cache)[0] == date(2026, 7, 29)
+
+    # a MISSING cache still raises -- offline may not invent a payload
     with pytest.raises(nse_http.NseFetchError, match="no cache file exists"):
         nse_http.cached_json(
             "https://example.invalid/y",
@@ -594,3 +608,19 @@ def test_the_corporate_action_day_cache_refuses_a_stale_cache_offline(tmp_path) 
             today=date(2026, 7, 30),
             allow_network=False,
         )
+
+    # and ONLINE the once-a-day rule is untouched: a stale cache is refetched, not served
+    pulled: list[str] = []
+
+    def fetcher(url: str):
+        pulled.append(url)
+        return {"rows": ["fresh"]}
+
+    assert nse_http.cached_json(
+        "https://example.invalid/x",
+        cache,
+        today=date(2026, 7, 30),
+        allow_network=True,
+        fetcher=fetcher,
+    ) == {"rows": ["fresh"]}
+    assert pulled == ["https://example.invalid/x"]

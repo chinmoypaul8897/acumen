@@ -161,13 +161,15 @@ def fetch_universe(
         cache_dir: where the day-cache lives; defaults to :func:`default_cache_dir`.
         today: the IST calendar date; defaults to the system date. Injectable so the
             once-a-day rule can be tested without waiting a day.
-        allow_network: explicit opt-in to a live pull. While False, a missing or stale
-            cache raises instead of reaching out -- this is what keeps pytest offline.
+        allow_network: explicit opt-in to a live pull. While False nothing reaches out --
+            whatever is cached is served at ANY age (offline means "use exactly what is on
+            disk", architect 31-Jul-2026) and only a MISSING or damaged cache raises. This
+            is what keeps pytest offline.
         session: an existing :class:`requests.Session`.
         sleep: injected for tests.
 
     Raises:
-        NseFetchError: offline with no cache for today, or the live pull failed.
+        NseFetchError: offline with no cache file at all, or the live pull failed.
         UniverseError: the payload parsed but is not a usable universe.
     """
     kwargs: dict[str, Any] = {}

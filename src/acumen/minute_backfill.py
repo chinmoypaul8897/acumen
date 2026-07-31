@@ -196,8 +196,16 @@ def fetch_corp_action_history(
     """The NSE corporate-action rows covering ``[start.year, end.year]``, one year per request.
 
     Day-cached and opt-in (CONTEXT 4.2): with ``allow_network=False`` this reads only the
-    day-cache, so a reviewer with the frozen cache gets a deterministic history and a bare clone
-    gets an empty one.
+    day-cache, and it reads it at ANY age -- offline means "use exactly what is on disk"
+    (architect, 31-Jul-2026). So a reviewer holding the frozen cache gets the same deterministic
+    history on any later day, which is what makes an evidence pack regenerable after the day it
+    was written (REVIEW_9A_2 finding C3).
+
+    A bare clone does NOT get an empty history: with no cache file there is nothing on disk to
+    use and :class:`acumen.nse_http.NseFetchError` is raised. The earlier version of this
+    sentence promised an empty tuple; that never happened, and it must not -- an empty
+    corporate-action history is indistinguishable from a market with no splits and would size
+    and bias every pre-event day wrongly (CONTEXT 3.2 Inputs).
     """
     actions: list[ca.CorporateAction] = []
     for year in range(start.year, end.year + 1):
@@ -233,8 +241,10 @@ def build_symbol_factors(
     the vendor adjusts by factors we do not hold there, so those spans are un-provable (gate 1
     excludes and counts them; a systematic pre-event span moves the clamp).
 
-    Network is opt-in: with ``allow_network=False`` this reads only the day-cache, so a reviewer
-    with the frozen cache gets a deterministic table and a bare clone gets an empty one.
+    Network is opt-in: with ``allow_network=False`` this reads only the day-cache, at any age,
+    so a reviewer with the frozen cache gets a deterministic table on any later day; a bare
+    clone with no cache raises rather than building a table from an empty history
+    (see :func:`fetch_corp_action_history`).
     """
     actions = fetch_corp_action_history(
         start, end, allow_network=allow_network, cache_dir=cache_dir, today=today

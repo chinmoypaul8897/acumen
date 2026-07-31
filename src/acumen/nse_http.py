@@ -12,7 +12,9 @@ bulk-scraped"):
 * one live pull per calendar DAY per endpoint -- :func:`cached_json` serves the on-disk copy
   for the rest of the day and never opens a socket;
 * the network is only ever touched when the caller passes ``allow_network=True``, which is
-  what keeps the test suite offline;
+  what keeps the test suite offline. OFFLINE, the cache is served at ANY age: "use exactly
+  what is on disk" (architect, 31-Jul-2026, REVIEW_9A_2 finding C3) -- an age check on a path
+  that is forbidden to refresh anything can only refuse. A MISSING cache still raises;
 * at most ~2 requests/second, exponential backoff between attempts;
 * a browser-like User-Agent, because NSE answers a bare client with HTTP 403.
 
@@ -324,17 +326,29 @@ def cached_json(
 ) -> Any:
     """Return the endpoint payload, pulling it live at most once per calendar day.
 
-    A cache written earlier on ``today`` is served without touching the network. Anything
-    older is refetched -- but only when ``allow_network`` is true.
+    **Online (``allow_network=True``):** a cache written earlier on ``today`` is served without
+    touching the network; anything older is refetched. That is CONTEXT 4.1's "once a day, never
+    bulk-scraped" politeness, and it is unchanged.
+
+    **Offline (``allow_network=False``): the cache on disk is served REGARDLESS of its age.**
+    ARCHITECT'S RULING (31-Jul-2026, closing REVIEW_9A_2 finding C3): offline means "use exactly
+    what is on disk"; an age check inside an offline path is a contradiction -- it can only ever
+    refuse, since the one action that could resolve the staleness is the action the caller has
+    forbidden. The old behaviour made every evidence pack in this repo un-regenerable from the
+    day after its cache was written, which is precisely the day REVIEW_8 finding C2's
+    byte-identity rule has to be checked on. A MISSING cache still raises: "nothing on disk" is
+    not a deterministic answer, and returning an empty payload would look exactly like a market
+    with no corporate actions.
 
     Args:
         url: the endpoint.
         cache_path: the day-cache file for this endpoint.
         today: the current IST calendar date, supplied by the caller so nothing here reads
-            the clock (CONTEXT 7-E8).
-        allow_network: the explicit opt-in to a live pull. False means "offline": a stale
-            or missing cache raises instead of silently reaching out. pytest never passes
-            True, which is what keeps the suite offline.
+            the clock (CONTEXT 7-E8). Offline it is not consulted at all.
+        allow_network: the explicit opt-in to a live pull. False means "offline": whatever is
+            cached is served at any age, and a MISSING (or damaged) cache raises rather than
+            silently reaching out. pytest never passes True, which is what keeps the suite
+            offline.
         session: an existing session; a fresh one is built when omitted.
         sleep: injected for tests.
         fetcher: how to pull the payload live, when omitted :func:`fetch_json`. Chunk 3's
@@ -345,7 +359,7 @@ def cached_json(
             the cache envelope holds.
 
     Raises:
-        NseFetchError: offline with no cache for ``today``, the cache is damaged and no live
+        NseFetchError: offline with NO cache file at all, the cache is damaged and no live
             pull was authorised, or the live pull failed.
     """
     try:
@@ -365,15 +379,18 @@ def cached_json(
         )
         cached = None
 
-    if cached is not None and cached[0] == today:
+    if cached is not None and (cached[0] == today or not allow_network):
+        # Offline, the age is not consulted: "use exactly what is on disk" (the 31-Jul-2026
+        # ruling above). Online, only a cache written TODAY is served -- the once-a-day rule.
         return cached[1]
 
     if not allow_network:
-        age = "no cache file exists" if cached is None else f"the cache is from {cached[0]}"
         raise NseFetchError(
-            f"Refusing to fetch {url}: {age} and allow_network is False. "
-            "Live pulls are opt-in (CONTEXT 4.1 keeps these endpoints to one pull per day); "
-            f"pass allow_network=True to refresh {Path(cache_path)}."
+            f"Refusing to fetch {url}: no cache file exists at {Path(cache_path)} and "
+            "allow_network is False. Offline serves whatever is cached at any age, but it "
+            "cannot invent a payload -- an empty result here would be indistinguishable from "
+            "a real answer. Live pulls are opt-in (CONTEXT 4.1 keeps these endpoints to one "
+            "pull per day); pass allow_network=True to fetch it once."
         )
 
     if fetcher is None:

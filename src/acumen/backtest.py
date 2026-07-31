@@ -1149,9 +1149,12 @@ def build_factor_tables(
     """The REAL chunk-3 factor table for each symbol, plus its digest and a parse summary.
 
     The corporate-action history is pulled ONCE for all years and reused across the universe
-    (the chunk-5B shape), day-cached; with ``allow_network=False`` only the cache is read, so a
-    reviewer holding it reproduces the table exactly and a bare clone gets an empty one -- which
-    is visible in the digest and in the manifest, never silent.
+    (the chunk-5B shape), day-cached; with ``allow_network=False`` only the cache is read, at
+    ANY age (architect, 31-Jul-2026 -- offline means "use exactly what is on disk"), so a
+    reviewer holding it reproduces the table exactly on any later day. A bare clone with no
+    cache RAISES rather than running on an empty table: an empty factor table is not visibly
+    different from a market with no corporate actions, and CONTEXT 3.2's pairwise adjustment
+    would then be silently wrong on every pre-event pair.
 
     The full history is passed to :func:`acumen.corp_actions.build_factor_table` per symbol
     because the Q-6 face-value reconstruction needs the symbol's whole split history, not the

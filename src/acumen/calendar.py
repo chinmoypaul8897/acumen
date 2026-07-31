@@ -549,14 +549,16 @@ def fetch_calendar(
     Args:
         cache_dir: where the day-cache lives; defaults to :func:`default_cache_dir`.
         today: the IST calendar date; defaults to the system date.
-        allow_network: explicit opt-in to a live pull. While False, a missing or stale
-            cache raises instead of reaching out -- this is what keeps pytest offline.
+        allow_network: explicit opt-in to a live pull. While False nothing reaches out --
+            whatever is cached is served at ANY age (offline means "use exactly what is on
+            disk", architect 31-Jul-2026) and only a MISSING or damaged cache raises. This
+            is what keeps pytest offline.
         session: an existing :class:`requests.Session`.
         segment: market segment; CONTEXT 4.1 says CM.
         sleep: injected for tests.
 
     Raises:
-        NseFetchError: offline with no cache for today, or the live pull failed.
+        NseFetchError: offline with no cache file at all, or the live pull failed.
         CalendarError: the payload parsed but is not a usable calendar.
     """
     kwargs: dict[str, Any] = {}

@@ -180,11 +180,29 @@ def test_a_cache_written_today_is_served_without_the_network(
     )
 
 
-def test_a_stale_cache_is_never_served_silently(tmp_path: Path, payload: dict) -> None:
-    """Yesterday's universe may be fine -- but the CALLER has to say so, in its own code."""
+def test_a_stale_cache_is_served_offline_and_still_refetched_online(
+    tmp_path: Path, payload: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """**REPLACES `test_a_stale_cache_is_never_served_silently`, by ARCHITECT'S RULING
+    (31-Jul-2026, closing REVIEW_9A_2 finding C3).**
+
+    That test pinned "yesterday's universe may be fine -- but the CALLER has to say so".
+    OFFLINE, the caller now says so by being offline: `allow_network=False` means "use exactly
+    what is on disk". The explicit stale path is untouched and still the one to use when the AGE
+    matters -- `load_cached_universe` hands the date back (tested directly below) -- and the
+    once-a-day politeness of CONTEXT 4.1 is untouched too: online, a stale cache is still
+    refetched rather than served.
+    """
     _write_cache(tmp_path, payload, date(2026, 7, 23))
-    with pytest.raises(NseFetchError, match="the cache is from 2026-07-23"):
-        fetch_universe(cache_dir=tmp_path, today=date(2026, 7, 24))
+    assert fetch_universe(cache_dir=tmp_path, today=date(2026, 7, 24)) == load_universe(
+        UNIVERSE_SNAPSHOT
+    )
+
+    monkeypatch.setattr(
+        nse_http, "cached_json_fetch", lambda url, **kwargs: {"data": {"UnderlyingList": []}}
+    )
+    with pytest.raises(UniverseError):  # the refetched payload is empty -- so it WAS refetched
+        fetch_universe(cache_dir=tmp_path, today=date(2026, 7, 24), allow_network=True)
 
 
 def test_load_cached_universe_returns_the_age_with_the_symbols(

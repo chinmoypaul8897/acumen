@@ -222,11 +222,24 @@ def test_cached_json_refuses_to_reach_out_without_the_flag(tmp_path: Path) -> No
         cached_json(URL, tmp_path / "cache.json", today=date(2026, 7, 24), allow_network=False)
 
 
-def test_cached_json_names_the_stale_date(tmp_path: Path) -> None:
+def test_cached_json_serves_a_stale_cache_offline_at_any_age(tmp_path: Path) -> None:
+    """**REPLACES `test_cached_json_names_the_stale_date`, by ARCHITECT'S RULING (31-Jul-2026,
+    closing REVIEW_9A_2 finding C3).**
+
+    That test pinned the opposite behaviour: offline, a cache older than ``today`` raised. The
+    ruling retires it -- offline means "use exactly what is on disk", and an age check on a path
+    that is forbidden to refresh anything can only ever refuse. The practical cost of the old
+    rule was that every evidence pack in this repo became un-regenerable the day after its cache
+    was written, which is precisely when REVIEW_8 finding C2's byte-identity rule is checked.
+
+    The cache is READ, never rewritten: its ``fetched_on`` still says what it always said, so
+    the next ONLINE call still sees it as stale and still refreshes it.
+    """
     path = tmp_path / "cache.json"
     write_cache(path, {"a": 1}, url=URL, fetched_on=date(2026, 7, 1))
-    with pytest.raises(NseFetchError, match="the cache is from 2026-07-01"):
-        cached_json(URL, path, today=date(2026, 7, 24), allow_network=False)
+    for today in (date(2026, 7, 1), date(2026, 7, 24), date(2031, 1, 1)):
+        assert cached_json(URL, path, today=today, allow_network=False) == {"a": 1}
+    assert json.loads(path.read_text(encoding="utf-8"))["fetched_on"] == "2026-07-01"
 
 
 def test_cached_json_refreshes_a_stale_cache_when_allowed(
