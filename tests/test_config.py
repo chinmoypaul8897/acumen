@@ -265,6 +265,18 @@ def test_no_module_in_src_hardcodes_a_context_35_money_amount() -> None:
     modules legitimately use, and an engine hardcoding a cost would hardcode it in the paise
     the engines actually work in. Asserted structurally over each module's numeric literals, so
     a constant carrying an amount cannot hide where a comment mentioning one cannot trip it.
+
+    **ITS LIMIT, written down here so a green run is not read as a proof** (REVIEW_9A_2 finding
+    C4). This is a scan of integer LITERALS. It sees `CAPITAL = 10_000_000` and it does NOT see
+    `10 ** 7`, `5_000_000 * 2` or `int(1e7)` -- a magnitude that is COMPUTED passes straight
+    through, and the assertion at the end of this test demonstrates that rather than describing
+    it. The repo already contains the worked precedent: decision B200 rewrote
+    `backtest.ResidualEntry.as_dict`'s `ratio * 10000` as `ratio * 100 * 100` for exactly this
+    reason (legitimately -- the two are the same Fraction, proved exhaustively in
+    `tests/test_review9a2_probes.py`), so the evasion is a pattern in this tree and a future
+    session must not assume a green tripwire means no module knows a money amount. What this
+    test DOES prove is the thing that actually went wrong in chunk 9A: a spec amount typed as a
+    constant, in any module of the package rather than in one sampled file.
     """
     import ast
 
@@ -298,6 +310,21 @@ def test_no_module_in_src_hardcodes_a_context_35_money_amount() -> None:
         if hits:
             offenders[module.name] = hits
     assert offenders == {}, f"CONTEXT 3.5 money amounts hardcoded in src/acumen: {offenders}"
+
+    # The limit, demonstrated beside the tripwire it belongs to (REVIEW_9A_2 finding C4): the
+    # same scan applied to four spellings of ONE magnitude catches only the typed one.
+    def literals_of(source: str) -> set[int]:
+        return {
+            node.value
+            for node in ast.walk(ast.parse(source))
+            if isinstance(node, ast.Constant)
+            and isinstance(node.value, int)
+            and not isinstance(node.value, bool)
+        }
+
+    assert capital_paise in literals_of("CAPITAL = 10_000_000")  # <-- caught
+    for evasion in ("CAPITAL = 10 ** 7", "CAPITAL = 5_000_000 * 2", "CAPITAL = int(1e7)"):
+        assert capital_paise not in literals_of(evasion), evasion  # <-- invisible to the scan
 
 
 def test_the_portfolio_layer_has_no_capital_default_left() -> None:
