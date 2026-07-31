@@ -336,10 +336,20 @@ def test_a_refusal_carrying_money_fails_its_invariant() -> None:
 
 
 def test_a_realized_pnl_outside_the_excursions_fails_its_invariant() -> None:
+    """The invariant now DECLARES its basis (REVIEW_9A_2 finding Q3): it is the GROSS PnL that
+    is bracketed by [MAE, MFE], because an excursion is a price move and carries no cost. The
+    label is looked up by its opening words so the sentence can carry that basis."""
     row = replace(executed_row(), mfe_paise=1, mae_paise=0)
-    assert (
-        verdicts([row])["every executed trade's realized PnL sits inside [MAE, MFE]"] is False
-    )
+    label = _invariant("every executed trade's realized GROSS PnL sits inside [MAE, MFE]", [row])
+    assert verdicts([row])[label] is False
+    assert "BEFORE-COSTS" in label and "Rs 100 cost" in label
+
+
+def _invariant(opening: str, rows) -> str:
+    """The one invariant label that starts with ``opening`` -- exactly one must."""
+    matches = [label for label in verdicts(rows) if label.startswith(opening)]
+    assert len(matches) == 1, matches
+    return matches[0]
 
 
 def test_a_failed_resume_fails_its_invariant() -> None:

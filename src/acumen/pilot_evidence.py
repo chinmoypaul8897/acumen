@@ -792,8 +792,17 @@ def metrics_table(label: str, metrics: pf.Metrics) -> list[str]:
         f"| CAGR | {_decimal_pct(metrics.cagr)} |",
         f"| Sharpe (daily, rf 0, x sqrt 252) | {_decimal(metrics.sharpe)} |",
         f"| Sortino (daily, rf 0, x sqrt 252) | {_decimal(metrics.sortino)} |",
-        f"| Avg MFE / avg MAE per trade | {_money(metrics.avg_mfe_paise)} / {_money(metrics.avg_mae_paise)} |",
-        f"| Largest MFE / largest MAE | {_money(metrics.largest_mfe_paise)} / {_money(metrics.largest_mae_paise)} |",
+        (
+            f"| Avg MFE / avg MAE per trade | {_money(metrics.avg_mfe_paise)} / "
+            f"{_money(metrics.avg_mae_paise)} -- **BEFORE COSTS**: an excursion is a PRICE "
+            "move against the entry, so neither figure carries the Rs 100 round trip. The "
+            "excursions bracket a trade's GROSS PnL, not its net |"
+        ),
+        (
+            f"| Largest MFE / largest MAE | {_money(metrics.largest_mfe_paise)} / "
+            f"{_money(metrics.largest_mae_paise)} -- **BEFORE COSTS**, on the same basis as "
+            "the row above |"
+        ),
         f"| Trading days in the series | {metrics.trading_days} |",
     ]
 
@@ -1464,17 +1473,25 @@ def invariant_report(
         ),
     )
     check(
-        "every MFE >= 0 and every MAE <= 0",
+        "every MFE >= 0 and every MAE <= 0 (both BEFORE COSTS -- price excursions)",
         all(
             (row.mfe_paise or 0) >= 0 and (row.mae_paise or 0) <= 0 for row in executed
         ),
     )
+    net_inside = sum(
+        1
+        for row in executed
+        if (row.mae_paise or 0) <= row.net_pnl_paise <= (row.mfe_paise or 0)
+    )
     check(
-        "every executed trade's realized PnL sits inside [MAE, MFE]",
+        "every executed trade's realized GROSS PnL sits inside [MAE, MFE] -- the BEFORE-COSTS "
+        "basis is what makes this an invariant; the NET PnL can sit below MAE by up to the "
+        "Rs 100 cost, so it is stated and counted rather than asserted",
         all(
             (row.mae_paise or 0) <= row.gross_pnl_paise <= (row.mfe_paise or 0)
             for row in executed
         ),
+        f" (net inside on {net_inside} of {len(executed)})",
     )
     relieved = sum(1 for row in rows if row.gate1_relieved)
     check(
