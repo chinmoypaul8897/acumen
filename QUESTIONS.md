@@ -2285,3 +2285,56 @@ test behind it; the hand-computed fixtures were written BEFORE the code, as this
   names (section 7a), stating the basis, the population, the drawdown/run-up denominators, the
   CAGR span convention and the outlier rule — which closes REVIEW_9A Q1, Q2, Q4, Q6 and Q7 as
   well.
+
+---
+
+## GO RULING · chunk 9B · architect, 31-Jul-2026 (operator-confirmed) · Q43/Q44 no longer BLOCK the run
+
+Recorded VERBATIM by the chunk-9B PREP session, as every ruling in this file is; this session
+authored none of it. It supersedes, for the RUN only, the blocking half of the 29-Jul-2026 plan
+amendment above ("9B = the full-history run + report, gated on the trader's Round-4 answers").
+The two questions themselves stay OPEN with the trader — what changes is that the run no longer
+waits on them, under four conditions.
+
+> "GO RULING (31-Jul-2026, operator-confirmed): chunk 9B proceeds WITHOUT the
+> trader's Q43/Q44 answers. Conditions: (1) every report output carries
+> 'capital-infeasibility flags NOT computed — trader's Q43 answer pending'; flags
+> compute post-hoc from the ledger the day the answer arrives. (2) The run manifest
+> is stamped 'PENDING TRADER CONFIRMATION OF Q44 (gap-rule example, POC 2032)';
+> if the trader's answer surprises, that is a §3.4 change → spec version bump →
+> full re-run; the superseded ledger is retained, labelled, never deleted.
+> (3) Q4 of REVIEW_9A_2: the outlier zero-branch prints all four quantities (count
+> 0, summed net ₹0.00, both shares 0%) — one format on both branches. (4) Session
+> records use commit-time dates (REVIEW_9A_2 Q5). Architect."
+
+**What the PREP session executed under it** (each item is code with a test behind it):
+
+- **Condition (1).** Already in force and unchanged: `acumen.backtest.CAPITAL_FLAGS_PENDING_NOTE`
+  and `acumen.portfolio.CAPITAL_FLAGS_PENDING_NOTE` both read, verbatim,
+  `"capital-infeasibility flags NOT computed -- the trader's Q43 answer is pending"`, the
+  sentence recorded under the plan amendment above and asserted in the pilot pack, in every
+  manifest and in the portfolio layer's own flag record. **This session did NOT reword that
+  constant to the ruling's shorter phrasing.** The two say the same thing; the repo's sentence
+  is the one already recorded verbatim in this file, already printed in a committed evidence
+  pack and already pinned by tests, and rewording it would move committed pack text for no
+  gain in meaning. Recorded here so the difference is a decision on the record rather than an
+  oversight — if the architect wants the ruling's exact phrasing instead, it is a one-line
+  change plus a pack regeneration.
+- **Condition (2).** `acumen.run_backtest.Q44_PENDING_STAMP` carries the ruling's sentence
+  verbatim and the run CLI writes BOTH disclosures into the run manifest's own `disclosures`
+  block (with the retention rule beside them, so the manifest states what happens if the answer
+  surprises). The stamp is passed by the RUN, not baked into `build_manifest`, so no chunk-9A
+  artefact and no committed manifest digest moves.
+- **Condition (3).** `acumen.pilot_evidence._outlier_line` now prints ONE format on both
+  branches: count, summed net PnL, and both tails with their fences, amounts and shares —
+  zeros printed as zeros. Closes REVIEW_9A_2 finding Q4.
+- **Condition (4).** Every session record in this session (PROGRESS entry stamp, STATUS line,
+  the dates cited in commit bodies and in this block) is the COMMIT-TIME date, 31-Jul-2026.
+  Closes REVIEW_9A_2 finding Q5.
+
+**What is still open with the trader, and therefore what the run does NOT do:** no
+capital-infeasibility flag VALUE is computed anywhere (Q43); `config.yaml`'s `capital_reference`
+and `margin_basis` stay null and there is still no default figure in `src/`. The gap-rule
+example (Q44) is unconfirmed, so the ledger the run produces is a ledger under CONTEXT v1.4 as
+written — if the confirmation contradicts §3.4, the ruling's own escalation applies (spec
+version bump, full re-run, superseded ledger retained and labelled, never deleted).
