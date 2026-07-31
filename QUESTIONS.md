@@ -2544,6 +2544,8 @@ may narrow or widen it.
 > day for volume; becomes CONTEXT law in the v1.5 amendment. Architect."
 
 ### What the DATA RECOVERY session executed under this ruling (31-Jul-2026)
+<!-- Q-19, raised by this session's smoke, is recorded after this block. -->
+
 
 **Q-17 — nothing to change; the ruling confirms what is already in the code.** Every clause was
 already true of the fix committed at `0b47d8e`, and each one is now pinned by a test that cites
@@ -2579,3 +2581,59 @@ is present on disk. Its verdict is one of exactly two, in the ruling's own words
 unexplained: the deltas below are the amendment payload for CONTEXT 4.6 v1.5"* or *"N unexplained
 divergences: DEFECT, triage before any number is believed"* — and the amendment itself stays the
 architect's to write.
+
+---
+
+## Q-19 · Q-18 DATA RECOVERY · class A · **OPEN** · NON-BLOCKING (the rebuild has a stated, executed workaround)
+
+**Question.** A bhavcopy 404 for a date whose file is **not published yet** is, in the ledger,
+indistinguishable from a 404 for a date that **had no session**. Under the Q-3 ruling only a
+`confirmed-404` counts as a non-trading day — so ingesting "up to today" during or shortly after
+the session silently records TODAY as a holiday. Should the downloader be allowed to call a 404
+`confirmed` for a date whose bhavcopy cannot exist yet?
+
+**This is measured, not hypothetical.** This session's runbook smoke (the ordinary chunk-2
+command, `--from 2026-07-01 --to 2026-07-31 --allow-network`, run at 10:21 IST on Friday
+**2026-07-31**, with the market open):
+
+| outcome | count | which |
+|---|---|---|
+| `file-present` | 22 | every completed trading day 2026-07-01..2026-07-30 |
+| `confirmed-404` | 9 | the 8 weekend dates — and **2026-07-31 itself**, a normal Friday |
+| `error` | 0 | — |
+
+The 31st's row reads `http_status 404`, `reason "no published bhavcopy in either format"`, and
+under Q-3 that is a settled answer meaning *not a trading day*. It is not: the session was in
+progress. The date was 404 in BOTH published formats, so the chunk-2 double-check that protects
+the UDiFF cutover boundary does not catch it either — both formats agree, and both are simply
+early.
+
+**Why it matters.** Exactly what Q-3 was written to prevent, arriving through a door Q-3's
+safeguard 1 does not cover — that safeguard says an **error** is never a holiday, and this is not
+an error. CONTEXT 3.2's `bias_pair(D)` is defined on TRADING days, so one phantom holiday shifts
+the (D−1, D−2) pair for the NEXT trading day too, and CONTEXT 7-E2's exclusions key off absence
+from the calendar. The failure is silent and it lands on the most recent day in the store — the
+one the live screener (chunk 13) and every fresh backtest reach first.
+
+**What this session did meanwhile.** Did NOT decide, and changed no chunk-2 code or 404 semantics
+— that ruling is the architect's and `bhavcopy.py` is reviewed. Instead:
+
+1. **Un-recorded the bad row using the existing documented recovery**, `python
+   scripts/backfill_daily.py --rebuild-ledger` (REVIEW_2 F6's path: rebuild the ledger from the
+   surviving monthly parquets; every non-recovered date returns to *pending* and is re-attempted
+   on the next run). Verified after: **22 file-present, 0 confirmed-404, 9 pending** over the
+   window — the phantom holiday is gone and the 8 genuine weekend 404s will simply be re-settled
+   by the rebuild's own step 1.
+2. **Made it an operator rule in the runbook.** `docs/recovery/q18_runbook.md` step 1 ends at the
+   **last COMPLETED trading day**, never at today, and says why. The architect's own Q-18 card
+   worded step 1 as "2000→today"; this is the one place the runbook deliberately narrows it, and
+   the narrowing is stated rather than assumed.
+
+**Options for the architect:**
+(a) operator discipline only — the runbook rule above, no code change (status quo);
+(b) the downloader refuses to record `confirmed-404` for a date on or after the current IST date
+    (or within a stated publication lag of the close) and records it as *pending* instead — a
+    small, testable change in `bhavcopy.py` that makes the guard structural rather than procedural;
+(c) a publication-lag value in `config.yaml` with the same effect and an operator-visible knob.
+
+Nothing is blocked: the rebuild proceeds under (a), which is already written into the runbook.
