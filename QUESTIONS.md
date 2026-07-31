@@ -2338,3 +2338,89 @@ and `margin_basis` stay null and there is still no default figure in `src/`. The
 example (Q44) is unconfirmed, so the ledger the run produces is a ledger under CONTEXT v1.4 as
 written — if the confirmation contradicts §3.4, the ruling's own escalation applies (spec
 version bump, full re-run, superseded ledger retained and labelled, never deleted).
+
+---
+
+## Q-17 · chunk 9B PREP · class A · **DECIDED BY THE CODE'S OWN EXISTING RULING; recorded for the architect** · did NOT block the run
+
+**What the smoke run found.** The chunk-9B smoke (the real runner, full era, RELIANCE +
+MARUTI) died on its first symbol with an unhandled exception:
+
+```
+acumen.aggregate.AggregateError: 1-minute stamp 2017-04-28T09:14:00 is outside the
+09:15..15:29 session (CONTEXT 7-E2); it belongs to no 15-minute grid bar.
+```
+
+RELIANCE 2017-04-28 stores 376 one-minute bars. 375 of them are the session; ONE is stamped
+**09:14** and carries 25,015 shares at a plausible price (Rs 1,409.73) -- a pre-open /
+call-auction print the vendor stamped one minute early.
+
+**The two layers disagreed, and CONTEXT 7-E2 can be read either way.** E2's own words are
+"Non-standard sessions (Muhurat, special/shortened sessions) are excluded. Detection: candle
+data on a date absent from the trading calendar, **or outside 09:15-15:30** -> excluded."
+
+- `acumen.quality_gates.integrity_gate` (chunk 5B, reviewed at REVIEW_5B_2) reads that at the
+  CANDLE level and says so in its own docstring: bars outside the session "are counted
+  (`out_of_session`, for the report) but do NOT by themselves exclude the day: **CONTEXT 7-E2
+  excludes an out-of-session candle at the CANDLE level (drop the stray bar), not at the day
+  level**". So gate 2 ADMITS such a day, deliberately.
+- `acumen.aggregate.aggregate_15min` (chunk 5A, reviewed) RAISES on the same bar, because a
+  stamp outside the session belongs to no 15-minute bucket.
+- `acumen.backtest.scan_non_standard_sessions` (chunk 9A, reviewed at REVIEW_9A) reads E2 at
+  the DATE level but only for the Muhurat shape: a date is non-standard when at least one
+  symbol stored candles for it and NO symbol stored a candle inside the session.
+
+Nothing dropped the bar, so the day reached the aggregator and the run died.
+
+**MEASURED before anything was changed** (read-only over the frozen store; generator and
+output committed at `docs/evidence/chunk9b_out_of_session.{py,md}` per CLAUDE.md's evidence
+rule):
+
+- **3,099 of ~493,900 stored symbol-days (0.63%)** carry at least one stamp outside
+  09:15..15:29, across **526 distinct dates** and 204 settled symbols.
+- **8 of those dates are the Muhurat shape** (no symbol has an in-session bar: 2017-10-19,
+  2018-11-07, 2019-10-27, 2020-11-14, 2021-11-04, 2022-10-24, 2023-11-12, 2024-11-01, all
+  stamped 18:15-18:49). Chunk 9A's date-level detector already excludes these, correctly.
+- **518 dates MIX** in-session and out-of-session bars -- the shape that crashed the run. They
+  are of two kinds: three market-wide dates (2017-04-28, 134 symbols of 139 with data, a 09:14
+  print; 2018-11-05, 134 of 153, stamps 15:30 and 15:32; 2019-10-25, 56 of 159, 15:30) and a
+  long tail of per-symbol vendor noise (RECLTD 508 symbol-days, TATASTEEL 507, PIDILITIND 124,
+  mostly through 2020).
+
+**Why this session did NOT treat it as an open STOP.** The reading is already decided in this
+repo's code, by a reviewed module, in writing: gate 2's candle-level drop. The only competing
+reading -- widen E2's date-level exclusion to any date carrying a stray stamp -- would exclude
+**518 trading dates for all 204 symbols, roughly 105,000 symbol-days**, because one vendor
+mis-stamp on TATASTEEL closed the market for everyone. That is not a defensible reading of a
+rule whose stated purpose is Muhurat sessions. So the fix APPLIES gate 2's ruling in the two
+places that consume the day, and nothing new was decided.
+
+**What was executed** (commit `chunk9B: an out-of-session 1-minute stamp no longer kills the
+run`):
+
+- `acumen.aggregate.in_session_bars(bars) -> (kept, dropped)`: pure, returns the count so a
+  drop can never be silent. `aggregate_15min` KEEPS its refusal -- inventing a bucket for a
+  stray stamp would invent a candle.
+- `signal_engine.stock_day` filters before the POC engine, the 15-minute aggregation and the
+  signal engine. **Gate 1, gate 1P and gate 2 still see the WHOLE stored day**, unchanged
+  chunk-5B semantics: NSE's daily volume includes the pre-open auction, so the stray bar is
+  part of what gate 1 reconciles against.
+- `backtest.minute_store_bars` (the 15-minute path reader) applies the same drop, or the
+  Q-16(b) equity path would raise on exactly the days the engine survived.
+- The day's ledger row carries `FLAG_OUT_OF_SESSION_DROPPED`. It is a FLAG rather than a new
+  column so that a clean day writes the bytes it always wrote and the chunk-9A pilot ledger's
+  published sha256 does not move. The run prints the total at the end.
+
+**What the architect may still want to rule** (nothing is blocked meanwhile):
+
+1. Whether the three MARKET-WIDE dates (2017-04-28, 2018-11-05, 2019-10-25) are
+   "special/shortened sessions" in E2's sense and should be excluded at the DATE level after
+   all. On the candle-level reading they trade normally; 2018-11-05 and 2019-10-25 sit beside
+   that year's Muhurat, which is suggestive.
+2. Whether E2's date-level detector should widen from "no symbol has an in-session bar" to a
+   share-of-universe test (e.g. "no symbol has a FULL session"), which would catch a shortened
+   session that still traded inside the window.
+
+Either ruling changes which days the ledger contains, so -- exactly like Q44 under the GO
+ruling -- it would mean a spec version bump and a full re-run, with the superseded ledger
+retained and labelled.
