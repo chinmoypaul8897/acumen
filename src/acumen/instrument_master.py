@@ -293,3 +293,71 @@ def _download_master(url: str) -> bytes:
     response = requests.get(url, timeout=180, headers={"User-Agent": "acumen/1.0"})
     response.raise_for_status()
     return response.content
+
+
+# --- CLI (the operator's own step; QUESTIONS.md Q-18 runbook step 3) --------------------
+
+
+def cached_masters(cache_dir: Path | str | None = None) -> tuple[Path, ...]:
+    """Every date-stamped master file on disk, oldest name first. Never fetches."""
+    base = Path(cache_dir) if cache_dir is not None else default_cache_dir()
+    home = base / CACHE_SUBDIR
+    if not home.is_dir():
+        return ()
+    return tuple(sorted(home.glob("OpenAPIScripMaster_*.json")))
+
+
+def parse_args(argv: Sequence[str] | None = None) -> Any:
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        prog="acumen-instrument-master",
+        description=(
+            "Fetch today's Angel One instrument master and NAME the file it wrote "
+            "(CONTEXT 4.3). Every pack that quotes a tick size cites that filename."
+        ),
+    )
+    parser.add_argument("--cache-dir", default=None, help="cache root (default: config cache_dir)")
+    parser.add_argument(
+        "--allow-network", action="store_true", help="REQUIRED to fetch; without it, report only"
+    )
+    return parser.parse_args(argv)
+
+
+def run(args: Any) -> int:
+    """Report what is cached, fetch today's dump when allowed, and name the file.
+
+    Idempotent by construction: :func:`load_instrument_master` serves a dump already fetched
+    today from the date-stamped cache without touching the network, so re-running this command
+    after a Ctrl-C costs one file read. It is a separate operator step (rather than a side
+    effect of the backfill) precisely so the filename is decided and printed BEFORE the long
+    run starts -- QUESTIONS.md Q-18, runbook step 3.
+    """
+    base = Path(args.cache_dir) if args.cache_dir else default_cache_dir()
+    existing = cached_masters(base)
+    print(f"cache dir    : {base / CACHE_SUBDIR}")
+    print(f"already held : {len(existing)} dump(s)" + (f", newest {existing[-1].name}" if existing else ""))
+
+    if not args.allow_network:
+        print("\nSTOPPING (no --allow-network). Nothing was fetched and nothing was written.")
+        return 0 if existing else 1
+
+    today = date.today()
+    path = master_cache_path(base, today)
+    master = load_instrument_master(cache_dir=base, today=today, allow_network=True)
+    print(f"\nMASTER FILE  : {path}")
+    print(f"  instruments: {len(master):,} NSE {EQ_SUFFIX.lstrip('-')} rows")
+    print(f"  cite it as : {path.name}")
+    return 0
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    try:
+        return run(parse_args(argv))
+    except InstrumentMasterError as exc:
+        print(f"ERROR: {exc}")
+        return 1
+
+
+if __name__ == "__main__":  # pragma: no cover -- exercised through main()
+    raise SystemExit(main())

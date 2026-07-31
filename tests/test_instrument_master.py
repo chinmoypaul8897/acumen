@@ -146,3 +146,95 @@ def test_load_instrument_master_uses_the_injected_fetcher_then_caches(tmp_path: 
     )
     assert master.token("RELIANCE") == "2885"
     assert im.master_cache_path(tmp_path, today).is_file()  # cached after a successful parse
+
+
+# --- the operator CLI (QUESTIONS.md Q-18 runbook step 3) -------------------------------
+
+
+def _seed_master(cache_dir: Path, stamp: str) -> Path:
+    path = cache_dir / im.CACHE_SUBDIR / f"OpenAPIScripMaster_{stamp}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(SAMPLE.read_bytes())
+    return path
+
+
+def test_cached_masters_is_empty_on_a_bare_tree(tmp_path: Path) -> None:
+    assert im.cached_masters(tmp_path) == ()
+
+
+def test_cached_masters_lists_every_dump_oldest_first(tmp_path: Path) -> None:
+    _seed_master(tmp_path, "2026-07-28")
+    _seed_master(tmp_path, "2026-07-31")
+    _seed_master(tmp_path, "2026-07-30")
+    names = [path.name for path in im.cached_masters(tmp_path)]
+    assert names == [
+        "OpenAPIScripMaster_2026-07-28.json",
+        "OpenAPIScripMaster_2026-07-30.json",
+        "OpenAPIScripMaster_2026-07-31.json",
+    ]
+
+
+def test_cli_without_allow_network_fetches_nothing_and_fails_on_an_empty_cache(
+    tmp_path: Path, capsys
+) -> None:
+    """The Q-18 rebuild must not be able to 'pass' step 3 with no master on disk."""
+    code = im.main(["--cache-dir", str(tmp_path)])
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "Nothing was fetched" in out
+    assert im.cached_masters(tmp_path) == ()
+
+
+def test_cli_without_allow_network_reports_an_existing_cache_and_succeeds(
+    tmp_path: Path, capsys
+) -> None:
+    _seed_master(tmp_path, "2026-07-28")
+    code = im.main(["--cache-dir", str(tmp_path)])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "OpenAPIScripMaster_2026-07-28.json" in out
+
+
+def test_cli_names_the_file_it_wrote(tmp_path: Path, monkeypatch, capsys) -> None:
+    """Step 3's whole point: the filename the packs cite is PRINTED, not inferred."""
+    from datetime import date
+
+    monkeypatch.setattr(im, "_download_master", lambda url: SAMPLE.read_bytes())
+    monkeypatch.setattr(im, "date", _FrozenDate)
+    code = im.main(["--cache-dir", str(tmp_path), "--allow-network"])
+    out = capsys.readouterr().out
+    assert code == 0
+    expected = im.master_cache_path(tmp_path, date(2026, 7, 31))
+    assert expected.is_file()
+    assert expected.name in out
+    assert "cite it as" in out
+
+
+def test_cli_is_idempotent_serving_the_same_day_cache_without_fetching(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    """Safe to Ctrl-C and re-run (the runbook's promise): a second call fetches nothing."""
+
+    def _refuse(url: str) -> bytes:
+        raise AssertionError("a same-day cache must be served without touching the network")
+
+    _seed_master(tmp_path, "2026-07-31")
+    monkeypatch.setattr(im, "_download_master", _refuse)
+    monkeypatch.setattr(im, "date", _FrozenDate)
+    assert im.main(["--cache-dir", str(tmp_path), "--allow-network"]) == 0
+    assert "OpenAPIScripMaster_2026-07-31.json" in capsys.readouterr().out
+
+
+class _FrozenDate:
+    """A stand-in for ``datetime.date`` whose ``today()`` never reads the clock."""
+
+    @staticmethod
+    def today():
+        from datetime import date as _date
+
+        return _date(2026, 7, 31)
+
+    def __call__(self, *args, **kwargs):  # pragma: no cover -- constructor path unused here
+        from datetime import date as _date
+
+        return _date(*args, **kwargs)
