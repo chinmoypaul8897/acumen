@@ -42,6 +42,15 @@ Backtester + live screener for one frozen trading strategy. Real money depends o
 - Every commit touching src/ or tests/ before its chunk's review carries the (unreviewed) suffix — no exceptions (REVIEW_7 C1).
 - Any session making claims from real store data commits the generating script and its output under docs/evidence/ (REVIEW_7 C3).
 
+## Data-store safety (architect-authored, 31-Jul-2026)
+
+- Never link, junction, or symlink mutable stores (data/, cache/) into any
+   worktree, temp dir, or disposable tree. Verification needs a COPY (read-only)
+   or must run in place. (Q-18 incident.)
+ - After every store-changing milestone, the OPERATOR snapshots data/ and cache/
+   to an offline location before the next chunk begins. Sessions remind; the
+   operator executes. (Q-18 incident.)
+
 ## Code standards
 
 - Python 3.10+, pytest, type hints on public functions.
