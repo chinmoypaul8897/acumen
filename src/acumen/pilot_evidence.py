@@ -529,7 +529,7 @@ RECONCILIATION_LABELS: dict[str, str] = {
     "never_armed": "Days never armed",
     "executed": "Executed trades",
     "shares": "Shares transacted",
-    "gross_paise": "Gross PnL",
+    "gross_paise": "Gross PnL (chunk-8 basis, before Rs 100/trade costs)",
     "cost_paise": "Costs paid",
     "net_paise": "Net PnL",
     "winners": "Winners (net)",
@@ -747,7 +747,8 @@ def metrics_table(label: str, metrics: pf.Metrics) -> list[str]:
             "| Profit / loss BEFORE Rs 100/trade costs | "
             f"{_money(metrics.before_cost_profit_paise)} / "
             f"{_money(metrics.before_cost_loss_paise)} -- the only before-costs figures in "
-            "this pack; every other number on this page is NET |"
+            "section 7; the three labelled rows of section 3's cross-document reconciliation "
+            "are the stated exception; every other number on this page is NET |"
         ),
         f"| Expected payoff (per trade) | {_money(metrics.expected_payoff_paise)} |",
         f"| Total trades / open trades | {metrics.total_trades} / {metrics.open_trades} |",
@@ -1236,9 +1237,11 @@ def render_markdown(
     add(
         "* **The one exception to the net basis, stated so it cannot mislead.** Section 3's "
         "reconciliation table compares this run against the COMMITTED chunk-8 pack figure by "
-        "figure, and chunk 8's own \"gross profit / gross loss\" are before-costs totals. "
-        "Those two rows are labelled with that basis where they appear and are a "
-        "cross-document check, not report metrics."
+        "figure, and chunk 8 reported on a before-costs basis: its \"Gross PnL\", its \"gross "
+        "profit\" and its \"gross loss\" are all totals taken before the Rs 100/trade round "
+        "trip. **All THREE of those rows** are labelled with that basis where they appear and "
+        "are a cross-document check, not report metrics (REVIEW_9A_2 finding Q1: the earlier "
+        "wording named two of them and left the third unlabelled)."
     )
     add("")
     add("| Metric | Value |")
