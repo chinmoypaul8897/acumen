@@ -812,24 +812,31 @@ def _path_line(label: str, excursion: pf.PathExcursion | None, metrics: pf.Metri
 
     Q-16(b) RULED (architect, 30-Jul-2026): the worst-case coincidence construction is retired.
     The ruling's single disclosed limit is printed with the figure, so nothing is implied.
+
+    The two forms are MIRRORS and are described in mirrored words (REVIEW_9A_2 finding Q2). A
+    drawdown's `recovered` field is the first later observation back at the peak it fell from;
+    a run-up's is the first later observation back at the trough it rose from -- which is a
+    GIVEBACK, not a recovery. The close-to-close rows one line above already say it that way,
+    so printing "never recovered" on a run-up row described one quantity two ways on adjacent
+    lines of the same table.
     """
     if excursion is None:
         return f"| {label} (intra-trade, 15-min path) | NOT COMPUTED -- {metrics.intraday_note} |"
+    drawdown = label.startswith("Max drawdown")
     first, second = (
-        (excursion.peak, excursion.trough)
-        if label.startswith("Max drawdown")
-        else (excursion.trough, excursion.peak)
+        (excursion.peak, excursion.trough) if drawdown else (excursion.trough, excursion.peak)
     )
-    recovered = (
-        "recovered " + _path_stamp(excursion.recovered)
+    verb = "recovered" if drawdown else "given back"
+    resolved = (
+        f"{verb} {_path_stamp(excursion.recovered)}"
         if excursion.recovered is not None
-        else "never recovered in the window"
+        else f"{verb} never in the window"
     )
     return (
         f"| {label} (intra-trade, 15-min path) | {_money(excursion.amount_paise)} "
         f"({pf.format_pct(excursion.pct)}), {_path_stamp(first)} -> {_path_stamp(second)}, "
         f"{excursion.observations} observation(s) of {metrics.intraday_observations}, "
-        f"{recovered}. LIMIT: {excursion.note} |"
+        f"{resolved}. LIMIT: {excursion.note} |"
     )
 
 
