@@ -656,6 +656,10 @@ class BacktestRunner:
     residual: Mapping[str, ResidualEntry]
     non_standard_sessions: frozenset[date] = frozenset()
     minute_loader: Callable[[str, date], Sequence | None] | None = None
+    #: Sentences the RUN wants stamped on its own manifest, verbatim and in order. Empty for
+    #: every chunk-9A artefact, so no committed manifest or manifest digest moves; chunk 9B's
+    #: run CLI fills it with the architect's GO-ruling disclosures (31-Jul-2026).
+    disclosures: tuple[str, ...] = ()
 
     # --- one symbol ---------------------------------------------------------------------
 
@@ -949,7 +953,11 @@ class BacktestRunner:
             if row.status == STATUS_REFUSED:
                 refused[row.reason] = refused.get(row.reason, 0) + 1
         executed = [row for row in rows if row.executed]
+        stamped = (
+            {"disclosures": list(self.disclosures)} if self.disclosures else {}
+        )
         return {
+            **stamped,
             "spec_version": self.spec.spec_version,
             "code_sha": self.spec.code_sha,
             "config_digest": self.spec.digest(),
@@ -1223,11 +1231,22 @@ def build_runner(
     label: str = "",
     allow_network: bool = False,
     progress: Callable[[str], None] | None = None,
+    non_standard_sessions: frozenset[date] | None = None,
+    disclosures: tuple[str, ...] = (),
 ) -> tuple[BacktestRunner, Path, dict]:
     """Open the local stores read-only and wire the whole machine. Returns (runner, master, ca).
 
     Money and Row Size come from ``config.yaml`` through the loader -- never typed here
     (CONTEXT 3.5, chunk-8 decision B169).
+
+    ``non_standard_sessions`` lets a caller supply a CONTEXT 7-E2 scan it already holds instead
+    of re-running it. The scan is O(symbols x span days) reads of the minute store -- the same
+    order as the walk itself -- so a full-history run that re-scanned on every resume would pay
+    for the whole universe again before writing its first new row (decision B181, recorded as a
+    9B duty in the chunk-9A pack). ``None`` means "scan now", which is what every chunk-9A
+    caller does and what keeps their artefacts byte-identical.
+
+    ``disclosures`` are stamped verbatim onto the run's own manifest and onto nothing else.
     """
     config = load_config(include_env=False)
     data = Path(data_dir) if data_dir is not None else config.path("data_dir")
@@ -1247,10 +1266,13 @@ def build_runner(
         wanted, daily_store, start=seed, end=end, allow_network=allow_network
     )
 
-    span_days = [seed + timedelta(days=offset) for offset in range((end - seed).days + 1)]
-    non_standard = scan_non_standard_sessions(
-        minute_store, wanted, span_days, progress=progress
-    )
+    if non_standard_sessions is None:
+        span_days = [seed + timedelta(days=offset) for offset in range((end - seed).days + 1)]
+        non_standard = scan_non_standard_sessions(
+            minute_store, wanted, span_days, progress=progress
+        )
+    else:
+        non_standard = tuple(sorted(non_standard_sessions))
     if non_standard:
         calendar = replace(
             calendar, trading_days=frozenset(calendar.trading_days) - set(non_standard)
@@ -1286,6 +1308,7 @@ def build_runner(
         residual=residual,
         non_standard_sessions=frozenset(non_standard),
         minute_loader=minute_loader(minute_store),
+        disclosures=tuple(disclosures),
     )
     return runner, master_path, ca_summary
 
