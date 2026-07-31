@@ -54,6 +54,18 @@ def test_the_sealed_scope_end_is_read_from_the_report_not_typed(sealed: rr.Repor
     assert sealed.scope_end == date(2026, 7, 28)
 
 
+def test_the_per_symbol_days_column_sums_to_the_sealed_stored_total(sealed: rr.ReportFacts) -> None:
+    """The two halves of the sealed report agree, which is what makes the comparison sound.
+
+    Section 3's `Days` column summed over all 210 symbols is 434,769 -- exactly reading G's
+    denominator and exactly CONTEXT 4.6's "434,769 stored symbol-days". So the per-symbol
+    quantity this reconciliation diffs IS the quantity the headline is built from, and the
+    independent store leg is counting the same thing the report is claiming.
+    """
+    assert sum(depth.days for depth in sealed.symbols.values()) == sealed.coverage_stored
+    assert sealed.coverage_stored == 434_769
+
+
 def test_a_sealed_per_symbol_row_parses_whole(sealed: rr.ReportFacts) -> None:
     abb = sealed.symbols["ABB"]
     assert (abb.route, abb.days, abb.gate1_pass, abb.gate1_gated) == ("map-required", 2431, 2416, 2429)
