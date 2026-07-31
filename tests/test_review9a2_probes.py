@@ -329,6 +329,13 @@ def test_the_mfe_mae_pair_is_a_BEFORE_COST_measure_in_a_net_basis_table() -> Non
 def test_the_pack_still_carries_a_third_before_costs_figure() -> None:
     """**PINS A DEFECT (REVIEW_9A_2 finding Q1) -- flip this when it is fixed.**
 
+    **STATE, 31-Jul-2026 (chunk-9B PREP):** the RENDERER is already fixed -- commit
+    ``257c0ce`` labels this row "(chunk-8 basis, before Rs 100/trade costs)" and widens the
+    definitions block's exception to all three rows. This pin still passes because the
+    COMMITTED ARTEFACT is stale: regenerating the pack needs the local Parquet stores, and this
+    session destroyed them (PROGRESS.md 2026-07-31, QUESTIONS.md Q-18). The pack regeneration
+    and this flip are OWED, together, the moment a store exists again.
+
     The ruling allows before-costs totals "ONCE, labelled". The pack's metric table carries one
     such line and section 3's reconciliation carries two more, which the definitions block
     discloses as "those two rows". There is a THIRD -- section 3's "Gross PnL Rs 12,665.05",
@@ -358,6 +365,11 @@ def test_the_pack_still_carries_a_third_before_costs_figure() -> None:
 
 def test_the_fifteen_minute_run_up_prints_a_giveback_as_a_recovery() -> None:
     """**PINS A DEFECT (REVIEW_9A_2 finding Q2, severity LOW) -- flip when it is fixed.**
+
+    **STATE, 31-Jul-2026 (chunk-9B PREP):** the RENDERER is already fixed -- commit ``6897387``
+    makes `_path_line` say "given back" on a run-up and "recovered" on a drawdown, mirroring
+    the close-to-close rows. This pin still passes because the COMMITTED ARTEFACT is stale (see
+    the sibling Q1 pin above and QUESTIONS.md Q-18). Flip it with the pack regeneration.
 
     `path_max_run_up.recovered` is the day the rise was GIVEN BACK (the first later observation
     at or below the trough) -- the correct mirror, and Q5's whole point. The pack prints it with

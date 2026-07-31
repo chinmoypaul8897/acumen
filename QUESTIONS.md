@@ -2424,3 +2424,92 @@ run`):
 Either ruling changes which days the ledger contains, so -- exactly like Q44 under the GO
 ruling -- it would mean a spec version bump and a full re-run, with the superseded ledger
 retained and labelled.
+
+---
+
+## Q-18 · chunk 9B PREP · class A · **OPEN -- STOP** · BLOCKS the chunk-9B RUN, the pack regeneration and every store-backed evidence claim
+
+**INCIDENT, 31-Jul-2026: the local `data/` and `cache/` trees were DESTROYED by this session.**
+Recorded here in full because CONTEXT 4.6 declares the minute-lake era FROZEN and "sealed at
+tag chunk5B-pass", and restoring it is not a decision a build session may take.
+
+**What happened, exactly.** To verify REVIEW_9A_2 finding C3 -- that the pilot pack regenerates
+byte-identically TODAY with no harness -- this session checked the pre-fix commit `6b0436d` out
+into a throwaway git worktree, applied ONLY the one-line `nse_http.cached_json` change, and ran
+the pack generator there. `data/` and `cache/` are gitignored, so a worktree has neither; they
+were linked in with two NTFS junctions:
+
+    <worktree>/data  -> C:\Users\chinm\acumen\data
+    <worktree>/cache -> C:\Users\chinm\acumen\cache
+
+**The verification itself succeeded** -- the regenerated pack was byte-identical to the
+committed one, sha256 `9e8a77c78644d0ffabb082987f2e4f5c07a0f0dbc19fdd7569d6b9d1b724df41`, with
+no harness. The cleanup did not: `git worktree remove --force` deleted the worktree
+recursively, FOLLOWED BOTH JUNCTIONS, and emptied their targets.
+
+**What is gone** (all of it gitignored by design -- CLAUDE.md: never commit `data/`, `cache/`):
+
+| Path | What it held |
+|---|---|
+| `data/minute_store/` | the chunk-5B 1-minute lake: 210 symbols, 434,769 stored symbol-days, RAW prices restored through the Q-10..Q-14 un-adjustment machinery |
+| `data/daily_store/` | ~25 years of bhavcopy (319 parquet + the coverage ledger the trading calendar is DERIVED from) |
+| `data/nse/ca/` | the corporate-action day-cache, 2005..2026, `fetched_on` 2026-07-29 -- the one REVIEW_9A_2 C3 was about |
+| `data/universe_backfill/ledger.json` | the DISCLOSED-RESIDUAL REGISTER (CONTEXT 4.6's chunk-9 duty; the 204 settled / 6 quarantined split) |
+| `data/adjustment_maps/`, `ca_raw_store/`, `ca_check_store/`, `raw_bhav/` | the measured per-event per-side application floors with their probe provenance, and the raw CA sources |
+| `data/backtests/` | every chunk-9A run: the pilot ledger REVIEW_9A verified at four kill points (sha256 `c3363f6f...c1e318`), its shards and manifests |
+| `cache/` | `OpenAPIScripMaster_2026-07-28.json` (the per-symbol tick grid) and `scrip_master.json` |
+
+**What SURVIVED, verified.** The tracked repository is undamaged: `git status` clean apart from
+this session's own work, `git fsck` clean, all 16 `tests/fixtures/` and 28 `poc/data/` files
+byte-intact, and `docs/evidence/chunk9a_pilot.md` NOT overwritten (the regeneration crashed
+before writing). Every committed evidence pack, review, ledger figure and digest is still on
+disk and in history. Nothing in `src/` or `tests/` was touched.
+
+**Recovery attempted and FAILED.** Windows Recycle Bin: 333 items, zero matching store files (a
+programmatic recursive delete bypasses it). Volume shadow copies: unavailable on this machine.
+The two other `acumen-*` directories under the user profile are empty. There is no backup this
+session can reach.
+
+**What it blocks right now.**
+
+1. **The chunk-9B RUN.** `docs/evidence/chunk9b_preflight.py` now correctly returns NO-GO on
+   checks 3-10 and refuses to emit the run command. That is the preflight working as designed.
+2. **The pilot-pack regeneration** owed by REVIEW_9A_2 Q1/Q2 and the GO ruling's condition (3).
+   The RENDERER fixes are committed (`257c0ce`, `6897387`, `227de96`, `9f0105c`); the committed
+   ARTEFACT still shows the old labels, and its two defect pins in
+   `tests/test_review9a2_probes.py` are still green and now carry a note saying exactly why.
+3. **The chunk-9B SMOKE** and therefore the MEASURED throughput and the projected full-run
+   duration. The smoke DID run before the loss and earned its keep -- it found Q-17 -- but it
+   crashed on that defect, so no clean end-to-end rate was ever recorded.
+4. **`docs/evidence/chunk9b_out_of_session.md`**, the Q-17 measurement's own output file. The
+   generator is committed; the numbers it produced are recorded verbatim in Q-17 above (they
+   were measured from the intact store before the loss), but the file itself was never written.
+5. Eight data-backed tests now SKIP instead of running (they already had the "data/ is
+   gitignored" skip guard, so the suite is green -- but eight real checks are no longer
+   exercised on this machine).
+
+**What the architect has to decide, and why this session decided none of it.** CONTEXT 4.6
+seals the data era with exact counts (434,769 stored symbol-days, 411,690 passing all three
+gates, 94.6917% coverage, 204 settled / 6 quarantined, per-event floors with full provenance).
+A rebuild is chunk-2 + chunk-5B work over the network and **it may not reproduce those
+numbers**: the vendor's 1-minute feed is re-fetched live, its back-adjustment is era- and
+event-dependent (OPEN-8 / Q-10..Q-14), and the measured application floors would be
+re-measured from whatever it returns today. Re-deriving the era therefore risks breaking the
+freeze rather than restoring it, and CONTEXT 4.6's own numbers -- which chunk 9B's report was
+going to be qualified by -- would need re-verification or a new architect acceptance.
+
+Options, for the architect (this session picks none):
+
+(a) **Restore from an operator backup** if one exists off this machine -- the only path that
+    preserves the freeze exactly. Nothing else does.
+(b) **Rebuild and RE-SEAL**: re-run chunk 2 (bhavcopy 2000..2026), the CA cache, the instrument
+    master, then chunk 5B's full-universe backfill and the Q-11/Q-14 map machinery; then a
+    fresh review re-establishes the era's numbers and CONTEXT 4.6 is amended with whatever they
+    now are. Expect many hours to days of wall-clock and a genuine risk the counts move.
+(c) **Rebuild and REQUIRE the old numbers**: same work, but treat any divergence from CONTEXT
+    4.6's sealed counts as a FAIL to be triaged rather than accepted.
+
+**What this session did meanwhile.** Stopped. Every code deliverable of chunk 9B PREP is
+committed and its tests are green from clean; every claim that needed the stores is marked
+BLOCKED here and in PROGRESS.md rather than being estimated, and the run was NOT handed to the
+operator, because the preflight refuses it and the preflight is right.
