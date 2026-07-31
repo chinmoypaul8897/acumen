@@ -2341,7 +2341,12 @@ version bump, full re-run, superseded ledger retained and labelled, never delete
 
 ---
 
-## Q-17 · chunk 9B PREP · class A · **DECIDED BY THE CODE'S OWN EXISTING RULING; recorded for the architect** · did NOT block the run
+## Q-17 · chunk 9B PREP · class A · **RULED 31-Jul-2026 — the candle-level drop is CONFIRMED as spec** · did NOT block the run
+
+> **The ruling is recorded verbatim at the end of this file (ARCHITECT'S RULINGS, 31-Jul-2026).**
+> What was already executed (below) IS the ruling; it becomes CONTEXT law in the v1.5 amendment,
+> and the two follow-up readings the architect was offered are NOT taken — the drop is uniform
+> for pre-open and post-close strays, and no date-level widening was ruled.
 
 **What the smoke run found.** The chunk-9B smoke (the real runner, full era, RELIANCE +
 MARUTI) died on its first symbol with an unhandled exception:
@@ -2427,7 +2432,13 @@ retained and labelled.
 
 ---
 
-## Q-18 · chunk 9B PREP · class A · **OPEN -- STOP** · BLOCKS the chunk-9B RUN, the pack regeneration and every store-backed evidence claim
+## Q-18 · chunk 9B PREP · class A · **RULED 31-Jul-2026 — option (c), rebuild and RECONCILE** · still blocks the chunk-9B RUN until the rebuild completes
+
+> **The ruling is recorded verbatim at the end of this file (ARCHITECT'S RULINGS, 31-Jul-2026).**
+> The ordered, resumable rebuild the ruling authorises is `docs/recovery/q18_runbook.md`; the
+> reconciliation it requires is `docs/recovery/q18_reconcile.py` (implementation
+> `src/acumen/recovery_reconcile.py`). Nothing below is retracted — it is the incident record
+> the ruling answers.
 
 **INCIDENT, 31-Jul-2026: the local `data/` and `cache/` trees were DESTROYED by this session.**
 Recorded here in full because CONTEXT 4.6 declares the minute-lake era FROZEN and "sealed at
@@ -2513,3 +2524,58 @@ Options, for the architect (this session picks none):
 committed and its tests are green from clean; every claim that needed the stores is marked
 BLOCKED here and in PROGRESS.md rather than being estimated, and the run was NOT handed to the
 operator, because the preflight refuses it and the preflight is right.
+
+---
+
+## ARCHITECT'S RULINGS (31-Jul-2026) · Q-18 and Q-17 · recorded VERBATIM by the DATA RECOVERY session
+
+The architect's text, exactly as supplied, quoted whole and unedited. It answers **Q-18**
+(class A, STOP) and closes **Q-17** (class A, recorded). Everything after this block is what
+this session executed under it — the ruling itself is the quotation, and nothing in this repo
+may narrow or widen it.
+
+> "ARCHITECT'S RULINGS (31-Jul-2026). Q-18: option (c) — rebuild through the existing reviewed
+> pipeline; the rebuilt era MUST be reconciled against CONTEXT 4.6's sealed numbers; every
+> divergence classified {new-CA-explained, vendor-repair-explained, unexplained}; explained
+> drift is accepted only via a formal CONTEXT 4.6 amendment (v1.5) listing exact deltas;
+> unexplained drift is a defect to triage. Q-17: the candle-level drop is CONFIRMED as spec —
+> stray out-of-session 1-min bars are dropped at the candle level, flagged and counted, never
+> silently; uniform for pre-open and post-close strays; gates continue to see the whole stored
+> day for volume; becomes CONTEXT law in the v1.5 amendment. Architect."
+
+### What the DATA RECOVERY session executed under this ruling (31-Jul-2026)
+
+**Q-17 — nothing to change; the ruling confirms what is already in the code.** Every clause was
+already true of the fix committed at `0b47d8e`, and each one is now pinned by a test that cites
+this ruling (`tests/test_aggregate.py`, `tests/test_backtest.py`):
+
+- *dropped at the candle level* — `acumen.aggregate.in_session_bars` drops the stray bar and
+  `aggregate_15min` keeps its refusal, so no bucket is ever invented for an out-of-session stamp;
+- *flagged and counted, never silently* — `in_session_bars` returns the dropped COUNT, the day's
+  ledger row carries `FLAG_OUT_OF_SESSION_DROPPED`, and the run prints the total at the end;
+- *uniform for pre-open and post-close strays* — the filter is the session window itself
+  (09:15..15:29 open-stamps, CONTEXT 7-E12), so a 09:14 stray and a 15:32 stray take the same
+  path; both shapes are measured in Q-17 above (2017-04-28 is pre-open, 2018-11-05 post-close);
+- *gates continue to see the whole stored day for volume* — gate 1, gate 1P and gate 2 are handed
+  the unfiltered day, because NSE's daily volume includes the pre-open auction;
+- *becomes CONTEXT law in the v1.5 amendment* — the architect's edit, not a session's. CONTEXT.md
+  is untouched here.
+
+The two follow-up readings Q-17 offered the architect (excluding the three market-wide dates at
+the DATE level; widening E2's date-level detector to a share-of-universe test) are **NOT taken** —
+the ruling confirms the candle-level drop and rules nothing else, so the 518 mixed dates trade
+normally and no ledger day moves.
+
+**Q-18 — option (c), executed as a HANDOVER, not as a rebuild.** This session builds no ingestion
+logic and fetches nothing heavy: the rebuild runs through the existing reviewed pipeline, in the
+operator's terminal, from `docs/recovery/q18_runbook.md` (five ordered, resumable steps, each with
+its source, its credential status and its completion check). The reconciliation the ruling
+REQUIRES is built and tested here — `src/acumen/recovery_reconcile.py`, launched by
+`docs/recovery/q18_reconcile.py` — and it is offline, read-only, and reads its SEALED BASELINE
+from the committed `docs/backfill_minute_report.md` rather than from any number typed by a
+session. It classifies every divergence into the ruling's three classes and it defaults to
+**unexplained**: a divergence is only ever called explained when the evidence for the explanation
+is present on disk. Its verdict is one of exactly two, in the ruling's own words — *"zero
+unexplained: the deltas below are the amendment payload for CONTEXT 4.6 v1.5"* or *"N unexplained
+divergences: DEFECT, triage before any number is believed"* — and the amendment itself stays the
+architect's to write.
