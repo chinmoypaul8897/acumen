@@ -2584,6 +2584,44 @@ architect's to write.
 
 ---
 
+## ARCHITECT'S TRIAGE RULINGS (01-Aug-2026) · Q-18 · recorded VERBATIM by the VERIFICATION + TRIAGE session
+
+The first reconciliation (operator-run, 31-Jul/01-Aug-2026) returned **354 unexplained
+divergences — DEFECT, triage before any number is believed**, which is the 31-Jul ruling's own
+second verdict. The architect's triage rulings on that defect follow, quoted whole and
+unedited. Everything after this block is what the VERIFICATION + TRIAGE session executed under
+them; the rulings themselves are the quotation, and nothing in this repo may narrow or widen
+them.
+
+> "T1 SEALED-FETCH-HORIZON: for each symbol, find the unique boundary date B such
+>  that the REBUILT store's day count on dates ≤ B equals the SEALED count exactly,
+>  with every extra day inside (B, 2026-07-28] and B inside the sealed fetch window
+>  (2026-07-20..2026-07-28). A symbol passing this test reclassifies its stored-day
+>  and matching gate-count deltas to a NEW class sealed-fetch-horizon — the sealed
+>  store's per-symbol horizon was earlier than its report label; not drift. A
+>  symbol failing the test STAYS unexplained.
+>  T2 NEW-CA TIGHTENED: new-CA-explained requires ex-date ≤ the rebuild fetch date
+>  (2026-07-31). Future ex-dates explain nothing; reclassify, letting T1 catch them.
+>  T3 REGRESSION FORENSICS (APLAPOLLO −467, GAIL −60, POWERGRID −23, LODHA −21):
+>  for each — (a) failing dates listed by era and by gate; (b) rebuilt adjustment-
+>  map events and floors diffed against every sealed-era review quote available;
+>  (c) correlate with the CA-cache delta (41,351 → 41,371: name the new rows for
+>  these symbols); (d) hand-verify THREE failing days per symbol against raw
+>  bhavcopy, digit by digit. Outcome per symbol: a measured, era-keyed explanation
+>  (class vendor-snapshot-drift — days honestly refused by the gates, disclosed)
+>  or ESCALATE to the architect with the evidence. No third option. APLAPOLLO's
+>  quarantine stands unless forensics clears it.
+>  T4 UNIVERSE: a REBUILD uses the SEALED universe (the 210). Re-fetch EXIDEIND
+>  and NUVAMA (network sanctioned for exactly these two, --symbols), full
+>  pipeline, include them in the reconciliation. Today's-F&O-list applies only to
+>  a deliberate, architect-signed universe refresh (CONTEXT 7-E5 clarification,
+>  goes into v1.5).
+>  T5 BIG IMPROVEMENTS VERIFIED: NESTLEIND (+1,002) and BSE (+84) — hand-verify
+>  FIVE flipped days each against raw bhavcopy before vendor-repair is believed;
+>  show the arithmetic. Architect, 01-Aug-2026."
+
+---
+
 ## Q-19 · Q-18 DATA RECOVERY · class A · **OPEN** · NON-BLOCKING (the rebuild has a stated, executed workaround)
 
 **Question.** A bhavcopy 404 for a date whose file is **not published yet** is, in the ledger,
@@ -2637,3 +2675,24 @@ one the live screener (chunk 13) and every fresh backtest reach first.
 (c) a publication-lag value in `config.yaml` with the same effect and an operator-visible knob.
 
 Nothing is blocked: the rebuild proceeds under (a), which is already written into the runbook.
+
+**MEASURED ADDENDUM (VERIFICATION + TRIAGE session, 01-Aug-2026) — what workaround (a) costs,
+exactly.** The rebuild ran under (a) and the price is now measurable rather than hypothetical.
+Step 1 stopped at the last COMPLETED trading day, **2026-07-30**; step 4's minute lake fetched
+through **2026-07-31**, which SmartAPI serves intraday. So every symbol holds one stored day
+with no raw daily row to gate against, and under the Q-14 ruling ("a day with no raw daily row
+is a gate-1P FAILURE, not an absence") that day fails:
+
+| Measured, from `data/universe_backfill/ledger.json` | Value |
+|---|---|
+| `gate1p_no_oracle` summed over the universe | **208** |
+| symbols carrying exactly one such day | **208 of 208** |
+| the date, on every symbol that lists it | **2026-07-31** |
+
+It is fully disclosed by the existing machinery — the rebuilt report's headline prints
+*"Gate-1P failures with NO raw daily row (Q-14 closes REVIEW_5B Q4) | 208"* — and it costs
+208 of 432,512 stored symbol-days, i.e. **0.048 pp of coverage**. It is not a defect and
+nothing is blocked; it is recorded here because it is the exact, measured shape of the
+mismatch this item is about, and because option (b) or (c) would remove it by construction
+(the two stores would stop on the same date). The architect's ruling is still owed; this
+session decided nothing.
