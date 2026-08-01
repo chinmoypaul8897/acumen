@@ -50,6 +50,11 @@ Backtester + live screener for one frozen trading strategy. Real money depends o
  - After every store-changing milestone, the OPERATOR snapshots data/ and cache/
    to an offline location before the next chunk begins. Sessions remind; the
    operator executes. (Q-18 incident.)
+- Operator-executed runbooks are relayed, not certified: after any
+   multi-step operator procedure, the next session's FIRST duty is an
+   independent verification sweep of every step's completion evidence read
+   from the machine itself — ledgers, files, digests, offline re-runs.
+   Pasted transcripts are never the record. (Q-18 recovery lesson.)
 
 ## Code standards
 
