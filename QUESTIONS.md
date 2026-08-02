@@ -2696,3 +2696,80 @@ nothing is blocked; it is recorded here because it is the exact, measured shape 
 mismatch this item is about, and because option (b) or (c) would remove it by construction
 (the two stores would stop on the same date). The architect's ruling is still owed; this
 session decided nothing.
+
+---
+
+## Q-20 · chunk 9B RESUME-1 · class A · **OPEN — STOP** · BLOCKS the chunk-9B RUN's tick input (RESUME-2); nothing in RESUME-1
+
+**Question.** The instrument master is a DAILY LIVE DUMP (CONTEXT 4.3) and CONTEXT 3.3 takes
+`tickSize` per symbol from it. Two snapshots are now cached on this machine and they DISAGREE
+about the tick for 11 of the sealed 210. Which snapshot must a historical backtest use?
+
+**Why it is a hole.** CONTEXT 3.3 says "per symbol from instrument master" and CONTEXT 4.3
+says the master is re-pulled daily. Neither says WHICH pull a run over 2016..2026 is entitled
+to read, and nothing in the spec anticipates the two disagreeing. `latest_cached_master`
+resolves it by filename — newest wins — which is a session-era implementation choice, not a
+ruling, and it silently decides real numbers.
+
+**This is measured, not hypothetical** (`docs/evidence/chunk9b_master_tick_drift.{py,md}`,
+offline and read-only over the two cached snapshots):
+
+| snapshot | NSE-EQ instruments | what it is |
+|---|---|---|
+| `OpenAPIScripMaster_2026-07-31.json` | 2,433 | runbook step 3 — the master the Q-18 REBUILD ran under |
+| `OpenAPIScripMaster_2026-08-02.json` | 2,438 | pulled by the T4 re-fetch two days later — the one `latest_cached_master` will hand the run |
+
+| symbol | 07-31 | 08-02 | ratio | symbol | 07-31 | 08-02 | ratio |
+|---|---|---|---|---|---|---|---|
+| BAJAJ-AUTO | 50p | 100p | x2 | NAUKRI | 5p | 10p | x2 |
+| BANKBARODA | 5p | 1p | x0.2 | PERSISTENT | 10p | 50p | x5 |
+| HEROMOTOCO | 10p | 50p | x5 | SWIGGY | 1p | 5p | x5 |
+| INDUSINDBK | 5p | 10p | x2 | TORNTPHARM | 10p | 50p | x5 |
+| JIOFIN | 1p | 5p | x5 | KEI | 50p | 10p | x0.2 |
+| LODHA | 5p | 10p | x2 | | | | |
+
+**All 11 are SETTLED**, i.e. every one is inside the 204-symbol universe the run walks. It is
+**not** a parsing or selection artefact: each master carries exactly ONE NSE `-EQ` row for each
+of these symbols and simply states a different `tick_size` in it (`rows 1 / 1` on every line of
+the evidence table). No token changed; no sealed symbol is absent from either snapshot.
+
+**Why it matters.** CONTEXT 3.3 builds the profile row grid as
+`totalTicks = round((top - bottom) / tick)`, so a different tick is a different grid, a
+different POC, and therefore a different entry, stop and target — for the whole history of
+that symbol, not just for recent days. The failure is SILENT: the code is correct either way
+and returns a plausible price. This repo has already measured that exact silence once — Q-2 /
+REVIEW_0 found that a wrong tick matched 15 of 25 frozen calibration days and put every DIXON
+day out by Rs 0.87 to Rs 78, which is why Q-2 was ruled the way it was.
+
+It also touches CONTEXT 6's no-drift property and the run's reproducibility: re-running the
+same span two days apart would move POCs on these 11 symbols with no code change and no data
+change. The manifest RECORDS the master by filename (so a ledger is at least attributable);
+nothing PINS it.
+
+**What blocks.** The chunk-9B RUN (RESUME-2) — specifically which master it reads. Nothing in
+RESUME-1: this session shipped CONTEXT v1.5, the store migration and the Q-19 guard, none of
+which touch tick selection, and no engine module was changed.
+
+**What this session did meanwhile.** Did NOT choose. No code was changed:
+`latest_cached_master` still resolves newest-by-filename exactly as chunk 9A reviewed it, both
+snapshots were left in place untouched, and the disagreement was measured and committed as
+evidence instead of being resolved. No master was fetched (this session made no network call).
+
+**Options for the architect:**
+(a) **Pin the rebuild's master.** The run reads `OpenAPIScripMaster_2026-07-31.json` — the
+    snapshot the data era was built and gated under — named explicitly in config or on the run
+    manifest, so the run's tick input is the era's own. Makes the run reproducible for good;
+    costs a stale tick for any symbol NSE genuinely re-banded since.
+(b) **Newest wins, disclosed** (status quo behaviour, ruled rather than inherited): the run
+    uses the newest cached master and the manifest carries the 11-symbol delta as a disclosed
+    condition, so a reader knows which symbols' grids depend on the pull date.
+(c) **Freeze a tick snapshot for the sealed universe**, committed like
+    `docs/recovery/sealed_universe_210.json`, with the master remaining the source for
+    everything else — the Q-2 precedent (a frozen fixture for the calibration ticks) extended
+    from fixtures to the run.
+(d) Something else — e.g. treat a tick change as a corporate-action-style era boundary, which
+    is a much larger change and is noted only for completeness.
+
+A related fact the architect may want to weigh under any option: the vendor moved these ticks
+in BOTH directions within two days (BANKBARODA 5p -> 1p while INDUSINDBK 5p -> 10p), so
+"newest is most correct" is not obviously true.

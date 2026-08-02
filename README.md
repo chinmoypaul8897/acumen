@@ -38,15 +38,21 @@ the test path by `pyproject.toml`), as long as `pytest` itself is available.
 
 ## Operator commands
 
-Market data lives **outside** the repo — the `data/` store is git-ignored. The daily bhavcopy
-store is built and maintained by the backfill script:
+Market data lives **outside the repository tree**, at `paths.data_root` / `paths.cache_root`
+in `config.yaml` — not merely git-ignored. Ignoring was not enough: on 31-Jul-2026 both stores
+sat inside the repo and `git worktree remove --force` followed two junctions into them and
+emptied them, with every ignore rule in force (QUESTIONS.md Q-18, CONTEXT §4.6). Outside the
+tree no git command can reach them, and the config loader refuses a store root that is
+relative or inside the repo, so it cannot quietly revert.
+
+Every command below defaults to those roots; `--store` is only for pointing at a copy.
 
 ```bash
 # resume the daily backfill (skips settled dates; network is opt-in)
-python scripts/backfill_daily.py --from 2000-01-01 --to 2026-07-24 --store data/daily_store --allow-network
+python scripts/backfill_daily.py --from 2000-01-01 --to 2026-07-30 --allow-network
 
 # rebuild a truncated/corrupt ledger from the surviving monthly files (offline, no date range)
-python scripts/backfill_daily.py --rebuild-ledger --store data/daily_store
+python scripts/backfill_daily.py --rebuild-ledger
 ```
 
 After `pip install -e .` these are also available as the `acumen-backfill` and
