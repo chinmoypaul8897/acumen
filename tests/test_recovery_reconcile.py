@@ -436,3 +436,321 @@ def test_the_cli_refuses_without_a_minute_store(tmp_path: Path, capsys) -> None:
     )
     assert code == 2
     assert "No minute store" in capsys.readouterr().out
+
+
+# =================================================================================================
+# The architect's TRIAGE rulings of 01-Aug-2026 (QUESTIONS.md, recorded verbatim).
+# =================================================================================================
+
+# --- T1: the SEALED-FETCH-HORIZON boundary test ---------------------------------------------------
+
+WINDOW_START = date(2026, 7, 20)
+WINDOW_END = date(2026, 7, 28)
+
+#: The rebuild's tail, as the real store holds it: the last five sealed-scope trading days plus
+#: the growth the rebuild added after the sealed era.
+TAIL = [date(2026, 7, d) for d in (20, 21, 22, 23, 24, 27, 28, 29, 30, 31)]
+
+
+def _horizon(days, sealed_days, symbol="TCS") -> rr.HorizonVerdict:
+    return rr.horizon_boundary(
+        days, sealed_days, window_start=WINDOW_START, window_end=WINDOW_END, symbol=symbol
+    )
+
+
+def test_t1_the_boundary_is_the_unique_stored_day_where_the_two_counts_meet() -> None:
+    """B is a STORED date, which is what makes it unique -- not a range of equal-count dates."""
+    verdict = _horizon(TAIL, 6)
+    assert verdict.boundary == date(2026, 7, 27)
+    assert sum(1 for d in TAIL if d <= verdict.boundary) == 6
+    assert verdict.extras == (date(2026, 7, 28),)
+    assert verdict.beyond == (date(2026, 7, 29), date(2026, 7, 30), date(2026, 7, 31))
+
+
+def test_t1_passes_when_the_boundary_lands_inside_the_sealed_fetch_window() -> None:
+    for sealed_days, boundary in ((1, date(2026, 7, 20)), (5, date(2026, 7, 24)),
+                                  (7, date(2026, 7, 28))):
+        verdict = _horizon(TAIL, sealed_days)
+        assert verdict.passed and verdict.boundary == boundary
+
+
+def test_t1_FAILS_for_a_symbol_whose_boundary_falls_before_the_sealed_fetch_window() -> None:
+    """The synthetic symbol the ruling's 'A symbol failing the test STAYS unexplained' is for.
+
+    DRIFTER's rebuilt store holds five days the sealed era did not, and they are NOT at the
+    tail -- three of them are inside the history. The boundary therefore lands in 2019, far
+    outside the sealed fetch window, and no horizon reading can explain the delta.
+    """
+    days = [date(2019, 1, d) for d in (7, 8, 9, 10, 11)] + TAIL
+    verdict = _horizon(days, 3, symbol="DRIFTER")
+    assert verdict.boundary == date(2019, 1, 9)
+    assert not verdict.passed
+    assert "OUTSIDE the sealed fetch window" in verdict.reason
+
+
+def test_t1_FAILS_when_the_rebuilt_store_holds_FEWER_days_than_the_sealed_report() -> None:
+    verdict = _horizon(TAIL, 50, symbol="LOSER")
+    assert not verdict.passed and verdict.boundary is None
+    assert "FEWER than the sealed report's 50" in verdict.reason
+
+
+def test_t1_FAILS_when_the_sealed_report_records_no_days() -> None:
+    verdict = _horizon(TAIL, 0, symbol="EMPTY")
+    assert not verdict.passed and "no days for this symbol" in verdict.reason
+
+
+def test_t1_a_PASSING_symbol_reclassifies_its_stored_day_delta() -> None:
+    sealed_rows = [("TCS", 7, 7, 7, "settled")]
+    rebuilt_rows = [("TCS", 10, 7, 7, "settled")]
+    horizon = _horizon(TAIL, 7)
+    found = rr.reconcile(
+        facts(sealed_rows), facts(rebuilt_rows), new_events={}, horizons={"TCS": horizon}
+    )
+    assert [(d.measure, d.classification) for d in found] == [
+        (rr.MEASURE_STORED, rr.CLASS_HORIZON)
+    ]
+    assert "boundary B = 2026-07-28" in found[0].evidence
+
+
+def test_t1_a_FAILING_symbol_stays_unexplained_end_to_end() -> None:
+    days = [date(2019, 1, d) for d in (7, 8, 9, 10, 11)] + TAIL
+    horizon = _horizon(days, 3, symbol="DRIFTER")
+    sealed_rows = [("DRIFTER", 3, 3, 3, "settled")]
+    rebuilt_rows = [("DRIFTER", 15, 3, 3, "settled")]
+    found = rr.reconcile(
+        facts(sealed_rows), facts(rebuilt_rows), new_events={}, horizons={"DRIFTER": horizon}
+    )
+    assert [d.classification for d in found] == [rr.CLASS_UNEXPLAINED]
+    assert "T1 (sealed-fetch-horizon) does not hold" in found[0].evidence
+
+
+def test_t1_does_NOT_reclassify_the_gate_count_until_the_arithmetic_is_measured() -> None:
+    """A passing boundary alone is not enough: the gate move must be reproduced day by day."""
+    horizon = _horizon(TAIL, 7)  # gate leg never measured -> gate_accounted is False
+    found = rr.reconcile(
+        facts([("TCS", 7, 5, 7, "settled")]),
+        facts([("TCS", 10, 8, 10, "settled")]),
+        new_events={},
+        horizons={"TCS": horizon},
+    )
+    by_measure = {d.measure: d.classification for d in found}
+    assert by_measure[rr.MEASURE_STORED] == rr.CLASS_HORIZON
+    assert by_measure[rr.MEASURE_PASSING] == rr.CLASS_UNEXPLAINED
+
+
+def _accounted(**over):
+    """The real TCS shape: sealed 2,409/2,429 of 2,431 stored -> rebuilt 2,413/2,433.
+
+    The whole 2026-07 window is 10 stored days, 9 of them gated (2026-07-31 has no bhavcopy
+    yet -- Q-19) and all 9 passing. The sealed era's own tail is the 7 days up to B.
+    """
+    kwargs = dict(
+        sealed_pass=2409, sealed_gated=2429, sealed_days=2431,
+        rebuilt_pass=2413, rebuilt_gated=2433,
+        tail_pass=9, tail_gated=9, sealed_tail_days=7,
+    )
+    kwargs.update(over)
+    return rr.account_gate_delta(_horizon(TAIL, 7), **kwargs)
+
+
+def test_account_gate_delta_closes_when_the_move_is_attributable_to_the_fetch_window() -> None:
+    closed = _accounted()
+    assert closed.gate_accounted
+    assert "No day older than the window changed verdict" in closed.gate_note
+    found = rr.reconcile(
+        facts([("TCS", 7, 2409, 2429, "settled")]),
+        facts([("TCS", 10, 2413, 2433, "settled")]),
+        new_events={}, horizons={"TCS": closed},
+    )
+    assert {d.classification for d in found} == {rr.CLASS_HORIZON}
+
+
+def test_account_gate_delta_refuses_a_move_larger_than_the_window_can_supply() -> None:
+    """NESTLEIND's shape: +1,002 passes cannot come out of a 10-day window."""
+    assert not _accounted(rebuilt_pass=3411).gate_accounted
+
+
+def test_account_gate_delta_refuses_a_REGRESSION_the_window_cannot_supply() -> None:
+    """APLAPOLLO's shape: -467 means days inside the sealed history changed verdict."""
+    open_ = _accounted(rebuilt_pass=1942)
+    assert not open_.gate_accounted
+    assert "Days INSIDE the sealed history moved verdict" in open_.gate_note
+    found = rr.reconcile(
+        facts([("TCS", 7, 2409, 2429, "settled")]),
+        facts([("TCS", 10, 1942, 2433, "settled")]),
+        new_events={}, horizons={"TCS": open_},
+    )
+    passing = next(d for d in found if d.measure == rr.MEASURE_PASSING)
+    assert passing.classification == rr.CLASS_UNEXPLAINED
+    assert "the stored-day delta IS a sealed-fetch horizon" in passing.evidence
+
+
+def test_the_sealed_store_lag_widens_the_bound_by_exactly_its_own_size() -> None:
+    """A sealed era with NO ungated days admits a narrower move than one carrying the lag.
+
+    sealed_days == sealed_gated means every sealed day had a raw daily row, so its tail must
+    have contributed all 7 gated days and the gated move can only be 9 - 7 = +2.
+    """
+    tight = _accounted(sealed_days=2429, rebuilt_gated=2433)   # +4 gated, no slack
+    assert not tight.gate_accounted
+    assert _accounted(sealed_days=2429, rebuilt_gated=2431).gate_accounted  # +2 gated: fits
+
+
+class _StubDay:
+    def __init__(self, volume: int) -> None:
+        self.volume = volume
+        self.open_paise, self.high_paise, self.low_paise = 100, 101, 99
+
+
+class _StubCache:
+    def __init__(self, rows) -> None:
+        self._rows = rows
+
+    def day(self, symbol: str, when: date):
+        return self._rows.get(when)
+
+
+def test_gate_window_runs_the_REAL_gates_over_exactly_those_days(
+    store: MinuteStore,
+) -> None:
+    """Not a re-implementation: universe_backfill.gate_symbol is handed a restricted view."""
+    for day in (date(2026, 7, 27), date(2026, 7, 28), date(2026, 7, 29)):
+        store.write_bars("TCS", [_day("TCS", day)])
+    cache = _StubCache({
+        date(2026, 7, 27): _StubDay(10),   # matches the 1-min sum -> gate 1 passes
+        date(2026, 7, 28): _StubDay(10),
+        # 2026-07-29 has NO raw daily row: gate 1 cannot run on it, so it is not gated
+    })
+    passed, gated = rr.gate_window(
+        store, cache, "TCS", (date(2026, 7, 28), date(2026, 7, 29))
+    )
+    assert (passed, gated) == (1, 1)  # only the 28th was gated, and it passed
+
+
+# --- T2: new-CA-explained tightened to the rebuild fetch date --------------------------------------
+
+
+def test_t2_a_FUTURE_ex_date_explains_nothing() -> None:
+    actions = [
+        _Action("TCS", date(2026, 7, 30), " Bonus 1:1"),      # inside the rebuild's own window
+        _Action("GAIL", date(2026, 8, 31), " Dividend Rs 5"),  # not yet ex: explains nothing
+    ]
+    events = rr.new_events_by_symbol(
+        actions, after=date(2026, 7, 28), until=rr.REBUILD_FETCH_DATE
+    )
+    assert events == {"TCS": ["Bonus 1:1 @ 2026-07-30"]}
+
+
+def test_t2_the_rebuild_fetch_date_itself_is_INSIDE_the_window() -> None:
+    actions = [_Action("TCS", rr.REBUILD_FETCH_DATE, " Bonus 1:1")]
+    assert rr.new_events_by_symbol(
+        actions, after=date(2026, 7, 28), until=rr.REBUILD_FETCH_DATE
+    ) == {"TCS": ["Bonus 1:1 @ 2026-07-31"]}
+
+
+def test_t2_reclassification_lets_T1_catch_the_symbol_instead() -> None:
+    """The ruling's own words: 'reclassify, letting T1 catch them'."""
+    found = rr.reconcile(
+        facts([("TCS", 7, 2409, 2429, "settled")]),
+        facts([("TCS", 10, 2413, 2433, "settled")]),
+        new_events={}, horizons={"TCS": _accounted()},
+    )
+    assert {d.classification for d in found} == {rr.CLASS_HORIZON}
+
+
+def test_t1_outranks_a_new_corporate_action_on_the_gate_measure() -> None:
+    found = rr.reconcile(
+        facts([("TCS", 7, 2409, 2429, "settled")]),
+        facts([("TCS", 10, 2413, 2433, "settled")]),
+        new_events={"TCS": ["Bonus 1:1 @ 2026-07-30"]},
+        horizons={"TCS": _accounted()},
+    )
+    assert {d.classification for d in found} == {rr.CLASS_HORIZON}
+
+
+# --- T3: vendor-snapshot-drift is READ, never inferred ----------------------------------------------
+
+
+def test_t3_a_drift_verdict_reclassifies_only_the_measures_it_names() -> None:
+    forensic = rr.ForensicVerdict("GAIL", rr.VERDICT_DRIFT, frozenset({rr.MEASURE_PASSING}),
+                                  "era 2016-10..2018-03 refused by gate 1P")
+    found = rr.reconcile(
+        facts([("GAIL", 100, 90, 100, "settled")]),
+        facts([("GAIL", 90, 60, 100, "settled")]),
+        new_events={}, forensics={"GAIL": forensic},
+    )
+    by_measure = {d.measure: d.classification for d in found}
+    assert by_measure[rr.MEASURE_PASSING] == rr.CLASS_SNAPSHOT_DRIFT
+    assert by_measure[rr.MEASURE_STORED] == rr.CLASS_UNEXPLAINED  # not named -> not reclassified
+
+
+def test_t3_an_ESCALATED_symbol_stays_unexplained() -> None:
+    forensic = rr.ForensicVerdict("APLAPOLLO", rr.VERDICT_ESCALATE,
+                                  frozenset({rr.MEASURE_PASSING, rr.MEASURE_STATUS}), "unresolved")
+    found = rr.reconcile(
+        facts([("APLAPOLLO", 100, 98, 100, "settled")]),
+        facts([("APLAPOLLO", 100, 40, 100, "quarantined")]),
+        new_events={}, forensics={"APLAPOLLO": forensic},
+    )
+    assert {d.classification for d in found} == {rr.CLASS_UNEXPLAINED}
+
+
+def test_t3_a_MEASURED_forensics_verdict_outranks_a_coincidental_new_corporate_action() -> None:
+    """A day-level measurement beats the mere existence of a nearby event (T2's own logic)."""
+    forensic = rr.ForensicVerdict("GAIL", rr.VERDICT_DRIFT, frozenset({rr.MEASURE_PASSING}), "x")
+    found = rr.reconcile(
+        facts([("GAIL", 100, 90, 100, "settled")]),
+        facts([("GAIL", 100, 60, 100, "settled")]),
+        new_events={"GAIL": ["Bonus 1:1 @ 2026-07-30"]},
+        forensics={"GAIL": forensic},
+    )
+    assert [d.classification for d in found] == [rr.CLASS_SNAPSHOT_DRIFT]
+
+
+def test_t3_the_QUARANTINE_a_drift_caused_is_reclassified_with_its_cause() -> None:
+    forensic = rr.ForensicVerdict("APLAPOLLO", rr.VERDICT_DRIFT,
+                                  frozenset({rr.MEASURE_PASSING, rr.MEASURE_STATUS}), "measured")
+    found = rr.reconcile(
+        facts([("APLAPOLLO", 100, 98, 100, "settled")]),
+        facts([("APLAPOLLO", 100, 40, 100, "quarantined")]),
+        new_events={}, forensics={"APLAPOLLO": forensic},
+    )
+    assert {d.classification for d in found} == {rr.CLASS_SNAPSHOT_DRIFT}
+
+
+def test_t3_the_ruling_allows_no_third_option() -> None:
+    with pytest.raises(rr.ReconcileError, match="no third option"):
+        rr.parse_forensics({"symbols": {"GAIL": {"verdict": "probably-fine"}}})
+
+
+def test_t3_an_absent_forensics_file_reclassifies_nothing(tmp_path: Path) -> None:
+    assert rr.read_forensics(tmp_path / "absent.json") == {}
+
+
+# --- the report the architect reads ------------------------------------------------------------------
+
+
+def test_the_report_prints_the_boundary_date_histogram() -> None:
+    horizons = {
+        "TCS": _horizon(TAIL, 7),
+        "GAIL": _horizon(TAIL, 5, symbol="GAIL"),
+        "DRIFTER": _horizon([date(2019, 1, d) for d in (7, 8, 9)] + TAIL, 2, symbol="DRIFTER"),
+    }
+    text = "\n".join(
+        rr.render(
+            sealed=facts(BASE), rebuilt=facts(BASE), divergences=(), measured={}, checks=(),
+            ca_rows=41_371, horizons=horizons, dropped_future_events=17,
+        )
+    )
+    assert "### Boundary-date histogram" in text
+    assert "| 2026-07-28 | 1 |" in text
+    assert "| 2026-07-24 | 1 |" in text
+    assert "T1 FAIL (stays unexplained): **1**: DRIFTER" in text
+    assert "17 corporate-action row(s) with a FUTURE ex-date were dropped" in text
+
+
+def test_the_report_prints_every_final_class_count_including_the_two_new_ones() -> None:
+    text = _render(BASE, BASE)
+    assert "Divergences by FINAL class:" in text
+    for name in (rr.CLASS_HORIZON, rr.CLASS_SNAPSHOT_DRIFT):
+        assert f"| `{name}` | 0 |" in text
