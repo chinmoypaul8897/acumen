@@ -2908,3 +2908,34 @@ committed at RESUME-1 and the approval leaves the code exactly as it stands.
   same sentence "a minority of stored history" became "only part of", because TATASTEEL at
   65.8% is a MAJORITY and the old wording was false for one of the caveat's two subjects. The
   computed caveat is what every manifest now carries verbatim.
+
+---
+
+## ARCHITECT'S RULINGS (02-Aug-2026) · the Q-18 RE-SEAL REVIEW's Part 0 · recorded VERBATIM by the re-seal review session
+
+The architect's text, exactly as supplied, quoted whole and unedited. It rules on the four
+items the RESUME-2 session put on the record for the reviewer (the REVIEW_7 row-count slip,
+the 47→45 factor-scan delta, the card's chunk-6 oracle citation, and Q-17's market-wide
+dates). Nothing in this repo may narrow or widen it.
+
+> "Rulings (02-Aug-2026): REVIEW_7's ICICIBANK '23 rows' is a transcription slip
+> (ceil(82/4)=21; all load-bearing figures reproduce); document stands, slip recorded. The
+> 47→45 factor-scan change is ACCEPTED as a re-measured statistic of the re-sealed era
+> (population and first-15 identical; bias structurally tick-blind; the two unnameable pairs
+> are a stated limit of the destroyed store). The architect's card citation 'BHARTIARTL
+> 2026-07-24 / 1913.9 / 25 rows' was in error (gate day 2026-07-17; 1913.9/25 is the trader's
+> reading per R3F-f). Q-17's five market-wide dates ride to the 9B report's disclosures;
+> 2021-02-24 is annotated as the probable NSE outage/extended session — identity candidate
+> only. Architect."
+
+**What this ruling settles, for the record.** Four items that were open to the reviewer are
+now closed by the architect and are NOT findings of REVIEW_9B_PRESEAL: (1) REVIEW_7's
+published "23 rows" for ICICIBANK 2026-05-21 stands as a document with a recorded
+transcription slip — the arithmetic is ceil(82/4) = 21 and no load-bearing figure moves;
+(2) the universe-wide bias-materiality count moving 47 → 45 is ACCEPTED as a re-measured
+statistic of the re-sealed era, with the two unnameable pairs a stated limit of the destroyed
+store; (3) decision B243's disagreement with the RESUME-2 card is resolved in the repo's
+favour — the chunk-6 gate day is 2026-07-17 and 1913.9 / 25 rows is the trader's chart
+reading (receipt R3F-f), so the card citation was in error; (4) Q-17's five market-wide mixed
+dates are carried to the chunk-9B report's DISCLOSURES rather than excluded, with 2021-02-24
+annotated as the probable NSE outage / extended session and named an identity candidate only.
