@@ -13,7 +13,7 @@ This is the chunk-9A **machine** -- the runner, the run ledger, the manifest and
 **Disclosures, first**
 
 * **The REAL chunk-3 factor table is wired.** Chunk 8's sweep ran with an EMPTY factor table, which REVIEW_7 proved correct for that window only. This run builds the full CONTEXT 4.2 table per symbol from the NSE corporate-action history and applies it pairwise (CONTEXT 3.2). Section 3 shows it changes nothing in the pilot window, and section 6 measures what it would have changed over the settled universe.
-* **The disclosed-residual register was read before any per-symbol statistic** (`universe_backfill/ledger.json`, CONTEXT 4.6's chunk-9 duty). Carried verbatim into every manifest this runner writes: "IOC (41.9% price-proven) and TATASTEEL (65.8%) are settled-but-partial under B149 -- their backtests cover a minority of stored history, concentrated in recent years."
+* **The disclosed-residual register was read before any per-symbol statistic** (`universe_backfill/ledger.json`, CONTEXT 4.6's chunk-9 duty). Carried verbatim into every manifest this runner writes: "IOC (42.0% price-proven) and TATASTEEL (65.8% price-proven) are settled-but-partial under B149 -- their backtests cover only part of stored history, concentrated in recent years."
 * **capital-infeasibility flags NOT computed -- the trader's Q43 answer is pending.** `capital_reference` and `margin_basis` are optional config keys and both are null. The machinery is built and tested; it computes POST-HOC from the ledger, never inside the run, and there is no default figure anywhere in it.
 * **The two CONTEXT 7-E13 metrics the build session STOPPED on are RULED and computed** (QUESTIONS.md **Q-16**, architect 30-Jul-2026). `outliers` is Tukey fences on net PnL, printed with its definition beside it. The intra-trade / intrabar drawdown and run-up are measured on the TRUE portfolio equity path at 15-minute resolution -- the earlier worst-case coincidence construction is RETIRED, because it invented co-timing -- with one disclosed limit: intra-candle excursions are not represented, and the per-trade MFE/MAE figures carry those. Nothing in this pack is labelled PROVISIONAL.
 * **One presentation basis: NET.** Every metric in section 7 is after the CONTEXT 3.5 Rs 100/trade round trip, over one population keyed on the sign of NET (the E13 presentation ruling, 30-Jul-2026). The before-costs totals appear on exactly one labelled line. Section 7a opens with the definitions block that ruling requires.
@@ -28,8 +28,9 @@ This is the chunk-9A **machine** -- the runner, the run ledger, the manifest and
 | Row Size N | 24 | `config.yaml` (CONTEXT 3.3) |
 | Capital (equity curve base) | Rs 100,000.00 | `config.yaml` (CONTEXT 3.5, R1-Q21a) |
 | capital_reference / margin_basis | null / null | trader Q43 PENDING |
-| Instrument master | `OpenAPIScripMaster_2026-07-28.json` | newest cached dump (CONTEXT 4.3 ticks) |
-| Spec version | v1.4 | CONTEXT.md |
+| Instrument master | `OpenAPIScripMaster_2026-07-31.json` | the PINNED dump, `config.yaml` (CONTEXT 4.3 ticks; QUESTIONS.md Q-20) |
+| Instrument-master sha256 | `ce198be44b44fc33...` | the pin's own digest, on every manifest |
+| Spec version | v1.5 | CONTEXT.md |
 | Factor-table digest | `3bfa71373c8e0da4...` | sha256 |
 | Pilot symbols | TCS, RELIANCE, HDFCBANK, ICICIBANK, BHARTIARTL | chunk-7/8 window, unchanged |
 | Pilot window | 2026-05-01 .. 2026-07-24 | chunk-7/8 window, unchanged |
@@ -46,7 +47,7 @@ Same days, same engines, but now driven by `acumen.backtest` end to end and with
 | Days never armed | 56 | 56 | YES |
 | Executed trades | 146 | 146 | YES |
 | Shares transacted | 53,750 | 53,750 | YES |
-| Gross PnL | Rs 12,665.05 | Rs 12,665.05 | YES |
+| Gross PnL (chunk-8 basis, before Rs 100/trade costs) | Rs 12,665.05 | Rs 12,665.05 | YES |
 | Costs paid | Rs 14,600.00 | Rs 14,600.00 | YES |
 | Net PnL | -Rs 1,934.95 | -Rs 1,934.95 | YES |
 | Winners (net) | 45 | 45 | YES |
@@ -240,11 +241,11 @@ CONTEXT 3.2: a demerger has NO valid factor, so any pair spanning the ex-date is
 | Shards on disk at the kill | RELIANCE.jsonl, TCS.jsonl (only COMPLETE symbols) |
 | Resumed run, ledger sha256 | `c3363f6f17757ebcbb2f08e8159e943cbbd692836d165687cbb2d91e22c1e318` |
 | **Byte-identical** | **YES** |
-| Manifest digest (commit-independent) | `b1390597c14e372ce91f47c735cc138d4c352c56ddce6206b25fd9ca1c7986e6` vs `b1390597c14e372ce91f47c735cc138d4c352c56ddce6206b25fd9ca1c7986e6` |
+| Manifest digest (commit-independent) | `f2327e6fc53bd62a073fd376e3c399dbe6c38b95074706d85c43f38554726077` vs `f2327e6fc53bd62a073fd376e3c399dbe6c38b95074706d85c43f38554726077` |
 | Rows: whole / resumed | 290 / 290 |
 | Duplicated (symbol, day) keys | 0 |
 | Pilot (a) ledger sha256 | `c3363f6f17757ebcbb2f08e8159e943cbbd692836d165687cbb2d91e22c1e318` |
-| Pilot (a) manifest digest | `89c4016879a75808517cd24d59011a87570bd26af9523f2982488c9d6e500ed5` |
+| Pilot (a) manifest digest | `3a746c7e8c75210be72ae912b9eb1be1cf02028bed952d5305226dda3d1a1951` |
 
 The ledger holds no clock read of any kind -- the only timestamps in a row are CANDLE stamps -- which is what lets the same code over the same stores produce the same bytes.
 
@@ -257,7 +258,7 @@ Every bonus and face-value split on a SETTLED symbol with an ex-date in the minu
 | Settled symbols scanned | 204 |
 | Share-count events in the era | 112 |
 | Bias pairs walked (one per event) | 107 |
-| **Pairs whose BIAS the adjustment changes** | **47** |
+| **Pairs whose BIAS the adjustment changes** | **45** |
 
 Those are days on which an empty factor table would have traded the WRONG SIDE. It is the measurement behind chunk 9's duty to wire the real table, and it is why the pilot window's "nothing changed" is a statement about the window, not a general one.
 
@@ -295,7 +296,7 @@ PURE over the ledger rows: no store, no clock. The equity curve is `capital + cu
 * **Outliers.** outliers = executed trades whose NET PnL falls outside the Tukey fences [Q1 - 3/2 x IQR, Q3 + 3/2 x IQR], taken over the net PnL of ALL executed trades; quartiles by linear interpolation between order statistics (R / numpy type 7), computed exactly in Fractions; shares are of the net-basis gross profit and gross loss (QUESTIONS.md Q-16(a), architect 30-Jul-2026)
 * **CAGR span.** The ENDPOINT DIFFERENCE of the walked window in calendar days (last day minus first day, so an 82-day window spans 81 days), over a 365-day year; `None` when the final equity is at or below zero, because a negative base has no real root (decision B187).
 * **Sharpe and Sortino.** E13's own convention: daily equity returns, risk-free rate 0, annualized x sqrt(252); sample standard deviation (n-1) for Sharpe, downside sum-of-squares over ALL observations for Sortino; `-` when undefined, never 0 (decision B186).
-* **The one exception to the net basis, stated so it cannot mislead.** Section 3's reconciliation table compares this run against the COMMITTED chunk-8 pack figure by figure, and chunk 8's own "gross profit / gross loss" are before-costs totals. Those two rows are labelled with that basis where they appear and are a cross-document check, not report metrics.
+* **The one exception to the net basis, stated so it cannot mislead.** Section 3's reconciliation table compares this run against the COMMITTED chunk-8 pack figure by figure, and chunk 8 reported on a before-costs basis: its "Gross PnL", its "gross profit" and its "gross loss" are all totals taken before the Rs 100/trade round trip. **All THREE of those rows** are labelled with that basis where they appear and are a cross-document check, not report metrics (REVIEW_9A_2 finding Q1: the earlier wording named two of them and left the third unlabelled).
 
 | Metric | Value |
 |---|---|
@@ -304,7 +305,7 @@ PURE over the ledger rows: no store, no clock. The equity curve is `capital + cu
 | Gross loss (net basis: the losers' net sum) | -Rs 98,424.55 |
 | Profit factor | 0.9803 |
 | Commission paid | Rs 14,600.00 |
-| Profit / loss BEFORE Rs 100/trade costs | Rs 101,099.20 / -Rs 88,434.15 -- the only before-costs figures in this pack; every other number on this page is NET |
+| Profit / loss BEFORE Rs 100/trade costs | Rs 101,099.20 / -Rs 88,434.15 -- the only before-costs figures in section 7; the three labelled rows of section 3's cross-document reconciliation are the stated exception; every other number on this page is NET |
 | Expected payoff (per trade) | -Rs 13.25 |
 | Total trades / open trades | 146 / 0 |
 | Winners / losers / flat (by NET sign) | 45 / 101 / 0 |
@@ -315,17 +316,17 @@ PURE over the ledger rows: no store, no clock. The equity curve is `capital + cu
 | Avg profit / avg loss | 2.2003 |
 | Largest win | Rs 2,900.00 (0.58% of its own notional, 3.01% of gross profit) -- all three NET |
 | Largest loss | -Rs 1,100.00 (-0.21% of its own notional, 1.12% of gross loss) -- all three NET; a loss over a loss is a POSITIVE share |
-| Outliers | NONE of 146 executed trades falls outside the fences [-Rs 4,243.30, Rs 4,141.50]. Q1 -Rs 1,099.00, Q3 Rs 997.20, IQR Rs 2,096.20. DEFINITION: outliers = executed trades whose NET PnL falls outside the Tukey fences [Q1 - 3/2 x IQR, Q3 + 3/2 x IQR], taken over the net PnL of ALL executed trades; quartiles by linear interpolation between order statistics (R / numpy type 7), computed exactly in Fractions; shares are of the net-basis gross profit and gross loss (QUESTIONS.md Q-16(a), architect 30-Jul-2026) |
+| Outliers | **0** of 146 executed trades, summed net Rs 0.00 -- 0 above Rs 4,141.50 (Rs 0.00, 0.00% of gross profit) and 0 below -Rs 4,243.30 (Rs 0.00, 0.00% of gross loss). Q1 -Rs 1,099.00, Q3 Rs 997.20, IQR Rs 2,096.20. DEFINITION: outliers = executed trades whose NET PnL falls outside the Tukey fences [Q1 - 3/2 x IQR, Q3 + 3/2 x IQR], taken over the net PnL of ALL executed trades; quartiles by linear interpolation between order statistics (R / numpy type 7), computed exactly in Fractions; shares are of the net-basis gross profit and gross loss (QUESTIONS.md Q-16(a), architect 30-Jul-2026) |
 | Max drawdown (equity close-to-close) | Rs 12,761.75 (11.68%), 2026-06-12 -> 2026-07-20, 25 observation(s), recovered never in the window |
 | Max run-up (equity close-to-close) | Rs 16,422.00 (17.68%), 2026-05-15 -> 2026-06-12, 19 observation(s), given back never in the window |
-| Max drawdown (intra-trade, 15-min path) | Rs 14,231.00 (12.98%), 2026-06-11 12:15 -> 2026-07-23 11:45, 302 observation(s) of 649, never recovered in the window. LIMIT: measured on the TRUE portfolio equity path at 15-minute resolution: every open position marked to its 15-min candle closes, exit candles at their exit levels, summed across positions. ONE disclosed limit: intra-candle excursions are not represented -- the per-trade MFE/MAE figures carry those (QUESTIONS.md Q-16(b), architect 30-Jul-2026) |
-| Max run-up (intra-trade, 15-min path) | Rs 17,515.10 (19.00%), 2026-05-19 12:15 -> 2026-06-11 12:15, 197 observation(s) of 649, never recovered in the window. LIMIT: measured on the TRUE portfolio equity path at 15-minute resolution: every open position marked to its 15-min candle closes, exit candles at their exit levels, summed across positions. ONE disclosed limit: intra-candle excursions are not represented -- the per-trade MFE/MAE figures carry those (QUESTIONS.md Q-16(b), architect 30-Jul-2026) |
+| Max drawdown (intra-trade, 15-min path) | Rs 14,231.00 (12.98%), 2026-06-11 12:15 -> 2026-07-23 11:45, 302 observation(s) of 649, recovered never in the window. LIMIT: measured on the TRUE portfolio equity path at 15-minute resolution: every open position marked to its 15-min candle closes, exit candles at their exit levels, summed across positions. ONE disclosed limit: intra-candle excursions are not represented -- the per-trade MFE/MAE figures carry those (QUESTIONS.md Q-16(b), architect 30-Jul-2026) |
+| Max run-up (intra-trade, 15-min path) | Rs 17,515.10 (19.00%), 2026-05-19 12:15 -> 2026-06-11 12:15, 197 observation(s) of 649, given back never in the window. LIMIT: measured on the TRUE portfolio equity path at 15-minute resolution: every open position marked to its 15-min candle closes, exit candles at their exit levels, summed across positions. ONE disclosed limit: intra-candle excursions are not represented -- the per-trade MFE/MAE figures carry those (QUESTIONS.md Q-16(b), architect 30-Jul-2026) |
 | Return on initial capital | -1.93% |
 | CAGR | -8.43% |
 | Sharpe (daily, rf 0, x sqrt 252) | -0.3809 |
 | Sortino (daily, rf 0, x sqrt 252) | -0.5903 |
-| Avg MFE / avg MAE per trade | Rs 1,396.84 / -Rs 1,148.31 |
-| Largest MFE / largest MAE | Rs 8,000.00 / -Rs 5,827.50 |
+| Avg MFE / avg MAE per trade | Rs 1,396.84 / -Rs 1,148.31 -- **BEFORE COSTS**: an excursion is a PRICE move against the entry, so neither figure carries the Rs 100 round trip. The excursions bracket a trade's GROSS PnL, not its net |
+| Largest MFE / largest MAE | Rs 8,000.00 / -Rs 5,827.50 -- **BEFORE COSTS**, on the same basis as the row above |
 | Trading days in the series | 58 |
 
 ### 7b. All / Long / Short
@@ -395,12 +396,12 @@ The machinery exists and is unit-tested on both branches: with `capital_referenc
 * no non-executed day pays a cost or carries PnL: **PASS**
 * qty x per-share risk <= the risk budget on every signalled day: **PASS**
 * the sizing floor is tight ((qty + 1) x risk > budget): **PASS**
-* every MFE >= 0 and every MAE <= 0: **PASS**
-* every executed trade's realized PnL sits inside [MAE, MFE]: **PASS**
+* every MFE >= 0 and every MAE <= 0 (both BEFORE COSTS -- price excursions): **PASS**
+* every executed trade's realized GROSS PnL sits inside [MAE, MFE] -- the BEFORE-COSTS basis is what makes this an invariant; the NET PnL can sit below MAE by up to the Rs 100 cost, so it is stated and counted rather than asserted: **PASS** (net inside on 126 of 146)
 * every evaluated day passed the whole CONTEXT 4.6 battery, recomputed per day (gate 1 strictly or by the evidence-gated auction relief, gate 2, gate 1P): **PASS** (3 day(s) passed gate 1 by auction relief, counted separately)
 * the run reconciles with the committed chunk-8 pack on every figure: **PASS**
 * an interrupted run resumes byte-identically with zero duplicates: **PASS**
-* the manifest carries CONTEXT 4.6's residual caveat verbatim: **PASS**
+* the manifest's residual caveat quotes its own register entries (CONTEXT 4.6 v1.5): **PASS**
 * the capital-infeasibility flags are NOT computed (Q43 pending): **PASS**
 * the benchmark is built from the first trade date's closes: **PASS**
 * every 15-minute path reconciles with the ledger (last mark == realized net PnL): **PASS** (146 paths, 903 marks)

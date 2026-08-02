@@ -326,66 +326,76 @@ def test_the_mfe_mae_pair_is_a_BEFORE_COST_measure_in_a_net_basis_table() -> Non
     assert net_inside == 126  # <-- 20 rows a net-basis reader would call violations
 
 
-def test_the_pack_still_carries_a_third_before_costs_figure() -> None:
-    """**PINS A DEFECT (REVIEW_9A_2 finding Q1) -- flip this when it is fixed.**
+def test_every_before_costs_figure_in_the_pack_is_labelled_as_one() -> None:
+    """**FLIPPED 02-Aug-2026 (chunk-9B RESUME-2). Was: PINS A DEFECT (REVIEW_9A_2 finding Q1).**
 
-    **STATE, 31-Jul-2026 (chunk-9B PREP):** the RENDERER is already fixed -- commit
-    ``257c0ce`` labels this row "(chunk-8 basis, before Rs 100/trade costs)" and widens the
-    definitions block's exception to all three rows. This pin still passes because the
-    COMMITTED ARTEFACT is stale: regenerating the pack needs the local Parquet stores, and this
-    session destroyed them (PROGRESS.md 2026-07-31, QUESTIONS.md Q-18). The pack regeneration
-    and this flip are OWED, together, the moment a store exists again.
+    The renderer was fixed at commit ``257c0ce`` on 31-Jul-2026, but the pin stayed green for
+    two days because the COMMITTED ARTEFACT was stale: regenerating the pack needs the local
+    Parquet stores and the 31-Jul incident had destroyed them (QUESTIONS.md Q-18). The stores
+    were rebuilt, the pack regenerated, and this now asserts the RULE instead of the defect.
 
     The ruling allows before-costs totals "ONCE, labelled". The pack's metric table carries one
-    such line and section 3's reconciliation carries two more, which the definitions block
-    discloses as "those two rows". There is a THIRD -- section 3's "Gross PnL Rs 12,665.05",
-    the same 146 trades before the same costs -- and it is neither labelled nor covered by the
-    stated exception, so the pack's own "the only before-costs figures in this pack" is not
-    literally true. It cannot mislead the way REVIEW_9A Q1 did (the two rows beneath it are
-    "Costs paid" and "Net PnL", which makes the triple self-explanatory), which is why this is
-    a finding and not the verdict."""
+    such line; section 3's cross-document reconciliation against the committed chunk-8 pack
+    carries three more -- "Gross PnL", "gross profit" and "gross loss", all chunk-8-basis
+    figures. The defect was that the THIRD ("Gross PnL Rs 12,665.05") was neither labelled nor
+    covered by a definitions block that said "those two rows". All four are now labelled where
+    they appear, and the exception names three.
+    """
     text = PACK.read_text(encoding="utf-8")
     labelled = [
         line
         for line in text.splitlines()
         if line.startswith("|") and "Rs 100/trade costs" in line.replace("BEFORE", "before")
     ]
-    assert len(labelled) == 3  # two in section 3, one in the metric table
+    assert len(labelled) == 4  # three in section 3, one in the metric table
 
-    unlabelled = [
+    # the row that used to be the unlabelled third one, now carrying its basis
+    assert (
+        "| Gross PnL (chunk-8 basis, before Rs 100/trade costs) | Rs 12,665.05 | "
+        "Rs 12,665.05 | YES |"
+    ) in text
+    assert not [
         line
         for line in text.splitlines()
         if line.startswith("| Gross PnL |") and "before" not in line
     ]
-    assert unlabelled == ["| Gross PnL | Rs 12,665.05 | Rs 12,665.05 | YES |"]  # <-- the third
-    assert "the only before-costs figures in this pack" in text  # ...and the claim it breaks
-    assert 'chunk 8\'s own "gross profit / gross loss" are before-costs totals' in text
-    assert "Those two rows are labelled" in text  # the exception names two, not three
+    # ...and the claim the defect broke is now literally true, scoped to where it holds
+    assert "the only before-costs figures in section 7" in text
+    assert "the only before-costs figures in this pack" not in text
+    assert "**All THREE of those rows** are labelled" in text
+    assert "Those two rows are labelled" not in text
 
 
-def test_the_fifteen_minute_run_up_prints_a_giveback_as_a_recovery() -> None:
-    """**PINS A DEFECT (REVIEW_9A_2 finding Q2, severity LOW) -- flip when it is fixed.**
+def test_the_two_run_up_rows_describe_the_same_quantity_the_same_way() -> None:
+    """**FLIPPED 02-Aug-2026 (chunk-9B RESUME-2). Was: PINS A DEFECT (REVIEW_9A_2 finding Q2).**
 
-    **STATE, 31-Jul-2026 (chunk-9B PREP):** the RENDERER is already fixed -- commit ``6897387``
-    makes `_path_line` say "given back" on a run-up and "recovered" on a drawdown, mirroring
-    the close-to-close rows. This pin still passes because the COMMITTED ARTEFACT is stale (see
-    the sibling Q1 pin above and QUESTIONS.md Q-18). Flip it with the pack regeneration.
+    The renderer was fixed at commit ``6897387`` on 31-Jul-2026 -- `_path_line` says "given
+    back" on a run-up and "recovered" on a drawdown -- but the pin stayed green for two days
+    because the COMMITTED ARTEFACT was stale (see the sibling Q1 pin above and QUESTIONS.md
+    Q-18). The stores were rebuilt, the pack regenerated, and this now asserts the RULE.
 
     `path_max_run_up.recovered` is the day the rise was GIVEN BACK (the first later observation
-    at or below the trough) -- the correct mirror, and Q5's whole point. The pack prints it with
-    the drawdown's vocabulary: the close-to-close run-up row says "given back never in the
-    window" and the 15-minute run-up row beside it says "never recovered in the window" for the
-    same quantity. A reader comparing the two rows is told two different things about one
-    number."""
+    at or below the trough) -- the correct mirror, and Q5's whole point. The defect was that the
+    pack printed it with the drawdown's vocabulary, so the close-to-close run-up row and the
+    15-minute run-up row beside it told a reader two different things about one number. Both
+    now say "given back", and both drawdown rows say "recovered".
+    """
     text = PACK.read_text(encoding="utf-8")
-    close_to_close = [ln for ln in text.splitlines() if ln.startswith("| Max run-up (equity")]
-    path_line = [ln for ln in text.splitlines() if ln.startswith("| Max run-up (intra-trade")]
+    lines = text.splitlines()
+    close_to_close = [ln for ln in lines if ln.startswith("| Max run-up (equity")]
+    path_line = [ln for ln in lines if ln.startswith("| Max run-up (intra-trade")]
     assert len(close_to_close) == 1 and len(path_line) == 1
     assert "given back never in the window" in close_to_close[0]
-    assert "never recovered in the window" in path_line[0]  # <-- drawdown vocabulary
-    assert "given back" not in path_line[0]
+    assert "given back never in the window" in path_line[0]  # <-- was "never recovered"
+    assert "recovered" not in path_line[0]
 
-    # the field itself IS the giveback, which is what makes the wording the defect:
+    # ...and the drawdown pair still says "recovered" on both rows, so the fix mirrored the
+    # vocabulary rather than replacing one wrong word with another.
+    for prefix in ("| Max drawdown (equity", "| Max drawdown (intra-trade"):
+        row = next(ln for ln in lines if ln.startswith(prefix))
+        assert "recovered" in row and "given back" not in row
+
+    # the field itself IS the giveback, which is what made the old wording the defect:
     source = inspect.getsource(pf.path_max_run_up)
     assert "point.equity_paise <= level" in source
 

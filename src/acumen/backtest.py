@@ -1113,6 +1113,17 @@ class BacktestRunner:
             "acknowledged": True,
             "source": RESIDUAL_LEDGER_RELPATH,
             "caveat": residual_caveat(self.residual),
+            # The register entries the CAVEAT ITSELF quotes -- CONTEXT 4.6 (v1.5) requires its
+            # figures to be "quoted from the register's own current figures", so a reader must
+            # be able to recompute the sentence from the manifest alone. They are carried in
+            # their own block rather than folded into `per_symbol`, because `per_symbol` is the
+            # UNIVERSE THIS RUN WALKED and IOC/TATASTEEL are usually not in it: a pilot over
+            # five symbols would otherwise look as though it had walked seven.
+            "caveat_basis": {
+                symbol: self.residual[symbol].as_dict()
+                for symbol in SETTLED_BUT_PARTIAL
+                if symbol in self.residual
+            },
             "per_symbol": entries,
             "not_in_register": missing,
         }
@@ -1360,13 +1371,18 @@ def build_runner(
 
     daily_store = DailyStore.at(data / "daily_store")
     minute_store = MinuteStore.at(data / "minute_store")
-    if master_path is None:
-        master, master_path, master_sha = pinned_master(cache, config.instrument_master)
-    else:
-        master_path = Path(master_path)
-        master, master_path, master_sha = pinned_master(
-            master_path.parent.parent, master_path.name
+    if master_path is not None and Path(master_path).name != config.instrument_master:
+        # The ruling is "ONE PINNED master snapshot governs the whole backtest", so an explicit
+        # path is a CONFIRMATION of the pin, never an override of it. Without this, threading
+        # the path through would have re-opened by argument exactly the door the config closed.
+        raise BacktestError(
+            f"{Path(master_path).name} is not the pinned instrument master "
+            f"({config.instrument_master}). QUESTIONS.md Q-20 pins ONE snapshot for the whole "
+            "backtest; change the pin in config.yaml -- which is an architect spec change, and "
+            "which makes every in-flight run refuse to resume -- rather than passing another "
+            "file here."
         )
+    master, master_path, master_sha = pinned_master(cache, config.instrument_master)
     seed = seed_from if seed_from is not None else start
     calendar = TradingCalendar.from_daily_store_range(
         daily_store, seed - timedelta(days=CALENDAR_LEAD_DAYS), end

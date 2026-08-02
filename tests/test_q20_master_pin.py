@@ -24,6 +24,8 @@ Source files in this repo are ASCII-only on purpose (see src/acumen/config.py).
 from __future__ import annotations
 
 import ast
+import inspect
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -180,6 +182,52 @@ def test_the_sha256_is_the_files_own_digest(tmp_path: Path) -> None:
     expected = hashlib.sha256(path.read_bytes()).hexdigest()
     assert bt.pinned_master(tmp_path, path.name)[2] == expected
     assert bt.file_sha256(path) == expected
+
+
+def test_build_runner_refuses_a_master_that_is_not_the_configured_pin(tmp_path: Path) -> None:
+    """An explicit ``master_path`` is a CONFIRMATION of the pin, never an override.
+
+    The preflight resolves the pin, prints its digest and threads the path into the run so the
+    operator's printed digest provably belongs to the file the run read. Threading a path would
+    otherwise re-open by argument exactly the door ``config.yaml`` closed, so `build_runner`
+    refuses any filename that is not the configured pin -- before it opens a single store.
+    """
+    with pytest.raises(bt.BacktestError) as excinfo:
+        bt.build_runner(
+            ("RELIANCE",),
+            date(2026, 5, 1),
+            date(2026, 5, 2),
+            master_path=tmp_path / "instrument_master" / "OpenAPIScripMaster_2099-01-01.json",
+        )
+    message = str(excinfo.value)
+    assert "not the pinned instrument master" in message
+    assert load_config(include_env=False).instrument_master in message
+    assert "Q-20" in message
+
+
+def test_the_bias_materiality_scan_cannot_see_a_tick_at_all() -> None:
+    """**Why the pilot pack's universe-wide scan count is NOT a Q-20 quantity.**
+
+    The chunk-9A pilot pack measures how often the real factor table changes the bias over the
+    whole settled universe. That count moved 47 -> 45 when the pack was regenerated on the
+    Q-18-rebuilt stores, and the obvious suspicion -- "the new tick pin moved it" -- is
+    refutable structurally rather than by argument: CONTEXT 3.2's bias reads DAILY candles plus,
+    for Rule 3, 1-minute candles. It builds no profile, so it needs no tick, no row size and no
+    instrument master, and the scan's two functions accordingly take none.
+
+    That leaves the daily store, the calendar derived from its ledger, and the minute lake --
+    exactly the stores the Q-18 rebuild replaced -- as the only inputs that could have moved it,
+    which is what CONTEXT 4.6 (v1.5) re-sealed with 422 explained divergences.
+    """
+    from acumen import pilot_evidence as pe
+
+    for function in (pe.scan_share_count_events, pe._bias_both_ways):
+        parameters = set(inspect.signature(function).parameters)
+        assert "master" not in parameters, function.__name__
+        assert "row_size" not in parameters, function.__name__
+        source = inspect.getsource(function)
+        for forbidden in ("master", "tick", "row_size", "SignalPipeline", "day_profile"):
+            assert forbidden not in source, f"{function.__name__} mentions {forbidden}"
 
 
 def test_the_committed_pin_exists_on_this_machine_and_is_the_ruled_one() -> None:

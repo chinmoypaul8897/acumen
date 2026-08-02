@@ -45,6 +45,13 @@ emptied them, with every ignore rule in force (QUESTIONS.md Q-18, CONTEXT §4.6)
 tree no git command can reach them, and the config loader refuses a store root that is
 relative or inside the repo, so it cannot quietly revert.
 
+The **tick regime is pinned** the same way, for the same reason: `config.yaml`'s
+`instrument_master` names ONE instrument-master snapshot and the backtest reads no other. The
+vendor's daily dump moved `tick_size` on 11 walked symbols — in both directions — within two
+days, and CONTEXT §3.3 sizes the volume-profile row grid by the tick, so "newest dump wins"
+silently changed POCs and made a re-run non-reproducible (QUESTIONS.md Q-20). The run manifest
+records the pin by filename and sha256, and a run refuses to resume under a different one.
+
 Every command below defaults to those roots; `--store` is only for pointing at a copy.
 
 ```bash

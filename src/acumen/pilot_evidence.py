@@ -1527,8 +1527,14 @@ def invariant_report(
         # CONTEXT 4.6 (v1.5): the settled-but-partial figures are "quoted from the register's
         # own current figures, which every manifest carries verbatim". So the invariant is
         # INTERNAL CONSISTENCY -- the caveat sentence must be the one this manifest's OWN
-        # per-symbol register entries produce. Reconstructing the entries from the manifest
-        # keeps the check offline and makes it impossible to satisfy with a frozen string.
+        # register entries produce. Reconstructing the entries from the manifest keeps the
+        # check offline and makes it impossible to satisfy with a frozen string.
+        #
+        # The basis is `caveat_basis`, NOT `per_symbol`. `per_symbol` is the universe the run
+        # WALKED, and this pilot walks five symbols of which neither B149 symbol is one -- so
+        # reconstructing from it produced "IOC (ABSENT from the register)" and the check could
+        # never pass on any run smaller than the full universe. It was written while the stores
+        # were destroyed and the pack could not be regenerated, so it had never executed.
         "the manifest's residual caveat quotes its own register entries (CONTEXT 4.6 v1.5)",
         manifest["residual_register"]["caveat"]
         == bt.residual_caveat(
@@ -1541,7 +1547,7 @@ def invariant_report(
                     gate1p_no_oracle=entry["gate1p_no_oracle"],
                     residual_reason=entry["residual_reason"],
                 )
-                for symbol, entry in manifest["residual_register"]["per_symbol"].items()
+                for symbol, entry in manifest["residual_register"]["caveat_basis"].items()
             }
         ),
     )
