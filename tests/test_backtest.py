@@ -656,7 +656,7 @@ def test_the_manifest_carries_the_spec_version_code_sha_and_config_digest(
     tmp_path: Path,
 ) -> None:
     manifest = make_runner(tmp_path).run(tmp_path / "run").manifest
-    assert manifest["spec_version"] == "v1.4"
+    assert manifest["spec_version"] == "v1.5"
     assert manifest["code_sha"] == "0" * 40
     assert manifest["config_digest"] == make_runner(tmp_path).spec.digest()
     assert manifest["universe"] == [SYMBOL]

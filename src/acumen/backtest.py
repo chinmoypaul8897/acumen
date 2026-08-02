@@ -80,8 +80,10 @@ from .minute_backfill import corp_actions_for_symbol, fetch_corp_action_history
 from .minute_store import MinuteStore
 from .signal_engine import SignalPipeline
 
-#: The CONTEXT.md version this runner implements. Written into every manifest.
-SPEC_VERSION: str = "v1.4"
+#: The CONTEXT.md version this runner implements. Written into every manifest, so a
+#: ledger always names the law it was produced under. Moved to v1.5 on 02-Aug-2026 with
+#: the Q-18 re-seal (CONTEXT 4.6 rewritten; Q-17 and Q-19 made law).
+SPEC_VERSION: str = "v1.5"
 
 #: The session window CONTEXT 3.1 gives NSE cash. Used ONLY by the E2 detector below.
 SESSION_OPEN: time = time(9, 15)
