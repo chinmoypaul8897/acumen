@@ -19,18 +19,32 @@ through a float: ``int(float("2189.20") * 100)`` is **218919**, a paisa short of
 4 measured them). A price that is not a whole number of paise is an error, not a rounding
 opportunity.
 
-**Every date gets an OUTCOME, and the three outcomes are never confused** (QUESTIONS.md Q-3,
-the architect's ruling and its safeguard 1):
+**Every date gets an OUTCOME, and the four outcomes are never confused** (QUESTIONS.md Q-3,
+the architect's ruling and its safeguard 1; QUESTIONS.md Q-19, now CONTEXT 4.6 law):
 
 * ``file-present``  -- NSE published a bhavcopy for that date. It is a trading day.
-* ``confirmed-404`` -- the server answered 404 for EVERY candidate URL. NSE published no
-  file, so it is a non-trading day.
+* ``confirmed-404`` -- the server answered 404 for EVERY candidate URL **and the date is old
+  enough for that answer to be final**. NSE published no file, so it is a non-trading day.
+* ``pending``       -- the server answered 404 for every candidate URL but the date is
+  YOUNGER than :data:`MIN_SEAL_AGE_DAYS`, so the file may simply not be published yet. The
+  date is UNSETTLED and is retried on the next run.
 * ``error``         -- anything else (timeout, 403 burst that outlived its retries, a
   corrupt ZIP). The date is simply UNKNOWN and must be retried later.
 
 An ``error`` is NEVER downgraded to ``confirmed-404``. That single rule is what stops a bad
 network afternoon from silently deleting trading days out of the derived calendar, and from
 there shifting every bias pair that spans them (CONTEXT 3.2).
+
+``pending`` closes the door Q-3's safeguard did not cover, and CONTEXT 4.6 (v1.5) makes it
+law: *"a confirmed-404 bhavcopy may be SEALED as a non-trading day only when the date is more
+than 7 calendar days in the past; younger 404s record as PENDING and are retried."* The hole
+was MEASURED, not imagined -- the Q-18 runbook smoke ran at 10:21 IST on Friday 2026-07-31
+with the market open, and NSE answered 404 in BOTH published formats for that very Friday, so
+the ordinary chunk-2 command sealed a normal trading day into the ledger as a phantom holiday.
+The double-format check cannot see it (both formats agree, and both are simply early) and it
+is not an ``error`` (nothing failed), so nothing else in this module would have caught it. The
+failure lands on the most recent day in the store -- the one the live screener and every fresh
+backtest reach first.
 
 Politeness: downloads are paced at one request per :data:`MIN_SECONDS_BETWEEN_REQUESTS`
 seconds (the chunk-2 card's "<= 1 req/2s"), sharing :mod:`acumen.nse_http`'s process-wide
@@ -78,13 +92,25 @@ FORMAT_UDIFF: str = "udiff"
 FORMAT_ARCHIVE: str = "archive"
 
 #: The three outcomes of the Q-3 ledger, spelled exactly as the architect's ruling spells
-#: them. They are persisted, so they are part of the store's contract.
+#: them, plus the Q-19 guard's fourth. They are persisted, so they are part of the store's
+#: contract.
 OUTCOME_PRESENT: str = "file-present"
 OUTCOME_NOT_FOUND: str = "confirmed-404"
 OUTCOME_ERROR: str = "error"
+#: CONTEXT 4.6 (v1.5), Q-19: a 404 on a date too young to be final. Non-terminal, so
+#: :meth:`acumen.daily_store.DailyStore.pending_dates` returns it and the next run re-asks.
+OUTCOME_PENDING: str = "pending"
 
 TERMINAL_OUTCOMES: frozenset[str] = frozenset({OUTCOME_PRESENT, OUTCOME_NOT_FOUND})
-ALL_OUTCOMES: frozenset[str] = frozenset({OUTCOME_PRESENT, OUTCOME_NOT_FOUND, OUTCOME_ERROR})
+ALL_OUTCOMES: frozenset[str] = frozenset(
+    {OUTCOME_PRESENT, OUTCOME_NOT_FOUND, OUTCOME_ERROR, OUTCOME_PENDING}
+)
+
+#: CONTEXT 4.6 (v1.5), Q-19: **"a confirmed-404 bhavcopy may be SEALED as a non-trading day
+#: only when the date is more than 7 calendar days in the past"**. A spec constant with its
+#: citation, like :data:`UDIFF_FIRST_DATE` and :data:`MIN_SECONDS_BETWEEN_REQUESTS` -- not a
+#: knob. Changing it is a CONTEXT change, not a session's or an operator's choice.
+MIN_SEAL_AGE_DAYS: int = 7
 
 #: Chunk-2 card: "polite pacing (<= 1 req/2s)". Slower than the 2/s CONTEXT 4.3 allows for
 #: the SmartAPI, because these are file downloads from an archive nobody is paying us to run.
@@ -178,6 +204,30 @@ class DateOutcome:
 
 
 # --- URLs ------------------------------------------------------------------------------
+
+
+def seals_as_non_trading_day(day: date, run_date: date) -> bool:
+    """May a 404 for ``day``, asked on ``run_date``, be SEALED as a non-trading day? PURE.
+
+    CONTEXT 4.6 (v1.5), Q-19: only when ``day`` is **more than**
+    :data:`MIN_SEAL_AGE_DAYS` calendar days in the past. A younger 404 is recorded
+    :data:`OUTCOME_PENDING` and re-asked.
+
+    Calendar days, not trading days, and no weekend exception: a Saturday inside the window
+    also waits. That is deliberate. The rule's job is to separate "NSE published nothing
+    because there was no session" from "NSE has not published it YET", and a weekday test
+    would re-introduce the very assumption -- that we already know which dates traded -- that
+    this ledger exists to establish. A weekend date simply seals a week later, at no cost:
+    :meth:`acumen.daily_store.DailyStore.pending_dates` re-asks it for free.
+
+    Args:
+        day: the date whose bhavcopy answered 404 in both published formats.
+        run_date: the date the question was asked (the run's own clock, naive IST).
+
+    Returns:
+        ``True`` when the 404 is final. A future ``day`` (age negative) is never final.
+    """
+    return (run_date - day).days > MIN_SEAL_AGE_DAYS
 
 
 def format_for(day: date) -> str:
@@ -536,14 +586,33 @@ def download_bhavcopy(
             raw_csv=text,
         )
 
+    # Both published formats answered 404. Whether that is an ANSWER or merely an EARLY
+    # answer is decided by the date's age, not by the response -- CONTEXT 4.6 (v1.5), Q-19.
+    if seals_as_non_trading_day(day, stamped.date()):
+        return Download(
+            DateOutcome(
+                trade_date=day,
+                outcome=OUTCOME_NOT_FOUND,
+                source_format=None,
+                url=last_url,
+                http_status=404,
+                reason="no published bhavcopy in either format",
+                attempted_at=stamped,
+            )
+        )
+    age = (stamped.date() - day).days
     return Download(
         DateOutcome(
             trade_date=day,
-            outcome=OUTCOME_NOT_FOUND,
+            outcome=OUTCOME_PENDING,
             source_format=None,
             url=last_url,
             http_status=404,
-            reason="no published bhavcopy in either format",
+            reason=(
+                f"404 in both formats, but {day.isoformat()} is only {age} calendar day(s) old "
+                f"and CONTEXT 4.6 seals a 404 only past {MIN_SEAL_AGE_DAYS} (QUESTIONS.md "
+                f"Q-19): the file may not be published yet. PENDING, not a holiday."
+            ),
             attempted_at=stamped,
         )
     )
@@ -582,7 +651,10 @@ def date_range(start: date, end: date) -> Iterator[date]:
 
 def summarise(outcomes: Iterable[DateOutcome]) -> dict[str, int]:
     """Count outcomes by kind, for the operator's run summary."""
-    counts = {name: 0 for name in (OUTCOME_PRESENT, OUTCOME_NOT_FOUND, OUTCOME_ERROR)}
+    counts = {
+        name: 0
+        for name in (OUTCOME_PRESENT, OUTCOME_NOT_FOUND, OUTCOME_ERROR, OUTCOME_PENDING)
+    }
     for outcome in outcomes:
         counts[outcome.outcome] += 1
     counts["attempted"] = sum(counts.values())

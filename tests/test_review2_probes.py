@@ -78,6 +78,10 @@ POC_DATES = tuple(date(2026, 7, d) for d in (14, 15, 16, 17, 20))
 WINDOW_2026 = (date(2026, 7, 13), date(2026, 7, 24))
 NOW = datetime(2026, 7, 24, 21, 0, 0)
 
+#: Past the CONTEXT 4.6 (v1.5) / Q-19 seal horizon for the dates it is used with -- see
+#: the note on the same constant in tests/test_bhavcopy.py.
+SEALING_NOW = datetime(2026, 8, 3, 21, 0, 0)
+
 
 # --- helpers ----------------------------------------------------------------------------
 
@@ -493,7 +497,13 @@ def test_an_error_date_is_re_attempted_and_only_fresh_evidence_settles_it(
     assert store.pending_dates(day, day) == (day,)
 
     session = _Recorder({}, [0.0])  # a real Saturday: everything 404s
-    store.ingest(bhavcopy.download_bhavcopy(day, session=session, sleep=lambda _s: None, now=NOW))
+    # SEALING_NOW, not NOW: a 404 settles a date only once it is more than
+    # MIN_SEAL_AGE_DAYS calendar days old (CONTEXT 4.6 v1.5, Q-19), and 2026-07-18 is six
+    # days before NOW. What this probe pins -- an error is settled ONLY by fresh evidence
+    # from the server, never promoted by the store -- is untouched.
+    store.ingest(
+        bhavcopy.download_bhavcopy(day, session=session, sleep=lambda _s: None, now=SEALING_NOW)
+    )
 
     assert store.outcomes()[day].outcome == OUTCOME_NOT_FOUND
     assert len(session.log) == 2, "both formats were asked before the date was settled"

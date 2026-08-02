@@ -1,10 +1,17 @@
 """Operator-run backfill of the daily bhavcopy store (chunk 2; CONTEXT 4.1).
 
 Downloads one date at a time, paced at one request per two seconds, and records EVERY date's
-outcome in the store's ledger -- ``file-present`` / ``confirmed-404`` / ``error``. It is
-resumable: a settled date is never fetched twice, and an ``error`` date is retried on the
-next run. Ctrl-C at any moment is safe (every write is atomic), and re-running over the same
-window changes nothing.
+outcome in the store's ledger -- ``file-present`` / ``confirmed-404`` / ``pending`` /
+``error``. It is resumable: a settled date is never fetched twice, and an ``error`` or
+``pending`` date is retried on the next run. Ctrl-C at any moment is safe (every write is
+atomic), and re-running over the same window changes nothing.
+
+**``--to`` may safely be today.** Since CONTEXT 4.6 (v1.5) / QUESTIONS.md Q-19 the guard is
+STRUCTURAL: a 404 on a date seven calendar days old or younger records as ``pending``, not
+as a holiday, so ingesting up to (or past) today can no longer seal a phantom non-trading
+day. The operator rule that used to carry this alone -- stop at the last COMPLETED trading
+day -- is kept as a belt in the Q-18 runbook, but it is no longer the only thing standing
+between the store and a shifted bias pair.
 
 Typical operator run (25 years; expect hours of wall clock, minutes of attention):
 
@@ -18,8 +25,8 @@ Equivalent entry points, in order of preference:
 
 Useful flags:
 
-    --store data/daily_store   where the Parquet store lives (default: config paths.data_dir)
-    --raw-dir data/raw_bhav    also keep each date's extracted CSV, for audit / fixtures
+    --store <data_root>/daily_store   where the Parquet store lives (default: config paths.data_root)
+    --raw-dir <data_root>/raw_bhav    also keep each date's extracted CSV, for audit / fixtures
     --retry-errors             re-attempt dates whose last outcome was an error (default on)
     --dry-run                  list what WOULD be fetched, touch nothing
     --rebuild-ledger           RECOVERY: rebuild the ledger from the monthly parquets and
@@ -33,7 +40,7 @@ truncated ("Parquet magic bytes not found"), any run that reads it now stops wit
 error pointing here. Quarantine any corrupt monthly parquet (move it aside, never delete),
 then rebuild the ledger from the files that survived -- one command, no network:
 
-    acumen-backfill --rebuild-ledger --store data/daily_store
+    acumen-backfill --rebuild-ledger --store <data_root>/daily_store
 
 Every date whose month parquet survived comes back as ``file-present``; every other date
 becomes pending again and re-resolves the next time a normal run reaches it.
@@ -66,7 +73,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--from", dest="start", default=None, help="first date, YYYY-MM-DD")
     parser.add_argument("--to", dest="end", default=None, help="last date, YYYY-MM-DD")
-    parser.add_argument("--store", default=None, help="store root (default: <data_dir>/daily_store)")
+    parser.add_argument("--store", default=None, help="store root (default: <data_root>/daily_store)")
     parser.add_argument("--raw-dir", default=None, help="also keep each date's extracted CSV")
     parser.add_argument(
         "--rebuild-ledger",
@@ -103,7 +110,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def default_store_root() -> Path:
     from .config import load_config
 
-    return load_config(include_env=False).path("data_dir") / "daily_store"
+    return load_config(include_env=False).path("data_root") / "daily_store"
 
 
 def resolve_dates(store: DailyStore, start: date, end: date, *, retry_errors: bool) -> list[date]:
@@ -148,7 +155,12 @@ def run(args: argparse.Namespace) -> int:
 
     session = nse_http.new_session()
     started = time.monotonic()
-    counts = {bhavcopy.OUTCOME_PRESENT: 0, bhavcopy.OUTCOME_NOT_FOUND: 0, bhavcopy.OUTCOME_ERROR: 0}
+    counts = {
+        bhavcopy.OUTCOME_PRESENT: 0,
+        bhavcopy.OUTCOME_NOT_FOUND: 0,
+        bhavcopy.OUTCOME_ERROR: 0,
+        bhavcopy.OUTCOME_PENDING: 0,
+    }
     print(f"\npacing       : 1 request / {args.min_interval:g}s\nstarted      : {datetime.now():%Y-%m-%d %H:%M:%S}\n")
 
     try:
@@ -232,6 +244,7 @@ def _print_progress(
         f"  {index:>6}/{total}  {day}  "
         f"present={counts[bhavcopy.OUTCOME_PRESENT]} "
         f"404={counts[bhavcopy.OUTCOME_NOT_FOUND]} "
+        f"pending={counts[bhavcopy.OUTCOME_PENDING]} "
         f"error={counts[bhavcopy.OUTCOME_ERROR]}  "
         f"elapsed={_hms(elapsed)} eta={_hms(remaining)}"
     )
@@ -246,13 +259,19 @@ def _print_summary(
     print(f"  attempted      : {summary['attempted']}")
     print(f"  file-present   : {summary[bhavcopy.OUTCOME_PRESENT]}")
     print(f"  confirmed-404  : {summary[bhavcopy.OUTCOME_NOT_FOUND]}")
+    print(
+        f"  pending (Q-19) : {summary[bhavcopy.OUTCOME_PENDING]}"
+        f"  (404 on a date <= {bhavcopy.MIN_SEAL_AGE_DAYS} calendar days old; RETRIED, never a holiday)"
+    )
     print(f"  error          : {summary[bhavcopy.OUTCOME_ERROR]}")
     print(f"  never attempted: {summary['missing']}")
     print(f"  weekend session: {summary['weekend_session']}  (EXCLUDED, QUESTIONS.md Q-5)")
-    if summary[bhavcopy.OUTCOME_ERROR] or summary["missing"]:
+    if summary[bhavcopy.OUTCOME_ERROR] or summary["missing"] or summary[bhavcopy.OUTCOME_PENDING]:
         print(
-            "  NOTE: errors and un-attempted dates are NOT holidays (QUESTIONS.md Q-3 "
-            "safeguard 1). Re-run this command to settle them before deriving a calendar."
+            "  NOTE: errors, un-attempted dates and pending dates are NOT holidays "
+            "(QUESTIONS.md Q-3 safeguard 1; CONTEXT 4.6 v1.5 / Q-19). Re-run this command "
+            "to settle them before deriving a calendar -- a pending date settles by itself "
+            f"once it is more than {bhavcopy.MIN_SEAL_AGE_DAYS} calendar days old."
         )
     _print_series_report(store, start, end, symbols)
 

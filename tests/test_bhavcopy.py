@@ -6,7 +6,8 @@ harder than the happy path:
 1. **Paise are exact.** Prices come off the CSV text through :class:`~decimal.Decimal`, never
    through a float. A value that is not a whole number of paise is refused rather than
    rounded (CONTEXT 7-E11).
-2. **The three outcomes are never confused.** ``file-present`` / ``confirmed-404`` / ``error``
+2. **The four outcomes are never confused.** ``file-present`` / ``confirmed-404`` /
+   ``pending`` (CONTEXT 4.6 v1.5, Q-19) / ``error``
    is the ledger the derived trading calendar is built from (QUESTIONS.md Q-3). A fetch that
    FAILED must never be recorded as "NSE published nothing", because that is how a bad
    network afternoon silently deletes trading days and shifts every bias pair that spans them.
@@ -32,6 +33,7 @@ from acumen.bhavcopy import (
     FORMAT_UDIFF,
     OUTCOME_ERROR,
     OUTCOME_NOT_FOUND,
+    OUTCOME_PENDING,
     OUTCOME_PRESENT,
     BhavcopyError,
     DateOutcome,
@@ -50,6 +52,14 @@ UDIFF_SAMPLE = FIXTURES / "bhavcopy_udiff_sample.csv"
 ARCHIVE_SAMPLE = FIXTURES / "bhavcopy_archive_sample.csv"
 
 NOW = datetime(2026, 7, 24, 21, 0, 0)
+
+#: A run clock far enough past the dates below for a 404 to be FINAL. CONTEXT 4.6 (v1.5)
+#: / QUESTIONS.md Q-19 seals a 404 only once the date is MORE than MIN_SEAL_AGE_DAYS
+#: calendar days old, so asking on NOW (2026-07-24) about 2026-07-18/19 now yields
+#: `pending`. That is the guard working, not a regression: the assertion each test below
+#: makes -- both formats asked, then confirmed-404 -- is unchanged, only its clock is
+#: moved past the horizon. The pending branch is pinned in tests/test_q19_seal_guard.py.
+SEALING_NOW = datetime(2026, 8, 3, 21, 0, 0)
 
 
 @pytest.fixture()
@@ -310,12 +320,19 @@ def test_a_present_file_is_recorded_as_file_present(udiff_text: str) -> None:
 
 
 def test_a_404_from_both_formats_is_confirmed_404() -> None:
-    """The card's named case: 2026-07-19 is a Sunday and NSE publishes nothing."""
+    """The card's named case: 2026-07-19 is a Sunday and NSE publishes nothing.
+
+    Asked on SEALING_NOW rather than NOW: since CONTEXT 4.6 (v1.5) / Q-19 a 404 seals only
+    once the date is more than MIN_SEAL_AGE_DAYS calendar days old, and 2026-07-19 is five
+    days before NOW. The case this test pins -- both formats asked, then confirmed-404 -- is
+    the same; the young-404 branch is pinned in tests/test_q19_seal_guard.py.
+    """
     day = date(2026, 7, 19)
     session = _StubSession({})  # everything 404s
 
-    result = download_bhavcopy(day, session=session, sleep=_no_sleep, now=NOW)
+    result = download_bhavcopy(day, session=session, sleep=_no_sleep, now=SEALING_NOW)
     assert result.outcome.outcome == OUTCOME_NOT_FOUND
+    assert result.outcome.outcome != OUTCOME_PENDING
     assert result.outcome.http_status == 404
     assert result.rows == ()
     assert session.urls == [
@@ -470,10 +487,12 @@ def test_summarise_counts_every_kind() -> None:
         DateOutcome(trade_date=date(2026, 7, 19), outcome=OUTCOME_NOT_FOUND),
         DateOutcome(trade_date=date(2026, 7, 18), outcome=OUTCOME_NOT_FOUND),
         DateOutcome(trade_date=date(2026, 7, 17), outcome=OUTCOME_ERROR),
+        DateOutcome(trade_date=date(2026, 7, 16), outcome=OUTCOME_PENDING),
     ]
     assert bhavcopy.summarise(outcomes) == {
         OUTCOME_PRESENT: 1,
         OUTCOME_NOT_FOUND: 2,
         OUTCOME_ERROR: 1,
-        "attempted": 4,
+        OUTCOME_PENDING: 1,
+        "attempted": 5,
     }

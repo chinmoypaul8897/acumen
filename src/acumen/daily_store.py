@@ -53,6 +53,7 @@ from .bhavcopy import (
     ALL_OUTCOMES,
     OUTCOME_ERROR,
     OUTCOME_NOT_FOUND,
+    OUTCOME_PENDING,
     OUTCOME_PRESENT,
     DailyRow,
     DateOutcome,
@@ -600,7 +601,7 @@ class DailyStore:
         frame = self.coverage(from_date, to_date)
         counts = {
             name: int((frame["outcome"] == name).sum())
-            for name in (OUTCOME_PRESENT, OUTCOME_NOT_FOUND, OUTCOME_ERROR)
+            for name in (OUTCOME_PRESENT, OUTCOME_NOT_FOUND, OUTCOME_ERROR, OUTCOME_PENDING)
         }
         counts["attempted"] = int(len(frame))
         counts["missing"] = (to_date - from_date).days + 1 - counts["attempted"]
@@ -616,9 +617,11 @@ class DailyStore:
     def pending_dates(self, from_date: date, to_date: date) -> tuple[date, ...]:
         """Dates in the range that still need attempting -- the resume list.
 
-        Unattempted dates AND ``error`` dates; a ``file-present`` or ``confirmed-404`` date
-        is settled. This is what makes the backfill safe to interrupt: it also means a bad
-        network afternoon is retried on the next run instead of hardening into a hole.
+        Unattempted dates, ``error`` dates AND ``pending`` dates; a ``file-present`` or
+        ``confirmed-404`` date is settled. This is what makes the backfill safe to interrupt:
+        it also means a bad network afternoon is retried on the next run instead of hardening
+        into a hole -- and, since CONTEXT 4.6 (v1.5) / Q-19, that a 404 on a date too young to
+        seal comes back for another ask instead of becoming a phantom holiday.
         """
         settled = {
             day for day, outcome in self.outcomes().items() if outcome.is_terminal

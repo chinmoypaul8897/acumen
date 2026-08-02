@@ -22,13 +22,25 @@ requires -- `SMARTAPI_KEY`, `SMARTAPI_CLIENT_CODE`, `SMARTAPI_PIN`, `SMARTAPI_TO
 Steps 1, 2, 3 and 5 need no credentials at all: steps 1-3 are public downloads and step 5 is
 offline. Never print, log or commit the file (CLAUDE.md rule 4).
 
-**Two rules that are now standing orders** (CLAUDE.md, "Data-store safety", 31-Jul-2026):
+**WHERE THE STORES ARE, as of 02-Aug-2026.** They are no longer under this repository. They
+live at `paths.data_root` and `paths.cache_root` in `config.yaml` -- CLAUDE.md, "Data-store
+safety", Q-18 layer 1: no git command can reach them. Every `data/...` and `cache/...` path
+below is therefore relative to those roots, not to the repo. The loader refuses a store root
+that is relative or inside the repository tree, so this cannot quietly revert.
 
-1. Never junction or symlink `data/` or `cache/` into a worktree or temp tree. That is how
-   this era was destroyed.
-2. **After each step below completes, snapshot `data/` and `cache/` to an offline location
-   before starting the next one.** Steps 2, 3 and 4 are hours of work each; a snapshot after
-   step 4 in particular is the difference between an incident and a re-copy.
+**Standing orders** (CLAUDE.md, "Data-store safety"):
+
+1. Never junction or symlink a store into a worktree or temp tree. That is how this era was
+   destroyed. Verification needs a COPY, or must run in place.
+2. **After each step below completes, snapshot both roots to an offline location before
+   starting the next one.** Steps 2, 3 and 4 are hours of work each; a snapshot after step 4
+   in particular is the difference between an incident and a re-copy.
+3. Keep **TWO snapshot generations**; never overwrite the previous one until the new one is
+   verified. `python scripts/run_backtest.py --preflight-only` prints each root's
+   last-changed timestamp under STORE FRESHNESS, which is how you check that a snapshot is
+   actually newer than the store it claims to cover.
+4. Sessions treat the stores as READ-ONLY unless the architect's prompt sanctions a named
+   write. **Deletions are operator-only**, snapshot verified first.
 
 **Do not commit or check out anything while step 4 or the later chunk-9B run is going.** The
 run spec's digest covers the code SHA, so a moved HEAD makes a resume refuse rather than mix
@@ -59,13 +71,29 @@ archive format (`.../content/historical/EQUITIES/YYYY/MMM/cmDDMMMYYYYbhav.csv.zi
 The era's format is tried first and the other only on a 404, so a `confirmed-404` means no file
 exists in **either** format. Public files, no credentials.
 
-**`--to` IS NOT "today". Read this.** The architect's card says "2000->today". Use the last
-**completed** trading day instead. This session's smoke measured why: run at 10:21 IST on
+**`--to` IS NOT "today" -- belt AND braces now.** The architect's card says "2000->today".
+Keep using the last **completed** trading day. The smoke measured why: run at 10:21 IST on
 Friday 2026-07-31 with the market open, the fetch recorded **2026-07-31 as `confirmed-404`** --
 and under the Q-3 ruling a confirmed-404 IS a non-trading day, so today would be sealed into
 the ledger as a phantom holiday and CONTEXT 3.2's bias pair for the next session would shift
-with it. Raised as **QUESTIONS.md Q-19** (class A, open, non-blocking); this is the workaround
-until the architect rules. If it happens anyway, the fix is
+with it.
+
+**As of 02-Aug-2026 that failure is impossible by construction.** Q-19 was ruled and is now
+CONTEXT 4.6 (v1.5) law: *"a confirmed-404 bhavcopy may be SEALED as a non-trading day only
+when the date is more than 7 calendar days in the past; younger 404s record as PENDING and
+are retried."* The downloader enforces it (`acumen.bhavcopy.seals_as_non_trading_day`), the
+ledger carries a fourth outcome `pending`, `pending_dates` re-asks it on the next run, and the
+trading calendar REFUSES to derive over a pending date rather than treating it as a holiday
+(tests: `tests/test_q19_seal_guard.py`, including the 2026-07-31 shape itself). The run
+summary prints a `pending (Q-19)` line so the count is never silent.
+
+**The operator rule stays anyway**, because it is free and it keeps the store's two halves in
+step: stopping at the last completed trading day is also what stops the minute lake running a
+day ahead of the daily oracle, which is what cost the rebuild 208 gate-1P no-oracle days
+(0.048 pp, all 2026-07-31 -- the measured addendum in QUESTIONS.md Q-19). The guard removes
+the silent corruption; the rule removes the noise.
+
+If a phantom row ever exists from an older run, the fix is unchanged:
 `python scripts/backfill_daily.py --rebuild-ledger` -- it rebuilds the ledger from the surviving
 monthly Parquets and returns every unrecovered date to *pending*, which this session ran and
 verified.

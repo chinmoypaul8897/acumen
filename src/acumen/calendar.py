@@ -352,7 +352,9 @@ class TradingCalendar:
                 + f", {len(unusable)} unsettled"
                 + (f" ({', '.join(unusable[:5])})" if unusable else "")
                 + ". QUESTIONS.md Q-3 safeguard 1: a download error is NEVER treated as a "
-                "holiday. Re-run the backfill over this range first."
+                "holiday, and (CONTEXT 4.6 v1.5 / Q-19) neither is a 'pending' date -- a 404 "
+                "on a date too young for that answer to be final. Re-run the backfill over "
+                "this range first."
             )
         if not trading:
             raise CalendarError(
@@ -529,10 +531,10 @@ def cache_path(cache_dir: Path | None = None) -> Path:
 
 
 def default_cache_dir() -> Path:
-    """``<data_dir>/nse`` from config.yaml. ``data/`` is gitignored (CLAUDE.md git rules)."""
+    """``<data_root>/nse`` from config.yaml -- OUTSIDE the repo tree (CLAUDE.md Q-18 layer 1)."""
     from .config import load_config  # local import: parsing must not require a config file
 
-    return load_config(include_env=False).path("data_dir") / "nse"
+    return load_config(include_env=False).path("data_root") / "nse"
 
 
 def fetch_calendar(
