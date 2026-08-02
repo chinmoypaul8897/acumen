@@ -27,8 +27,9 @@ parenthesis):
 
     CONTEXT 7-E2 non-standard session
       -> BIAS UNRESOLVABLE (:data:`REASON_BIAS_UNRESOLVED`: the calendar cannot answer for the
-         date, the symbol's whole bias series could not be assembled, or this particular day
-         has no CONTEXT 3.2 pair inside the run's own history)
+         date, the symbol's whole bias series could not be assembled, this particular day has
+         no CONTEXT 3.2 pair inside the run's own history, or -- QUESTIONS.md Q-21 -- its
+         Rule-3 minute scan met a vendor-corrupt bar on D-1 and the pair cannot be decided)
       -> no minutes -> gate 1 -> gate 2 -> gate 1P -> suppressed -> no bias yet (seeding)
       -> no POC -> the signal outcome
 
@@ -73,8 +74,8 @@ from . import signals as sig
 from . import simulate as sim
 from .aggregate import Bar, aggregate_15min, in_session_bars
 from .atomic_io import atomic_write_text
-from .bias import RULE_3_NO_MINUTE
-from .bias_engine import BiasEngine, BiasEngineError, DailyBias
+from .bias import RULE_3_NO_MINUTE, BiasError, Candle
+from .bias_engine import BiasEngine, BiasEngineError, DailyBias, MalformedMinuteBar
 from .calendar import CalendarError, TradingCalendar
 from .config import load_config
 from .daily_store import DailyStore
@@ -180,6 +181,7 @@ RARE_SHAPE_LABELS: tuple[str, ...] = (
     "rule-3 tie bias days",
     "rule-3 day with no 1-minute data (carried, CONTEXT 3.2)",
     "E10 fallback reference (no 11:00-stamped candle)",
+    "rule-3 day refused on a malformed 1-minute bar (QUESTIONS.md Q-21)",
 )
 
 #: Ledger / manifest / progress file names inside a run directory.
@@ -810,6 +812,24 @@ class BacktestRunner:
                 )
                 continue
             bias = biases.get(day)
+            if bias is not None and bias.unresolved_detail is not None:
+                # QUESTIONS.md Q-21's third REASON_BIAS_UNRESOLVED case: the Rule-3 scan met a
+                # vendor-corrupt 1-minute bar on D-1. The offending bar's stamp and OHLCV ride
+                # in the reason, and the row carries the flag the manifest's rare-shape counter
+                # is derived from. The carried bias is printed unchanged -- the day did not
+                # move it -- but the day is REFUSED, so nothing trades on corrupt evidence.
+                rows.append(
+                    LedgerRow(
+                        symbol=symbol,
+                        day=day,
+                        status=STATUS_REFUSED,
+                        reason=f"{REASON_BIAS_UNRESOLVED}: {bias.unresolved_detail}",
+                        bias=bias.bias,
+                        bias_rule=bias.rule,
+                        flags=(FLAG_MALFORMED_MINUTE_BAR,),
+                    )
+                )
+                continue
             if bias is None:
                 rows.append(
                     LedgerRow(
@@ -1135,6 +1155,14 @@ class BacktestRunner:
 #: always did: the chunk-9A pilot ledger's published sha256 does not move (REVIEW_9A section 7).
 FLAG_OUT_OF_SESSION_DROPPED: str = "out-of-session 1-minute bar(s) dropped (CONTEXT 7-E2)"
 
+#: Set on the refused ledger row of a trade day whose Rule-3 scan met a vendor-corrupt bar on
+#: D-1 (QUESTIONS.md Q-21). Like the flag above it is a FLAG rather than a new column, so a day
+#: without one writes exactly the bytes it always did; the manifest's rare-shape counter is
+#: DERIVED from it, which is what keeps a resumed run's count identical to a fresh one's.
+FLAG_MALFORMED_MINUTE_BAR: str = (
+    "rule-3 minute scan met a malformed 1-minute bar (QUESTIONS.md Q-21)"
+)
+
 
 #: What every output says while the trader's Q43 answer is outstanding. Verbatim, everywhere.
 CAPITAL_FLAGS_PENDING_NOTE: str = (
@@ -1161,6 +1189,10 @@ def rare_shape_counts(rows: Sequence[LedgerRow]) -> dict[str, int]:
         if row.reference_source == sig.REFERENCE_FROM_MINUTES:
             counts["E10 fallback reference (no 11:00-stamped candle)"] += 1
         for flag, label in (
+            (
+                FLAG_MALFORMED_MINUTE_BAR,
+                "rule-3 day refused on a malformed 1-minute bar (QUESTIONS.md Q-21)",
+            ),
             (sim.FLAG_QTY_ZERO_UNSIZABLE, "qty-zero unsizable days"),
             (sim.FLAG_SIGNAL_UNSIZABLE, "signal-unsizable (degenerate) days"),
             (sim.FLAG_BOTH_TOUCHED_STOP_WINS, "both-touched candles (stop won)"),
@@ -1444,25 +1476,49 @@ def build_runner(
 
 
 def minute_loader(store: MinuteStore):
-    """The ``(symbol, date) -> candles`` interface CONTEXT 3.2's Rule 3 needs, over the store."""
+    """The ``(symbol, date) -> candles`` interface CONTEXT 3.2's Rule 3 needs, over the store.
+
+    **A vendor-corrupt bar is refused HERE** (QUESTIONS.md Q-21, architect 03-Aug-2026). A raw
+    1-minute bar whose open or close lies outside ``[low, high]`` is impossible, and
+    :class:`acumen.bias.Candle` -- the pure engine's own invariant -- says so by raising. This
+    is the narrowest place that still holds the RAW bar, so it is the only place that can name
+    the offending stamp and its OHLCV; the exception is re-raised as
+    :class:`~acumen.bias_engine.MalformedMinuteBar`, which the bias engine turns into a refused
+    DAY under :data:`REASON_BIAS_UNRESOLVED`.
+
+    The bar is never dropped and the scan is never continued without it: Rule 3 decides on
+    which extreme broke FIRST, so a scan minus one corrupt bar could reverse the bias.
+    """
 
     def load(symbol: str, day: date):
         bars = store.minutes(symbol, day)
         if not bars:
             return None
-        from .bias import Candle
-
-        return tuple(
-            Candle(
-                open=int(bar.open_paise),
-                high=int(bar.high_paise),
-                low=int(bar.low_paise),
-                close=int(bar.close_paise),
-                stamp=bar.stamp,
-                day=bar.stamp.date(),
-            )
-            for bar in bars
-        )
+        candles = []
+        for bar in bars:
+            try:
+                candles.append(
+                    Candle(
+                        open=int(bar.open_paise),
+                        high=int(bar.high_paise),
+                        low=int(bar.low_paise),
+                        close=int(bar.close_paise),
+                        stamp=bar.stamp,
+                        day=bar.stamp.date(),
+                    )
+                )
+            except BiasError as exc:
+                raise MalformedMinuteBar(
+                    symbol=symbol,
+                    day=day,
+                    stamp=bar.stamp,
+                    open_paise=int(bar.open_paise),
+                    high_paise=int(bar.high_paise),
+                    low_paise=int(bar.low_paise),
+                    close_paise=int(bar.close_paise),
+                    volume=int(bar.volume),
+                ) from exc
+        return tuple(candles)
 
     return load
 

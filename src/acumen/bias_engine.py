@@ -44,6 +44,60 @@ class BiasEngineError(RuntimeError):
     """The bias orchestration cannot assemble the inputs a pair needs."""
 
 
+#: The rule a day carries when its Rule-3 minute evidence is MALFORMED (QUESTIONS.md Q-21,
+#: architect 03-Aug-2026). It is neither a decision nor a carry-with-a-reason: the pair is
+#: UNRESOLVABLE, and the orchestration above refuses the whole DAY under its own
+#: ``REASON_BIAS_UNRESOLVED``.
+RULE_MINUTES_MALFORMED: str = "minutes-malformed"
+
+
+class MalformedMinuteBar(BiasEngineError):
+    """A stored 1-minute bar a Rule-3 scan asked for is impossible: O or C outside [L, H].
+
+    Raised by the RUN's minute loader (:func:`acumen.backtest.minute_loader`) at the LOAD
+    BOUNDARY, which is the narrowest place that still holds the raw bar and therefore the only
+    place that can name it. QUESTIONS.md Q-21 (architect, 03-Aug-2026): malformed minute
+    evidence makes the bias unresolvable for that pair, so the DAY is refused and counted --
+    never a crash, and never a scan with the corrupt bar quietly dropped, because a scan minus
+    a bar could reverse a first-break and therefore the bias itself.
+
+    It subclasses :class:`BiasEngineError` deliberately: :meth:`acumen.bias_engine.BiasEngine`
+    turns it into a refused DAY, and any escape past that is still a COUNTED no-trade for the
+    symbol rather than a dead run.
+    """
+
+    def __init__(
+        self,
+        *,
+        symbol: str,
+        day: date,
+        stamp: datetime | None,
+        open_paise: int,
+        high_paise: int,
+        low_paise: int,
+        close_paise: int,
+        volume: int,
+    ) -> None:
+        self.symbol = symbol
+        self.day = day
+        self.stamp = stamp
+        self.open_paise = open_paise
+        self.high_paise = high_paise
+        self.low_paise = low_paise
+        self.close_paise = close_paise
+        self.volume = volume
+        super().__init__(self.detail())
+
+    def detail(self) -> str:
+        """The refusal detail Q-21 requires: the offending bar's stamp and its OHLCV."""
+        stamp = "unstamped" if self.stamp is None else self.stamp.isoformat(sep=" ")
+        return (
+            f"malformed-minute-bar {self.symbol} {self.day.isoformat()} stamp {stamp} "
+            f"O {self.open_paise} H {self.high_paise} L {self.low_paise} "
+            f"C {self.close_paise} V {self.volume}"
+        )
+
+
 @dataclass(frozen=True)
 class DailyBias:
     """The bias in effect for one trading day, with everything the evidence pack needs."""
@@ -64,6 +118,11 @@ class DailyBias:
     #: chunk-12 pack.
     tie_case: bool = False
     log: str | None = None
+    #: Set ONLY when this day's bias could not be resolved at all -- QUESTIONS.md Q-21's third
+    #: ``REASON_BIAS_UNRESOLVED`` case, malformed Rule-3 minute evidence. It carries the
+    #: offending bar verbatim so the orchestration can log it in the refusal without ever
+    #: re-reading the store. ``None`` on every other day, so no existing row's bytes move.
+    unresolved_detail: str | None = None
 
 
 @dataclass(frozen=True)
@@ -184,7 +243,32 @@ class BiasEngine:
 
         previous_adj = self._adjust_previous(symbol, previous_raw, current)
         provider: MinuteProvider = self._provider(symbol, current_date)
-        outcome = evaluate_pair(previous_adj, current, provider, last_bias)
+        try:
+            outcome = evaluate_pair(previous_adj, current, provider, last_bias)
+        except MalformedMinuteBar as exc:
+            # QUESTIONS.md Q-21 (architect, 03-Aug-2026): "malformed minute evidence makes the
+            # bias UNRESOLVABLE for that pair -- the day joins REASON_BIAS_UNRESOLVED as its
+            # third case (minutes-malformed), counted, never a crash". The carried bias is left
+            # UNCHANGED: a day whose evidence is corrupt decides nothing, in either direction.
+            return (
+                DailyBias(
+                    trade_date=day,
+                    bias=last_bias,
+                    tradeable=False,
+                    rule=RULE_MINUTES_MALFORMED,
+                    detail=exc.detail(),
+                    current_date=current_date,
+                    previous_date=previous_date,
+                    previous_candle=previous_adj,
+                    current_candle=current,
+                    unresolved_detail=exc.detail(),
+                    log=(
+                        f"{symbol} {day}: Rule-3 minute evidence malformed on {current_date} "
+                        "-> bias unresolvable, day refused (Q-21)"
+                    ),
+                ),
+                last_bias,  # unchanged
+            )
 
         new_bias = outcome.bias
         return (

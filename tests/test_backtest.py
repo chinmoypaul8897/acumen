@@ -55,7 +55,8 @@ from acumen.bhavcopy import (
     DailyRow,
     DateOutcome,
 )
-from acumen.bias import BEARISH, BULLISH
+from acumen.bias import BEARISH, BULLISH, BiasError, Candle, evaluate_pair
+from acumen.bias_engine import RULE_MINUTES_MALFORMED, MalformedMinuteBar
 from acumen.calendar import TradingCalendar
 from acumen.daily_store import DailyStore
 from acumen.instrument_master import InstrumentMaster
@@ -948,3 +949,189 @@ def test_the_fifteen_minute_path_reader_applies_the_same_drop(tmp_path: Path) ->
     paths = bt.assemble_trade_paths(rows, bars_for=bt.minute_store_bars(stores[0]))
     assert len(paths) == 1
     assert paths[0].marks  # it produced marks rather than raising
+
+
+# ==============================================================================================
+# QUESTIONS.md Q-21: the Rule-3 scan meets a vendor-corrupt 1-minute bar
+#
+# The bar that killed the full-history run at symbol 104/204 was JUBLFOOD 2023-03-03 09:15,
+# O 44210 H 44440 L 44295 C 44295 V 12909 -- an open 85 paise BELOW the low. The world below is
+# that shape, synthetic and hand-derived, on the D-1 of a genuine Rule-3 pair:
+#
+#   D-2 = SEED_A  O 199000 H 200000 L 198000 C 199500   -> body [199000, 199500]
+#   D-1 = SEED_B  O 199200 H 200500 L 197500 C 199300   -> C.high > P.high AND C.low < P.low,
+#                                                          close inside the body -> RULE 3
+#
+# and D-1's three stored minutes are chosen so that the corruption is DECISIVE:
+#
+#   09:15  O 199000  H 200500  L 199100  C 199250  V 12909  <- malformed (O below L); breaks
+#                                                              P.high 200000 FIRST -> BULLISH
+#   09:16  O 199250  H 199300  L 197500  C 197600  V 300    <- breaks P.low 198000 -> BEARISH
+#   09:17  O 197600  H 199350  L 197550  C 199300  V 200       if the corrupt bar were skipped
+#
+# Repaired, the day is BULLISH; with the corrupt bar quietly dropped it is BEARISH. That is the
+# architect's rationale in one fixture -- "a scan minus a corrupt bar could reverse a
+# first-break" -- and it is why the DAY is refused rather than the bar skipped.
+# ==============================================================================================
+
+Q21_STAMP = at(time(9, 15), SEED_B)
+Q21_DETAIL = (
+    f"malformed-minute-bar {SYMBOL} {SEED_B.isoformat()} stamp {Q21_STAMP.isoformat(sep=' ')} "
+    "O 199000 H 200500 L 199100 C 199250 V 12909"
+)
+
+
+def q21_prior_minutes(*, malformed: bool) -> list[Minute]:
+    """D-1's three bars. ``malformed`` puts the open 2 rupees below the low, as the vendor did."""
+    return [
+        Minute(
+            at(time(9, 15), SEED_B),
+            R(1990.00) if malformed else R(1992.00),
+            R(2005.00),
+            R(1991.00),
+            R(1992.50),
+            12909,
+        ),
+        Minute(at(time(9, 16), SEED_B), R(1992.50), R(1993.00), R(1975.00), R(1976.00), 300),
+        Minute(at(time(9, 17), SEED_B), R(1976.00), R(1993.50), R(1975.50), R(1993.00), 200),
+    ]
+
+
+def q21_world(tmp_path: Path, *, malformed: bool = True, rule_3: bool = True):
+    """The standard trade day, with a Rule-3 (or, for the control, a Rule-1) D-1 carrying the bar."""
+    minutes = synthetic_minutes(TRADE_DAY)
+    prior = q21_prior_minutes(malformed=malformed)
+    rows = dict(lead_rows())
+    rows.update(
+        {
+            SEED_A: daily_row(SEED_A, R(1990), R(2000), R(1980), R(1995), 1000),
+            # The Rule-3 outside bar, or the ORIGINAL day (a Rule-1 breakout) for the control.
+            SEED_B: daily_row(SEED_B, R(1992), R(2005), R(1975), R(1993), 13409)
+            if rule_3
+            else daily_row(SEED_B, R(1995), R(2010), R(1990), R(2008), 13409),
+            TRADE_DAY: row_for_minutes(TRADE_DAY, minutes),
+        }
+    )
+    return build_stores(
+        tmp_path, minute_days={SEED_B: prior, TRADE_DAY: minutes}, daily_rows=rows
+    )
+
+
+def q21_trade_day_row(runner) -> bt.LedgerRow:
+    return next(row for row in runner.walk_symbol(SYMBOL).rows if row.day == TRADE_DAY)
+
+
+def test_q21_the_loader_names_the_offending_bar_instead_of_dying_anonymously(
+    tmp_path: Path,
+) -> None:
+    """The RUN's loader is the narrowest place that still holds the RAW bar, so it is the only
+    place that can say WHICH bar. Before Q-21 it raised BiasError with four prices and no
+    symbol, no date, no stamp and no volume -- and killed the run."""
+    minute_store, _, _, _ = q21_world(tmp_path)
+    load = bt.minute_loader(minute_store)
+
+    with pytest.raises(MalformedMinuteBar) as excinfo:
+        load(SYMBOL, SEED_B)
+
+    assert excinfo.value.detail() == Q21_DETAIL
+    assert (excinfo.value.symbol, excinfo.value.day, excinfo.value.stamp) == (
+        SYMBOL,
+        SEED_B,
+        Q21_STAMP,
+    )
+    assert isinstance(excinfo.value.__cause__, BiasError)  # the pure invariant caught it
+    assert load(SYMBOL, TRADE_DAY) is not None  # a clean day still loads
+
+
+def test_q21_a_malformed_bar_refuses_the_day_and_counts_it_instead_of_crashing(
+    tmp_path: Path,
+) -> None:
+    """The architect's ruling: the day joins REASON_BIAS_UNRESOLVED as its third case, counted,
+    never a crash, with the offending bar's stamp and OHLCV in the refusal detail."""
+    runner = make_runner(tmp_path, stores=q21_world(tmp_path))
+
+    rows = runner.walk_symbol(SYMBOL).rows  # it does not raise
+    row = next(row for row in rows if row.day == TRADE_DAY)
+
+    assert len(rows) == 3  # every other day of the span still walked
+    assert row.status == bt.STATUS_REFUSED
+    assert row.reason == f"{bt.REASON_BIAS_UNRESOLVED}: {Q21_DETAIL}"
+    assert row.bias_rule == RULE_MINUTES_MALFORMED
+    assert row.flags == (bt.FLAG_MALFORMED_MINUTE_BAR,)
+    assert row.executed is False and row.signalled is False and row.qty == 0
+
+
+def test_q21_the_same_day_with_the_bar_corrected_is_an_ordinary_rule_3_bias(
+    tmp_path: Path,
+) -> None:
+    """The CONTROL. One field moves -- the corrupt open, 199000 -> 199200 -- and the day is a
+    normal Rule-3 bullish bias that trades the golden trade. So the refusal above is caused by
+    the corruption and by nothing else in the fixture."""
+    runner = make_runner(tmp_path, stores=q21_world(tmp_path, malformed=False))
+
+    row = q21_trade_day_row(runner)
+
+    assert row.status == bt.STATUS_EVALUATED
+    assert row.bias == BULLISH and row.bias_rule == "rule-3-outside-bar"
+    assert row.flags == ()
+    assert row.executed is True
+    assert (row.entry_paise, row.stop_paise, row.target_paise) == (200100, 199900, 200700)
+    assert row.qty == 500 and row.net_pnl_paise == 290_000  # the hand-computed golden trade
+
+
+def test_q21_a_malformed_bar_on_a_non_rule_3_day_changes_nothing(tmp_path: Path) -> None:
+    """Rules 1 and 2 read NO minutes (CONTEXT 3.2 -- only Rule 3 asks which extreme broke
+    first), so the identical corrupt bar sitting on a Rule-1 D-1 must be invisible. This is the
+    measure of the fix's blast radius: it touches Rule-3 scan days and nothing else."""
+    runner = make_runner(tmp_path, stores=q21_world(tmp_path, rule_3=False))
+
+    row = q21_trade_day_row(runner)
+
+    assert row.status == bt.STATUS_EVALUATED
+    assert row.bias == BULLISH and row.bias_rule == "rule-1-breakout"
+    assert row.flags == ()  # never loaded, so never refused
+    assert row.executed is True and row.net_pnl_paise == 290_000
+
+
+def test_q21_skipping_the_corrupt_bar_would_have_reversed_the_bias(tmp_path: Path) -> None:
+    """WHY the DAY is refused rather than the bar skipped, proved on the fixture rather than
+    asserted: with the bar repaired the high breaks first (BULLISH); with the bar simply
+    dropped the low breaks first (BEARISH). Two opposite trades from the same stored day."""
+    P = Candle(open=R(1990), high=R(2000), low=R(1980), close=R(1995))
+    C = Candle(open=R(1992), high=R(2005), low=R(1975), close=R(1993))
+
+    def candles(minutes: list[Minute]) -> tuple[Candle, ...]:
+        return tuple(
+            Candle(
+                open=m.open_paise,
+                high=m.high_paise,
+                low=m.low_paise,
+                close=m.close_paise,
+                stamp=m.stamp,
+            )
+            for m in minutes
+        )
+
+    repaired = candles(q21_prior_minutes(malformed=False))
+    skipped = candles(q21_prior_minutes(malformed=True)[1:])
+
+    assert evaluate_pair(P, C, lambda: repaired, None).bias == BULLISH
+    assert evaluate_pair(P, C, lambda: skipped, None).bias == BEARISH
+
+
+def test_q21_the_manifest_counts_the_rare_shape(tmp_path: Path) -> None:
+    """The ruling requires a rare-shape counter. Like every other one it is DERIVED from the
+    row flags, so a resumed run replaying the shard counts it identically."""
+    runner = make_runner(tmp_path, stores=q21_world(tmp_path))
+    rows = runner.walk_symbol(SYMBOL).rows
+    clean = make_runner(tmp_path / "clean")
+
+    manifest = runner.build_manifest(rows, {SYMBOL: {}})
+    label = "rule-3 day refused on a malformed 1-minute bar (QUESTIONS.md Q-21)"
+
+    assert label in bt.RARE_SHAPE_LABELS
+    assert manifest["rare_shapes"][label] == 1
+    assert set(manifest["rare_shapes"]) == set(bt.RARE_SHAPE_LABELS)
+    # ...and a window without one still says so out loud, rather than omitting the row.
+    spotless = clean.build_manifest(clean.walk_symbol(SYMBOL).rows, {SYMBOL: {}})
+    assert spotless["rare_shapes"][label] == 0

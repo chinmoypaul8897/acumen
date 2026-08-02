@@ -16,7 +16,7 @@ ASCII-only, like every other source file in this repo (chunk-0 B7).
 from __future__ import annotations
 
 import csv
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -31,7 +31,12 @@ from acumen.bhavcopy import (
     DateOutcome,
 )
 from acumen.bias import BEARISH, BULLISH, Candle
-from acumen.bias_engine import BiasEngine, csv_minute_loader
+from acumen.bias_engine import (
+    RULE_MINUTES_MALFORMED,
+    BiasEngine,
+    MalformedMinuteBar,
+    csv_minute_loader,
+)
 from acumen.calendar import TradingCalendar
 from acumen.daily_store import DailyStore
 
@@ -239,3 +244,96 @@ def test_minute_loader_interface_drives_a_synthetic_rule3_through_the_engine(tmp
 
 def R(rupees: float) -> int:
     return int(round(rupees * 100))
+
+
+# ==============================================================================================
+# QUESTIONS.md Q-21: a Rule-3 scan that meets a vendor-corrupt 1-minute bar
+# ==============================================================================================
+
+
+def _malformed_loader(day: date, *, symbol: str = "ACME"):
+    """A MinuteLoader that refuses exactly the way the RUN's loader refuses (Q-21)."""
+
+    def load(sym: str, when: date):
+        if when == day:
+            raise MalformedMinuteBar(
+                symbol=sym,
+                day=when,
+                stamp=datetime(when.year, when.month, when.day, 9, 15),
+                open_paise=44210,
+                high_paise=44440,
+                low_paise=44295,
+                close_paise=44295,
+                volume=12909,
+            )
+        return None
+
+    return load
+
+
+def _q21_world(tmp_path) -> tuple[list[date], DailyStore, TradingCalendar]:
+    """Mon..Thu, where Wed is an outside bar -> Thursday's pair is Rule 3 and reads Wed's
+    minutes. The same shape the missing-1-minute carry test uses, so the ONLY difference
+    between the two is what the loader does."""
+    d = [date(2024, 7, 1) + timedelta(days=i) for i in range(4)]
+    candles = {
+        d[0]: (10000, 11000, 9000, 10500),
+        d[1]: (10450, 12000, 10400, 11800),  # seeds BULLISH on Wednesday's pair
+        d[2]: (10600, 13000, 8000, 10450),   # outside bar -> Rule 3 on Thursday
+        d[3]: (10450, 10600, 10300, 10500),
+    }
+    store, calendar = _store_from_candles(tmp_path, "ACME", candles)
+    return d, store, calendar
+
+
+def test_q21_a_malformed_minute_bar_makes_the_day_unresolvable_and_never_raises(tmp_path) -> None:
+    """The architect's Q-21 ruling: malformed minute evidence makes the bias UNRESOLVABLE for
+    that pair. The engine must return that verdict, not propagate the exception -- a
+    full-history run over 400,000 stock-days may not die on one vendor-corrupt bar."""
+    d, store, calendar = _q21_world(tmp_path)
+    engine = BiasEngine(
+        store=store, calendar=calendar, minute_loader=_malformed_loader(d[2])
+    )
+
+    series = {b.trade_date: b for b in engine.bias_series("ACME", d[2], d[3])}
+
+    thu = series[d[3]]
+    assert thu.rule == RULE_MINUTES_MALFORMED
+    assert thu.tradeable is False
+    assert thu.unresolved_detail is not None
+    # The offending bar rides in the detail, stamp and OHLCV, exactly as the ruling requires.
+    assert "malformed-minute-bar ACME 2024-07-03 stamp 2024-07-03 09:15:00" in thu.unresolved_detail
+    assert "O 44210 H 44440 L 44295 C 44295 V 12909" in thu.unresolved_detail
+
+
+def test_q21_a_corrupt_day_decides_nothing_and_leaves_the_carry_untouched(tmp_path) -> None:
+    """A corrupt day must not move the bias in EITHER direction. Wednesday seeded BULLISH; the
+    unresolvable Thursday reports that same carried bias and is not tradeable on it."""
+    d, store, calendar = _q21_world(tmp_path)
+    engine = BiasEngine(
+        store=store, calendar=calendar, minute_loader=_malformed_loader(d[2])
+    )
+
+    series = {b.trade_date: b for b in engine.bias_series("ACME", d[2], d[3])}
+
+    assert series[d[2]].bias == BULLISH          # seeded on Tuesday's breakout
+    assert series[d[3]].bias == BULLISH          # carried, UNCHANGED
+    assert series[d[3]].tradeable is False       # ...but the day itself is refused
+
+
+def test_q21_is_not_the_missing_minute_carry(tmp_path) -> None:
+    """Corrupt data and ABSENT data are different answers to different questions. R1-Q6's
+    documented fallback (no 1-minute data -> carry, day tradeable on the carried bias) must not
+    swallow the Q-21 case, or a run would trade a day whose evidence is impossible."""
+    d, store, calendar = _q21_world(tmp_path)
+    absent = BiasEngine(store=store, calendar=calendar, minute_loader=None)
+    corrupt = BiasEngine(
+        store=store, calendar=calendar, minute_loader=_malformed_loader(d[2])
+    )
+
+    missing = absent.bias_for_day("ACME", d[3], seed_from=d[2])
+    malformed = corrupt.bias_for_day("ACME", d[3], seed_from=d[2])
+
+    assert missing.rule == "rule-3-no-1min-carry" and missing.tradeable is True
+    assert malformed.rule == RULE_MINUTES_MALFORMED and malformed.tradeable is False
+    assert missing.unresolved_detail is None and malformed.unresolved_detail is not None
