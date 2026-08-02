@@ -331,13 +331,16 @@ Q-19 into CONTEXT law. Everything below this line is the RUN the rebuild existed
 
 ---
 
-## Step 6 -- THE CHUNK-9B FULL-HISTORY RUN (staged 02-Aug-2026; **NOT yet handed over**)
+## Step 6 -- THE CHUNK-9B FULL-HISTORY RUN (staged 02-Aug-2026; AUTHORIZED and started 03-Aug-2026; **RELAUNCH owed**)
 
-> **This command is STAGED, not handed over.** The re-seal review gates it: chunk 9B is
-> `resume-2 done -- staged for re-seal review (unreviewed)` in STATUS.md, and a FRESH review
-> session must PASS the span before the operator starts a run whose ledger is the input to
-> every number chunk 10 reports. Everything needed to start is verified and written down here
-> so that handover is a decision, not a scramble.
+> **State, 03-Aug-2026.** The re-seal review PASSED (`docs/reviews/REVIEW_9B_PRESEAL.md`, tag
+> `q18-reseal-pass`) and the operator started the run. It stopped at symbol 104 of 204 on a
+> vendor-corrupt 1-minute bar -- QUESTIONS.md **Q-21**, ruled and fixed the same day -- so this
+> step is live again as a RELAUNCH. Read the next section before the command: one operator
+> action is owed first.
+>
+> *(Original staging note, 02-Aug-2026: this command was written down complete while the
+> re-seal review gated it, so that handover would be a decision rather than a scramble.)*
 
 ### The command
 
@@ -354,6 +357,25 @@ To see the checks without running:
 ```
 python scripts/run_backtest.py --preflight-only
 ```
+
+### Before the RELAUNCH of 03-Aug-2026 -- one operator action first
+
+The first attempt died on 2026-08-03 at symbol **104 of 204 (JUBLFOOD)**, on the vendor-corrupt
+1-minute bar QUESTIONS.md **Q-21** records. The defect is fixed and the fix is tested, but the
+run must start from an empty directory: a resume would refuse anyway (the code SHA moved, and
+the spec digest covers it), and its 103 finished shards are worth keeping as a cross-check
+against the relaunched run.
+
+**The OPERATOR renames it -- not a session, and it is never deleted** (CLAUDE.md data-store
+safety, layer 2: store deletions are operator-only, and sessions treat the stores as read-only):
+
+```
+cd <data_root>/backtests
+ren chunk9b_full chunk9b_full_crashed_0803
+```
+
+Then start the run normally. The relaunch walks the whole universe under ONE code SHA, which is
+what the resume law requires; the retained directory is evidence, not an input.
 
 ### Pre-run checklist -- all four, in order
 
