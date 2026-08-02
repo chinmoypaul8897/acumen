@@ -1,7 +1,19 @@
 # Secrets — never committed, never printed, never logged (CLAUDE.md rule 4, CONTEXT §4.3)
 .env
 
-# Local stores, caches and run artifacts (CONTEXT §6: data/ is gitignored).
+# Local stores, caches and run artifacts.
+#
+# THE STORES NO LONGER LIVE HERE. As of 02-Aug-2026 the mutable stores are OUTSIDE this
+# repository tree, at paths.data_root / paths.cache_root in config.yaml — CLAUDE.md,
+# "Data-store safety", Q-18 layer 1: no git command can reach them. Gitignoring them was
+# never enough; on 31-Jul-2026 `git worktree remove --force` followed two NTFS junctions
+# into in-repo data/ and cache/ and emptied both, and every ignore rule below was in force
+# at the time (QUESTIONS.md Q-18, CONTEXT §4.6).
+#
+# The two entries are KEPT as a belt: if a stray data/ or cache/ ever reappears under the
+# repo root it must still never be committed. The loader refuses an in-repo store root, so
+# nothing this project writes can create one.
+#
 # Anchored with a leading slash ON PURPOSE: an unanchored "data/" would also ignore
 # poc/data/, and those CSVs are FROZEN GOLDEN FIXTURES that must stay tracked (CONTEXT §8 F7/F10).
 /data/

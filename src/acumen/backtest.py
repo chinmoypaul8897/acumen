@@ -104,7 +104,7 @@ RESIDUAL_CAVEAT: str = (
     "their backtests cover a minority of stored history, concentrated in recent years."
 )
 
-#: Where the chunk-5B run ledger lives, relative to ``data_dir``. It is the machine-readable
+#: Where the chunk-5B run ledger lives, relative to ``data_root``. It is the machine-readable
 #: face of the disclosed-residual register (backfill report section 3f).
 RESIDUAL_LEDGER_RELPATH: str = "universe_backfill/ledger.json"
 
@@ -1249,8 +1249,8 @@ def build_runner(
     ``disclosures`` are stamped verbatim onto the run's own manifest and onto nothing else.
     """
     config = load_config(include_env=False)
-    data = Path(data_dir) if data_dir is not None else config.path("data_dir")
-    cache = Path(cache_dir) if cache_dir is not None else config.path("cache_dir")
+    data = Path(data_dir) if data_dir is not None else config.path("data_root")
+    cache = Path(cache_dir) if cache_dir is not None else config.path("cache_root")
 
     daily_store = DailyStore.at(data / "daily_store")
     minute_store = MinuteStore.at(data / "minute_store")

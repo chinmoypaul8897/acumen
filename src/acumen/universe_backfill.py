@@ -3865,13 +3865,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def _default_root(subdir: str) -> Path:
     from .config import load_config
 
-    return load_config(include_env=False).path("data_dir") / subdir
+    return load_config(include_env=False).path("data_root") / subdir
 
 
 def _data_dir() -> Path:
     from .config import load_config
 
-    return load_config(include_env=False).path("data_dir")
+    return load_config(include_env=False).path("data_root")
 
 
 def run(args: argparse.Namespace) -> int:

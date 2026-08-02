@@ -47,9 +47,19 @@ margin_basis:        # null -- trader Q43 pending
 # unchanged). OPEN-2's chart-POC reproduction remains chunk 6's gate.
 row_size: 24  # confirmed by trader screenshot, Round 3, 25-Jul-2026
 
-# Filesystem placeholders. Relative values are resolved against this file's directory by
-# the loader. All three are gitignored (CLAUDE.md: never commit data/, cache/, artifacts).
+# Filesystem roots. Relative values are resolved against this file's directory by the loader.
+#
+# data_root and cache_root are Q-18 LAYER 1 (CLAUDE.md, "Data-store safety"): the mutable
+# stores live OUTSIDE the repository tree, so NO git command can reach them. That is what the
+# 31-Jul-2026 incident cost -- `git worktree remove --force` followed two junctions into
+# in-repo data/ and cache/ and emptied both. Outside the tree, the same command cannot touch
+# them however it is invoked. Both MUST be absolute and outside the repo; the loader refuses
+# anything else rather than letting a store drift back inside (src/acumen/config.py).
+#
+# The operator MOVED the two trees here on 02-Aug-2026; the old in-repo locations are gone.
 paths:
-  data_dir: data      # Parquet stores (daily + 1-min) -- CONTEXT 6
-  cache_dir: cache    # downloaded instrument master / raw API payloads
-  logs_dir: logs      # run logs
+  data_root: C:/Users/chinm/acumen-data          # Parquet stores (daily + 1-min), CA cache,
+                                                 # adjustment maps, ledgers, run artifacts
+  cache_root: C:/Users/chinm/acumen-data/cache   # instrument master / raw API payloads
+  logs_dir: logs                                 # run logs (repo-local, gitignored; holds no
+                                                 # store data and is regenerated freely)

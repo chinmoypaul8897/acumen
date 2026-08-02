@@ -216,10 +216,10 @@ class InstrumentMaster:
 
 
 def default_cache_dir() -> Path:
-    """``cache_dir`` from config.yaml (gitignored -- CLAUDE.md git rules)."""
+    """``cache_root`` from config.yaml -- OUTSIDE the repo tree (CLAUDE.md Q-18 layer 1)."""
     from .config import load_config  # local import: parsing must not require a config file
 
-    return load_config(include_env=False).path("cache_dir")
+    return load_config(include_env=False).path("cache_root")
 
 
 def master_cache_path(cache_dir: Path | str, today: date) -> Path:
@@ -317,7 +317,7 @@ def parse_args(argv: Sequence[str] | None = None) -> Any:
             "(CONTEXT 4.3). Every pack that quotes a tick size cites that filename."
         ),
     )
-    parser.add_argument("--cache-dir", default=None, help="cache root (default: config cache_dir)")
+    parser.add_argument("--cache-dir", default=None, help="cache root (default: config cache_root)")
     parser.add_argument(
         "--allow-network", action="store_true", help="REQUIRED to fetch; without it, report only"
     )

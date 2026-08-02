@@ -1503,14 +1503,14 @@ def yahoo_url(symbol: str, start: date, end: date) -> str:
 
 
 def cache_path(cache_dir: Path, name: str) -> Path:
-    """Where a day-cached CA payload lives. ``data/`` is gitignored (CLAUDE.md git rules)."""
+    """Where a day-cached CA payload lives, under ``<data_root>/nse/ca/`` (outside the repo)."""
     return Path(cache_dir) / "ca" / name
 
 
 def default_cache_dir() -> Path:
     from .config import load_config  # local: parsing must not require a config file
 
-    return load_config(include_env=False).path("data_dir") / "nse"
+    return load_config(include_env=False).path("data_root") / "nse"
 
 
 def fetch_nse_corporate_actions(

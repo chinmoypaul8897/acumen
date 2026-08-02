@@ -3,7 +3,7 @@
 The operator's runbook for the QUESTIONS.md Q-11 reconstruction. Credentialed, polite: for each
 probe WINDOW it makes one ONE_MINUTE call, folds it, measures the era's cumulative ratios against
 the RAW daily store, then (once every window is in) builds the :class:`acumen.vendor_adjustment.
-AdjustmentMap`, persists it under ``data/adjustment_maps/`` (gitignored), prints the full map, and
+AdjustmentMap`, persists it under ``<data_root>/adjustment_maps/`` (outside the repo tree), prints the full map, and
 runs the CONSUMPTION acceptance -- un-adjust every probe day THROUGH the map and check price
 containment (<= 2 paise on a CA era) + gate-1 volume band per day.
 

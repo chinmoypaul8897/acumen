@@ -1035,7 +1035,7 @@ def _store_context():
     from acumen import trade_evidence as evidence
 
     config = load_config(include_env=False)
-    data_dir = Path(config.path("data_dir"))
+    data_dir = Path(config.path("data_root"))
     for required in (data_dir / "minute_store", data_dir / "daily_store"):
         if not required.exists():
             pytest.skip(f"local store {required} is absent (data/ is gitignored)")

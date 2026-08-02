@@ -42,6 +42,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import time
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
@@ -62,7 +63,9 @@ from .nse_http import NseFetchError
 #: The chunk-5B status that makes a symbol eligible for the run (CONTEXT 4.6).
 SETTLED: str = "settled"
 
-#: Where a full-history run lands, under ``data/backtests/``. One directory, standard names.
+#: Where a full-history run lands, under ``<data_root>/backtests/``. One directory, standard
+#: names. ``data_root`` lives OUTSIDE the repository tree (CLAUDE.md Q-18 layer 1), so a run's
+#: artifacts are out of every git command's reach as well.
 DEFAULT_LABEL: str = "chunk9b_full"
 
 #: The earliest year NSE's corporate-action API answers for (CONTEXT 4.2, verified).
@@ -83,6 +86,72 @@ Q44_ESCALATION: str = (
 
 class PreflightError(RuntimeError):
     """A preflight check could not even be attempted -- distinct from a check that FAILED."""
+
+
+@dataclass(frozen=True)
+class StoreStamp:
+    """One store root's LAST-CHANGED time -- CLAUDE.md's Q-18 layer 3, made printable.
+
+    The layer says the operator keeps TWO snapshot generations and never overwrites the
+    previous until the new one is verified, "and the preflight prints the stores' last-changed
+    timestamps so the operator can confirm the snapshot is newer". This is that measurement:
+    the newest modification time anywhere under the root, so a file rewritten deep inside a
+    symbol directory still moves the number the operator compares against.
+
+    It is deliberately NOT a check and NOT a disclosure. It cannot fail a preflight (a stale
+    snapshot is the operator's call, not the runner's), and it never reaches the run manifest,
+    which must stay byte-identical across runs and therefore carries no clock read.
+    """
+
+    name: str
+    root: Path
+    exists: bool
+    last_changed: datetime | None
+    entries: int
+
+    def line(self, width: int) -> str:
+        if not self.exists:
+            return f"{self.name.ljust(width)} : {self.root}  MISSING"
+        stamp = (
+            self.last_changed.strftime("%Y-%m-%d %H:%M:%S")
+            if self.last_changed is not None
+            else "unknown"
+        )
+        return (
+            f"{self.name.ljust(width)} : {self.root}  last changed {stamp}  "
+            f"({self.entries:,} entries)"
+        )
+
+
+def store_last_changed(name: str, root: Path) -> StoreStamp:
+    """Walk ``root`` and return its newest modification time and entry count.
+
+    Both stores are written through :mod:`acumen.atomic_io` (write-temp-then-replace), so a
+    changed byte anywhere shows up as a changed mtime on a real file; the walk takes the max
+    over files AND directories so a pure add/remove is caught too. Unreadable entries are
+    skipped rather than raised on: this is an operator convenience, and it must never be the
+    thing that stops a run.
+    """
+    root = Path(root)
+    if not root.exists():
+        return StoreStamp(name=name, root=root, exists=False, last_changed=None, entries=0)
+    newest = 0.0
+    entries = 0
+    for parent, dirnames, filenames in os.walk(root):
+        here = Path(parent)
+        for entry in (here, *(here / n for n in dirnames), *(here / n for n in filenames)):
+            try:
+                newest = max(newest, entry.stat().st_mtime)
+            except OSError:  # a vanished or locked entry is not worth a failed preflight
+                continue
+        entries += len(dirnames) + len(filenames)
+    return StoreStamp(
+        name=name,
+        root=root,
+        exists=True,
+        last_changed=datetime.fromtimestamp(newest) if newest else None,
+        entries=entries,
+    )
 
 
 @dataclass(frozen=True)
@@ -107,9 +176,15 @@ class Preflight:
     symbols: tuple[str, ...]
     start: date | None
     end: date | None
-    data_dir: Path
-    run_dir: Path
+    #: Both are ``None`` on exactly one branch: ``config.yaml`` did not load, so the store
+    #: roots are UNKNOWN. Nothing invents ``data/`` there -- CLAUDE.md's Q-18 layer 1 puts the
+    #: stores outside the repo and config.yaml is the only thing that says where. That branch
+    #: is always NO-GO, and the renderer reads neither field unless the verdict is GO.
+    data_dir: Path | None
+    run_dir: Path | None
     notes: tuple[str, ...] = ()
+    #: CLAUDE.md Q-18 layer 3. Printed, never checked, never carried into the manifest.
+    store_stamps: tuple[StoreStamp, ...] = ()
 
     @property
     def ok(self) -> bool:
@@ -279,8 +354,8 @@ def preflight(
             symbols=(),
             start=None,
             end=None,
-            data_dir=Path(data_dir) if data_dir is not None else Path("data"),
-            run_dir=Path("data") / "backtests" / label,
+            data_dir=Path(data_dir) if data_dir is not None else None,
+            run_dir=(Path(data_dir) / "backtests" / label) if data_dir is not None else None,
         )
 
     checks.append(
@@ -300,9 +375,11 @@ def preflight(
         )
     )
 
-    data = Path(data_dir) if data_dir is not None else config.path("data_dir")
-    cache = Path(cache_dir) if cache_dir is not None else config.path("cache_dir")
+    data = Path(data_dir) if data_dir is not None else config.path("data_root")
+    cache = Path(cache_dir) if cache_dir is not None else config.path("cache_root")
     run_dir = data / "backtests" / label
+    # CLAUDE.md Q-18 layer 3: measured here, printed by the renderer, checked by nobody.
+    stamps = (store_last_changed("data_root", data), store_last_changed("cache_root", cache))
 
     # 2. the daily store (the gate-1 / gate-1P raw oracle).
     daily_store = DailyStore.at(data / "daily_store")
@@ -465,6 +542,7 @@ def preflight(
         data_dir=data,
         run_dir=run_dir,
         notes=tuple(notes),
+        store_stamps=stamps,
     )
 
 
@@ -507,6 +585,19 @@ def render_preflight(report: Preflight, *, label: str, command: str | None) -> l
         lines.append("DISCLOSED CONDITIONS (measured, not failures -- and not silent):")
         for note in report.notes:
             lines.append(f"  * {note}")
+        lines.append("=" * 78)
+    if report.store_stamps:
+        stamp_width = max(len(stamp.name) for stamp in report.store_stamps)
+        lines.append(
+            "STORE FRESHNESS (CLAUDE.md Q-18 layer 3 -- the stores live OUTSIDE this repo):"
+        )
+        for stamp in report.store_stamps:
+            lines.append(f"  {stamp.line(stamp_width)}")
+        lines.append(
+            "  A snapshot covers these stores only if it is NEWER than every line above. "
+            "Keep TWO generations; never overwrite the previous one until the new one is "
+            "verified. Snapshotting is the OPERATOR's, never a session's."
+        )
         lines.append("=" * 78)
     if report.ok:
         lines.append(
@@ -743,7 +834,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--label",
         default=DEFAULT_LABEL,
-        help=f"run directory name under data/backtests/ (default: {DEFAULT_LABEL})",
+        help=f"run directory name under <data_root>/backtests/ (default: {DEFAULT_LABEL})",
     )
     parser.add_argument(
         "--symbols",

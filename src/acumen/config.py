@@ -28,6 +28,13 @@ goes through ``Decimal`` so a fractional
 rupee amount can never arrive as a float-rounded number of paise: an amount that is not a
 whole number of paise is refused.
 
+``paths.data_root`` and ``paths.cache_root`` are the other required-and-checked pair, for a
+different reason: they name the MUTABLE STORES, and CLAUDE.md's Q-18 layer 1 puts those
+outside the repository tree so that no git command can reach them. The loader refuses a
+missing, relative, or in-repo store root rather than resolving one -- see
+:func:`_require_outside_repo`. Every store and cache path in ``src/`` is derived from these
+two keys; nothing hardcodes a store location.
+
 This module performs file I/O and is NOT part of the pure engine layer; engine functions
 receive already-loaded values as arguments (CONTEXT 6).
 
@@ -72,6 +79,14 @@ _OPTIONAL_KEYS: frozenset[str] = frozenset({"capital_reference", "margin_basis"}
 #: config.yaml (the units CONTEXT 3.5 states them in) cross into that domain exactly once,
 #: here.
 PAISE_PER_RUPEE: int = 100
+
+#: The two path keys that name the MUTABLE STORES. Q-18 layer 1 (CLAUDE.md, "Data-store
+#: safety"): both must be present, both must be absolute, and neither may lie inside the
+#: repository tree. Enforced by :func:`_validate_paths` rather than left to convention --
+#: the whole point of the layer is that no git command can reach a store, and a store that
+#: drifts back under the repo root is reachable again the moment someone runs
+#: ``git worktree remove --force`` or ``git clean -xfd``.
+STORE_ROOT_KEYS: tuple[str, ...] = ("data_root", "cache_root")
 
 
 class ConfigError(RuntimeError):
@@ -392,16 +407,62 @@ def _validate_row_size(value: Any, path: Path) -> int:
 
 
 def _validate_paths(value: Any, path: Path) -> Mapping[str, Path]:
-    """Resolve every declared path against the config file's directory."""
+    """Resolve every declared path, then enforce Q-18 layer 1 on the two store roots."""
     if not isinstance(value, dict) or not value:
         raise ConfigError(f"paths in {path} must be a non-empty mapping of name -> directory.")
     base = path.parent
     resolved: dict[str, Path] = {}
+    declared: dict[str, Path] = {}
     for name, raw_path in value.items():
         if not isinstance(name, str) or not isinstance(raw_path, str) or not raw_path.strip():
             raise ConfigError(
                 f"paths entry {name!r} in {path} must map a name to a non-empty path string."
             )
         candidate = Path(raw_path)
+        declared[name] = candidate
         resolved[name] = candidate if candidate.is_absolute() else (base / candidate).resolve()
+
+    missing = [name for name in STORE_ROOT_KEYS if name not in resolved]
+    if missing:
+        raise ConfigError(
+            f"paths in {path} is missing {', '.join(missing)}. CLAUDE.md's Q-18 layer 1 requires "
+            f"the mutable stores to be declared here and to live OUTSIDE the repository tree; "
+            f"there is no default, because a store nobody declared is a store nobody snapshots."
+        )
+    for name in STORE_ROOT_KEYS:
+        _require_outside_repo(name, declared[name], resolved[name], path)
     return resolved
+
+
+def _require_outside_repo(name: str, declared: Path, root: Path, source: Path) -> None:
+    """Refuse a store root that is not absolute, or that lies inside the repository tree.
+
+    Q-18 layer 1 (CLAUDE.md, "Data-store safety"), made structural. On 31-Jul-2026 the local
+    ``data/`` and ``cache/`` trees were destroyed because they sat inside the repo and a
+    ``git worktree remove --force`` reached them through two NTFS junctions. Outside the tree,
+    no git command can reach a store however it is invoked -- but only while the config keeps
+    pointing outside, which is what this check holds in place. It is deliberately a REFUSAL
+    and not a warning: a silently in-repo store is the exact failure mode the layer exists to
+    end, and it is invisible until the day it is fatal.
+    """
+    if not declared.is_absolute():
+        raise ConfigError(
+            f"paths.{name} in {source} must be an ABSOLUTE path outside the repository tree "
+            f"(CLAUDE.md Q-18 layer 1); got the relative value {str(declared)!r}. A relative "
+            f"store root is resolved against the config file's own directory -- which, for the "
+            f"committed config, IS the repository root -- so it names an in-repo store however "
+            f"it is spelled. Write the absolute path."
+        )
+    repo = REPO_ROOT.resolve()
+    try:
+        inside = root.resolve().is_relative_to(repo)
+    except OSError:  # pragma: no cover -- an unresolvable root is caught at first use
+        inside = False
+    if inside:
+        raise ConfigError(
+            f"paths.{name} in {source} points INSIDE the repository tree ({root}). CLAUDE.md's "
+            f"Q-18 layer 1 requires the mutable stores to live outside it, so that no git "
+            f"command can reach them -- an in-repo store was destroyed by "
+            f"`git worktree remove --force` on 31-Jul-2026 (QUESTIONS.md Q-18). Move the store "
+            f"and point {name} at its new home; do not point it back inside."
+        )

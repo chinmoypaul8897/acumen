@@ -271,9 +271,19 @@ def test_a_live_pull_of_a_bad_payload_still_refuses_to_invent_a_universe(
         fetch_universe(cache_dir=tmp_path, today=date(2026, 7, 24), allow_network=True)
 
 
-def test_cache_lives_under_the_gitignored_data_dir() -> None:
-    """CLAUDE.md git rules: data/ is never committed, so the day-cache belongs there."""
+def test_cache_lives_under_the_configured_data_root_outside_the_repo() -> None:
+    """CLAUDE.md Q-18 layer 1: the day-cache is store state, so it lives OUTSIDE the repo.
+
+    It used to be enough to say "under gitignored data/". The 31-Jul-2026 incident proved it
+    is not: every ignore rule was in force and `git worktree remove --force` destroyed the
+    tree anyway. The location is now derived from ``paths.data_root``, which the loader
+    refuses to let point inside the repository tree.
+    """
+    from acumen.config import REPO_ROOT, load_config
+
+    data_root = load_config(include_env=False).path("data_root")
     default = universe.cache_path()
     assert default.name == universe.CACHE_FILENAME
     assert default.parent.name == "nse"
-    assert default.parent.parent.name == "data"
+    assert default.parent.parent == data_root
+    assert not default.resolve().is_relative_to(REPO_ROOT.resolve())

@@ -178,8 +178,8 @@ def build_context(
 ) -> SweepContext:
     """Open the local stores read-only and wire the whole pipeline, money included."""
     config = load_config(include_env=False)
-    data = Path(data_dir) if data_dir is not None else config.path("data_dir")
-    cache = Path(cache_dir) if cache_dir is not None else config.path("cache_dir")
+    data = Path(data_dir) if data_dir is not None else config.path("data_root")
+    cache = Path(cache_dir) if cache_dir is not None else config.path("cache_root")
 
     daily_store = DailyStore.at(data / "daily_store")
     minute_store = MinuteStore.at(data / "minute_store")
@@ -685,7 +685,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         description="Price the chunk-7 sweep and write the chunk-8 evidence pack.",
     )
     parser.add_argument("--out", default=DEFAULT_OUT, help=f"output path (default: {DEFAULT_OUT})")
-    parser.add_argument("--data-dir", default=None, help="data dir (default: config paths.data_dir)")
+    parser.add_argument("--data-dir", default=None, help="data dir (default: config paths.data_root)")
     parser.add_argument("--cache-dir", default=None, help="instrument-master cache dir")
     return parser.parse_args(argv)
 

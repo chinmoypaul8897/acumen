@@ -396,7 +396,7 @@ def run_window(
     progress=None,
     run_name: str | None = None,
 ) -> tuple[PilotRun, bt.BacktestRunner]:
-    """Wire the machine and walk one window, into a fresh run directory under ``data/``.
+    """Wire the machine and walk one window, into a fresh run directory under ``<data_root>/``.
 
     ``run_name`` names the DIRECTORY when it must differ from the label; the label is part of
     the spec, so two runs that are meant to produce identical manifests must share it.
@@ -405,7 +405,7 @@ def run_window(
         symbols, start, end, data_dir=data_dir, label=label
     )
     config = load_config(include_env=False)
-    root = (Path(data_dir) if data_dir is not None else config.path("data_dir")) / RUN_ROOT
+    root = (Path(data_dir) if data_dir is not None else config.path("data_root")) / RUN_ROOT
     run_dir = root / (run_name or label)
     if fresh and run_dir.exists():
         shutil.rmtree(run_dir)
@@ -476,7 +476,7 @@ def resume_proof(
     )
 
     config = load_config(include_env=False)
-    root = (Path(data_dir) if data_dir is not None else config.path("data_dir")) / RUN_ROOT
+    root = (Path(data_dir) if data_dir is not None else config.path("data_root")) / RUN_ROOT
     run_dir = root / "chunk9a_resume_killed"
     if run_dir.exists():
         shutil.rmtree(run_dir)
@@ -1562,7 +1562,7 @@ def build_everything(
 ) -> dict:
     """Run every pilot piece and return what the renderer needs."""
     config = load_config(include_env=False)
-    data = Path(data_dir) if data_dir is not None else config.path("data_dir")
+    data = Path(data_dir) if data_dir is not None else config.path("data_root")
     daily_store = DailyStore.at(data / "daily_store")
 
     pilot, pilot_runner = run_window(
@@ -1645,7 +1645,7 @@ def build_everything(
     trade_paths = bt.assemble_trade_paths(
         pilot.result.rows, bars_for=bt.minute_store_bars(pilot_runner.minute_store)
     )
-    master = bt.latest_cached_master(config.path("cache_dir"))[1].name
+    master = bt.latest_cached_master(config.path("cache_root"))[1].name
     return {
         "pilot": pilot,
         "pilot_runner": pilot_runner,

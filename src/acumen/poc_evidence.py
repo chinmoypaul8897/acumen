@@ -387,7 +387,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--allow-network", action="store_true",
                         help="permit the live scratch read for a chart day not in the store")
-    parser.add_argument("--data-dir", default=None, help="data dir (default: config paths.data_dir)")
+    parser.add_argument("--data-dir", default=None, help="data dir (default: config paths.data_root)")
     parser.add_argument("--cache-dir", default=None, help="instrument-master cache dir")
     parser.add_argument("--out", default="docs/gate_chunk6_poc_evidence.md", help="output path")
     return parser.parse_args(argv)
@@ -395,8 +395,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def run(args: argparse.Namespace, *, command: str) -> int:
     config = load_config()
-    data_dir = Path(args.data_dir) if args.data_dir else config.path("data_dir")
-    cache_dir = Path(args.cache_dir) if args.cache_dir else config.path("cache_dir")
+    data_dir = Path(args.data_dir) if args.data_dir else config.path("data_root")
+    cache_dir = Path(args.cache_dir) if args.cache_dir else config.path("cache_root")
     daily_store = DailyStore.at(data_dir / "daily_store")
     minute_store = MinuteStore.at(data_dir / "minute_store")
     master: InstrumentMaster = load_instrument_master(

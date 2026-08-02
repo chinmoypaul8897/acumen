@@ -45,7 +45,7 @@ era per pass, so a ``measured`` value is always a single observed scalar, never 
 **The map.** :class:`AdjustmentMap` is committed per symbol: one :class:`EraResolution` per era,
 each carrying its per-event :class:`EventChoice` (kind, ex-date, price/volume factor and source),
 the measured cumulative, the containment residual, the gate-1 gap and the probe windows. It is
-persisted under ``data/adjustment_maps/<SYMBOL>.json`` (a gitignored store artifact) and printed
+persisted under ``<data_root>/adjustment_maps/<SYMBOL>.json`` (a store artifact, outside the repo) and printed
 into the evidence pack. Deterministic: the same fetched inputs produce the same map.
 
 **Consumption.** :func:`unadjust_with_map` replaces the FIX-3 factor-table un-adjustment: for a day
@@ -1909,7 +1909,7 @@ def _day_reason(
 
 
 def map_path(symbol: str, data_dir: Path | None = None) -> Path:
-    """Where a symbol's committed adjustment map lives (``data/`` is gitignored)."""
+    """Where a symbol's committed adjustment map lives (under ``data_root``, outside the repo)."""
     base = Path(data_dir) if data_dir is not None else _default_data_dir()
     return base / "adjustment_maps" / f"{symbol.strip().upper()}.json"
 
@@ -1917,7 +1917,7 @@ def map_path(symbol: str, data_dir: Path | None = None) -> Path:
 def _default_data_dir() -> Path:
     from .config import load_config  # local: building a map must not require a config file
 
-    return load_config(include_env=False).path("data_dir")
+    return load_config(include_env=False).path("data_root")
 
 
 def _probe_to_dict(p: FloorProbe) -> dict:
@@ -2100,7 +2100,7 @@ def map_is_current(adjustment_map: AdjustmentMap) -> bool:
 
 
 def persist_map(adjustment_map: AdjustmentMap, data_dir: Path | None = None) -> Path:
-    """Write the map to ``data/adjustment_maps/<SYMBOL>.json`` (gitignored) ATOMICALLY.
+    """Write the map to ``<data_root>/adjustment_maps/<SYMBOL>.json`` ATOMICALLY.
 
     REVIEW_5B finding C4: this was the only store write in the repo that bypassed
     :mod:`acumen.atomic_io` -- a plain truncate-then-write, with no temp file, no fsync and no
@@ -2115,7 +2115,7 @@ def persist_map(adjustment_map: AdjustmentMap, data_dir: Path | None = None) -> 
 
 
 def load_map(symbol: str, data_dir: Path | None = None) -> AdjustmentMap:
-    """Read a committed adjustment map from ``data/``.
+    """Read a committed adjustment map from ``<data_root>``.
 
     A torn or malformed file raises :class:`VendorAdjustmentError` like every other unreadable map
     (REVIEW_5B finding C4: ``json.JSONDecodeError`` escaped all four guards written for exactly this

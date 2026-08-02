@@ -1231,9 +1231,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--symbol", default="TCS", help="symbol to backfill (NSE cash equity)")
     parser.add_argument("--from", dest="start", default=MINUTE_DATA_FLOOR.isoformat(), help="start date YYYY-MM-DD")
     parser.add_argument("--to", dest="end", default=None, help="end date YYYY-MM-DD (default: today)")
-    parser.add_argument("--store", default=None, help="minute store root (default: <data_dir>/minute_store)")
-    parser.add_argument("--daily-store", default=None, help="daily store root (default: <data_dir>/daily_store)")
-    parser.add_argument("--cache-dir", default=None, help="instrument-master cache dir (default: config cache_dir)")
+    parser.add_argument("--store", default=None, help="minute store root (default: <data_root>/minute_store)")
+    parser.add_argument("--daily-store", default=None, help="daily store root (default: <data_root>/daily_store)")
+    parser.add_argument("--cache-dir", default=None, help="instrument-master cache dir (default: config cache_root)")
     parser.add_argument("--allow-network", action="store_true", help="REQUIRED to fetch anything")
     parser.add_argument("--no-gate3", action="store_true", help="skip the OPEN-8 adjustment probe")
     parser.add_argument("--max-windows", type=int, default=None, help="cap windows this run (debug)")
@@ -1245,9 +1245,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                              "and AFTER (un-adjusted in memory); makes NO SmartAPI pulls")
     parser.add_argument("--adjustment-map", default=None,
                         help="path to a persisted Q-11 adjustment map JSON; default: "
-                             "<data_dir>/adjustment_maps/<SYMBOL>.json when it exists")
+                             "<data_root>/adjustment_maps/<SYMBOL>.json when it exists")
     parser.add_argument("--map-data-dir", default=None,
-                        help="data dir holding adjustment_maps/ (default: config data_dir)")
+                        help="data dir holding adjustment_maps/ (default: config data_root)")
     return parser.parse_args(argv)
 
 
@@ -1277,7 +1277,7 @@ def load_adjustment_map_for(
 def _default_root(subdir: str) -> Path:
     from .config import load_config
 
-    return load_config(include_env=False).path("data_dir") / subdir
+    return load_config(include_env=False).path("data_root") / subdir
 
 
 def run(args: argparse.Namespace) -> int:

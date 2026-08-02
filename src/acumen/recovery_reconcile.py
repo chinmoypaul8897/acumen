@@ -1305,7 +1305,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--sealed", default=SEALED_REPORT_RELPATH, help="the committed report")
     parser.add_argument("--rebuilt", default=REBUILT_REPORT_RELPATH, help="runbook step 4's report")
-    parser.add_argument("--data-dir", default=None, help="data dir (default: config data_dir)")
+    parser.add_argument("--data-dir", default=None, help="data dir (default: config data_root)")
     parser.add_argument("--cache-dir", default=None, help="CA day-cache dir (default: config)")
     parser.add_argument("--forensics", default=T3_FORENSICS_RELPATH,
                         help="the committed T3 forensics verdicts (T3; absent = none)")
@@ -1322,7 +1322,7 @@ def run(args: argparse.Namespace) -> int:
     from .universe_backfill import build_daily_cache
 
     config = load_config(include_env=False)
-    data = Path(args.data_dir) if args.data_dir else config.path("data_dir")
+    data = Path(args.data_dir) if args.data_dir else config.path("data_root")
     cache = Path(args.cache_dir) if args.cache_dir else None
 
     sealed = read_report(args.sealed)

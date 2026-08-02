@@ -30,7 +30,7 @@ from . import nse_http
 #: CONTEXT 4.1 -- verified live 21-Jul-2026, 210 stocks.
 UNDERLYING_INFORMATION_URL: str = "https://www.nseindia.com/api/underlying-information"
 
-#: Day-cache file name under the cache directory (which lives inside gitignored data/).
+#: Day-cache file name under the cache directory (which lives under data_root, outside the repo).
 CACHE_FILENAME: str = "underlying_information.json"
 
 #: The key holding the F&O STOCK underlyings. ``IndexList`` is the other one and is dropped.
@@ -141,10 +141,10 @@ def cache_path(cache_dir: Path | None = None) -> Path:
 
 
 def default_cache_dir() -> Path:
-    """``<data_dir>/nse`` from config.yaml. ``data/`` is gitignored (CLAUDE.md git rules)."""
+    """``<data_root>/nse`` from config.yaml -- OUTSIDE the repo tree (CLAUDE.md Q-18 layer 1)."""
     from .config import load_config  # local import: parsing must not require a config file
 
-    return load_config(include_env=False).path("data_dir") / "nse"
+    return load_config(include_env=False).path("data_root") / "nse"
 
 
 def fetch_universe(

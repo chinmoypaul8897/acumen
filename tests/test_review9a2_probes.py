@@ -67,7 +67,7 @@ DAY = date(2026, 3, 2)
 def _pilot_rows() -> tuple[bt.LedgerRow, ...]:
     """The committed pilot ledger, or a skip -- ``data/`` is gitignored (chunk-8 precedent)."""
     config = load_config(include_env=False)
-    ledger = config.path("data_dir") / PILOT_LEDGER_RELPATH
+    ledger = config.path("data_root") / PILOT_LEDGER_RELPATH
     if not ledger.is_file():
         pytest.skip(f"local run ledger {ledger} is absent (data/ is gitignored)")
     return bt.read_ledger(ledger)
@@ -75,7 +75,7 @@ def _pilot_rows() -> tuple[bt.LedgerRow, ...]:
 
 def _pilot_paths() -> tuple[bt.TradePath, ...]:
     config = load_config(include_env=False)
-    store_dir = config.path("data_dir") / "minute_store"
+    store_dir = config.path("data_root") / "minute_store"
     if not store_dir.is_dir():
         pytest.skip(f"local minute store {store_dir} is absent (data/ is gitignored)")
     store = MinuteStore(store_dir)
@@ -119,7 +119,7 @@ def test_the_exit_level_rule_bites_on_the_real_pilot_not_only_on_the_fixture() -
     rows = _pilot_rows()
     paths = _pilot_paths()
     config = load_config(include_env=False)
-    store = MinuteStore(config.path("data_dir") / "minute_store")
+    store = MinuteStore(config.path("data_root") / "minute_store")
 
     by_key = {(row.symbol, row.day): row for row in rows if row.executed}
     diverged = 0
@@ -150,7 +150,7 @@ def test_every_pilot_path_reconciles_and_its_entry_mark_is_the_entry_candles_own
     rows = _pilot_rows()
     paths = _pilot_paths()
     config = load_config(include_env=False)
-    store = MinuteStore(config.path("data_dir") / "minute_store")
+    store = MinuteStore(config.path("data_root") / "minute_store")
 
     assert len(paths) == len([row for row in rows if row.executed])
     assert all(pf.path_reconciles(path) for path in paths)
