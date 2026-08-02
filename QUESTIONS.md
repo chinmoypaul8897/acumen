@@ -2939,3 +2939,120 @@ favour — the chunk-6 gate day is 2026-07-17 and 1913.9 / 25 rows is the trader
 reading (receipt R3F-f), so the card citation was in error; (4) Q-17's five market-wide mixed
 dates are carried to the chunk-9B report's DISCLOSURES rather than excluded, with 2021-02-24
 annotated as the probable NSE outage / extended session and named an identity candidate only.
+
+---
+
+## Q-21 · chunk 9B RUN · class A · **RULED 03-Aug-2026 — executed by the run-crash fix session** · was KILLING the full-history run
+
+**The architect's ruling, recorded VERBATIM.** It was supplied with the fix brief and is
+quoted whole and unedited; nothing in this repo may narrow or widen it.
+
+> "Q-21 (03-Aug-2026, found by the full run at symbol 103): a Rule-3 minute scan
+> can meet a vendor-corrupt bar (open/close outside [low,high]). ARCHITECT'S
+> RULING: malformed minute evidence makes the bias UNRESOLVABLE for that pair --
+> the day joins REASON_BIAS_UNRESOLVED as its third case (minutes-malformed),
+> counted, never a crash, with the offending bar's stamp and OHLCV logged in the
+> refusal detail and a rare-shape counter in the manifest. Rationale: gate 2
+> already declares an impossible-OHLC day unusable for trading; its minutes
+> cannot then decide a bias. Refusing the DAY (not skipping the bar) is the
+> conservative reading -- a scan minus a corrupt bar could reverse a first-break.
+> Symbols that completed before the crash provably contain no such day (they
+> would have crashed), so the fix changes nothing for them; the ledger still
+> re-runs under ONE code SHA per the resume law. Architect."
+
+**One correction of fact before the execution notes, read from the machine rather than from the
+crash transcript** (CLAUDE.md: *pasted transcripts are never the record*). The ruling's opening
+line says the run was "at symbol 103". `progress.json` in the crashed run directory lists **103
+COMPLETED symbols** and there are 103 whole shards on disk matching it exactly, and that list is
+the settled universe's own leading prefix -- so the last symbol the run FINISHED was JSWSTEEL
+(#103) and it **died inside symbol 104 of 204, JUBLFOOD**. Nothing in the ruling turns on the
+number; it is corrected here so the relaunch's accounting starts from the right one.
+
+**EXECUTED by the run-crash fix session (2026-08-03).** The narrowest correct scope, exactly
+as the ruling scopes it -- the RUN's Rule-3 minute loader (`acumen.backtest.minute_loader`),
+which is the only site in `src/acumen` that builds `bias.Candle` objects out of stored minute
+bars on the run path:
+
+- **The load boundary refuses, and it is the only place that can name the bar.**
+  `minute_loader` builds each `Candle` inside a `try`, and turns `bias.BiasError` into
+  `acumen.bias_engine.MalformedMinuteBar` carrying the symbol, the date and the RAW bar --
+  stamp, O, H, L, C and V. The pure engine (`bias.py`) is untouched: its `Candle.__post_init__`
+  invariant is what caught the corruption in the first place and it keeps catching it.
+- **The DAY is refused, not the bar.** `BiasEngine._bias_for` catches `MalformedMinuteBar`
+  around `evaluate_pair` and returns a `DailyBias` with `rule="minutes-malformed"`,
+  `tradeable=False` and the offending bar in `unresolved_detail`, leaving the carried bias
+  UNCHANGED -- a corrupt day decides nothing. No bar is dropped from the scan.
+- **`REASON_BIAS_UNRESOLVED`, third case.** `BacktestRunner.walk_symbol` emits one refused
+  ledger row for that trade day whose reason is
+  `bias unresolvable (CONTEXT 3.2 pair could not be assembled): malformed-minute-bar <SYMBOL>
+  <D-1> stamp <...> O <..> H <..> L <..> C <..> V <..>`, flagged
+  `FLAG_MALFORMED_MINUTE_BAR`. The reason chain in the module docstring names all three cases.
+- **Counted in the manifest.** A new `rare_shapes` label, *"rule-3 day refused on a malformed
+  1-minute bar (QUESTIONS.md Q-21)"*, derived from the row flag like every other rare shape,
+  so a resumed run counts it identically and a reader can recompute it from the ledger alone.
+
+**The bar that killed the run, read from the machine** (`docs/evidence/chunk9b_q21_malformed_bar.{py,md}`,
+offline and read-only): **JUBLFOOD, D-1 = 2023-03-03, stamp 09:15, O 44210 H 44440 L 44295
+C 44295 V 12909** -- the open sits 85 paise BELOW the low. The bar's open agrees with the raw
+bhavcopy's open for that day to the paisa (44210), so it is the vendor's first-minute LOW that
+is wrong, not its open. The pair it broke is trade day **2023-03-06** (D-1 2023-03-03, D-2
+2023-03-02) and it is a genuine CONTEXT 3.2 Rule-3 outside bar -- P O 44375 H 44700 L 44010
+C 44130 (body [44130, 44375]); C O 44210 H 44765 L 43835 C 44135, so C.high > P.high AND
+C.low < P.low with the close inside the body. With the minutes withheld the engine answers
+`rule-3-no-1min-carry`, which is the Rule-3 branch: that is why the scan asked for those
+minutes at all.
+
+**NOTE FOR THE ARCHITECT -- the ruling's RATIONALE does not hold for this bar's shape, though
+its INSTRUCTION is executed exactly as written.** The ruling reasons that "gate 2 already
+declares an impossible-OHLC day unusable for trading". Recomputed from the store, JUBLFOOD
+2023-03-03 **PASSES all three gates** -- gate 1 PASS (unrelieved), gate 2 PASS with no reasons,
+gate 1P PASS, `usable == True`, 375 stored bars. It is not an oversight in the gate: CONTEXT 4.5
+enumerates exactly two OHLC-sanity triggers, `high < low` and a CLOSE outside `[low, high]`, and
+`quality_gates.integrity_gate` says in its own docstring that **`open` is deliberately NOT
+tested**. This bar's close (44295) equals its low, so nothing gate 2 tests is violated; only
+`bias.Candle`'s CONTEXT 7-E11 invariant, which validates the open as well, catches it. So this
+class of corruption -- an open outside `[low, high]` -- has NO backstop other than the Q-21
+refusal itself, and a day carrying it would otherwise have decided a bias and traded.
+
+There is a second gap behind the first, and it is structural rather than enumerative: **a day's
+gate verdicts do not gate its use as bias EVIDENCE.** The battery runs in
+`SignalPipeline.stock_day` for the day being TRADED; `BiasEngine` reads D-1's daily row and
+D-1's minutes straight from the stores, consulting no gate. So even where gate 2 does fire --
+JIOFIN 2023-08-21, whose bar has `high < low` AND a close outside the range -- a Rule-3 scan of
+that date would still have read those minutes. Gate 2 stops the day being traded; it has never
+stopped the day deciding the next day's bias.
+
+Recorded, not decided: whether CONTEXT 4.5's gate-2 enumeration should gain the open, and
+whether CONTEXT 3.2's Rule-3 scan should refuse a D-1 that failed the battery, are both
+architect calls and CONTEXT changes. Nothing in this fix depends on either answer -- the Q-21
+refusal fires on the malformed bar itself, whichever way they are ruled.
+
+**The population is bigger than the crash, and the second premise needs correcting too.** The
+lake scan (153,712,320 stored bars, 20,460 parquet files, all 204 settled symbols) finds **48
+malformed bars, not one**: 47 of them on the SAME date and minute, **2023-03-03 09:15**, across
+47 different symbols -- a market-wide vendor defect in one first-minute print, in which the low
+is set above the open -- plus **JIOFIN 2023-08-21 09:15**, which is worse in kind (O 30000
+H 26185 L 29995 C 26185: high below low, open and close both outside). **47 of the 48 are
+invisible to gate 2** for the reason above; only JIOFIN's faults are of the shape CONTEXT 4.5
+enumerates.
+
+So the ruling's sentence *"symbols that completed before the crash provably contain no such day
+(they would have crashed)"* is **not right as stated**: **19 of the 48 affected symbols had
+already completed** -- ANGELONE, AUBANK, AXISBANK, BAJAJHLDNG, BANDHANBNK, BANKBARODA,
+BANKINDIA, BHARATFORG, BRITANNIA, CDSL, CROMPTON, DALBHARAT, DRREDDY, GLENMARK, GODREJCP,
+HEROMOTOCO, INDIANB, JIOFIN, JSWSTEEL -- and they did not crash because no Rule-3 scan ever
+ASKED for those dates, not because the bars are absent. What was load-bearing is the READ.
+
+**The ruling's CONCLUSION nevertheless holds, and is now measured rather than assumed.** Asked
+of the real engine with each symbol's own factor table wired: of the 48 bars, exactly **ONE** is
+read by a Rule-3 scan -- **JUBLFOOD, trade day 2023-03-06** -- and it is the one that crashed the
+run. The other 47 are never read at all: the trade day that takes their corrupt date as D-1 is
+decided by an inside bar, Rule 1, Rule 2 or a missing candle -- symbol by symbol in the evidence
+table -- and not one of those loads a minute.
+**Zero completed symbols gain a refusal**, so every one of
+the 103 finished shards would reproduce byte-for-byte under the fixed code, exactly as the
+ruling says; the ledger still re-runs whole under ONE code SHA per the resume law.
+
+**What it costs the run: ONE symbol-day.** JUBLFOOD 2023-03-06 becomes a counted refusal.
+2023-03-03 is also the D-2 of trade day 2023-03-08 for those symbols, but Rule 3 reads only
+D-1's minutes, so no D-2 is touched.
