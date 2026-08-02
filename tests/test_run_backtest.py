@@ -281,23 +281,53 @@ class FakeClock:
 
 
 def test_the_reporter_counts_every_symbol_and_prints_an_eta_line() -> None:
+    """The runner WALKS first and REPORTS afterwards, so a symbol's cost is the interval that
+    ENDS at its progress call. The clock is advanced BEFORE each call here, which is where a
+    real run spends it; the previous version of this test advanced it BETWEEN the progress call
+    and `after_symbol` -- a window the runner spends two print statements in -- and so it
+    passed while production printed "rate --" for six hours (fixed 03-Aug-2026).
+    """
     lines: list[str] = []
     clock = FakeClock()
     reporter = rb.ProgressReporter(
         4, out=lines.append, clock=clock, now=lambda: datetime(2026, 7, 31, 12, 0)
     )
-    reporter("  AAA: 10 walked")
-    clock.advance(100)
+    clock.advance(100)                # AAA is walked...
+    reporter("  AAA: 10 walked")      # ...and only then reported
     reporter.after_symbol("AAA")
+    clock.advance(100)
     reporter("  BBB: 10 walked")
+    reporter.after_symbol("BBB")
 
     assert lines[0] == "  AAA: 10 walked"
     assert "[1/4]  25.0%" in lines[1]
-    assert "ETA -- (no symbol walked yet)" in lines[1]  # nothing measured yet: say so
+    assert "ETA -- (no symbol walked yet)" in lines[1]  # nothing CONFIRMED walked yet: say so
     assert "[2/4]  50.0%" in lines[3]
     assert "100.0s/symbol" in lines[3]
     assert "ETA 0:03:20" in lines[3]  # 2 symbols left x 100s
     assert "(~2026-07-31 12:03)" in lines[3]
+
+
+def test_the_rate_feeds_after_n_fresh_symbols() -> None:
+    """The regression the operator hit: 101 of 204 symbols freshly walked, six hours in, and the
+    line still read `rate -- | ETA -- (no symbol walked yet)`. Fresh walks must produce a rate
+    AND an ETA, and the arithmetic must be the walking, not the elapsed wall clock."""
+    lines: list[str] = []
+    clock = FakeClock()
+    reporter = rb.ProgressReporter(
+        204, out=lines.append, clock=clock, now=lambda: datetime(2026, 8, 3, 6, 0)
+    )
+    for index in range(1, 102):  # 101 fresh symbols at 95 seconds each
+        clock.advance(95)
+        reporter(f"  SYM{index}: 2,428 walked")
+        reporter.after_symbol(f"SYM{index}")
+
+    line = lines[-1]
+    assert "[101/204]" in line
+    assert "no symbol walked yet" not in line
+    assert "95.0s/symbol" in line
+    assert "ETA 2:43:05" in line  # 103 symbols left x 95s = 9,785s
+    assert "(~2026-08-03 08:43)" in line  # the stub now() + the remaining 2:43:05
 
 
 def test_a_resumed_shard_does_not_flatter_the_eta() -> None:
@@ -306,26 +336,76 @@ def test_a_resumed_shard_does_not_flatter_the_eta() -> None:
     seconds for the 4 that are left."""
     lines: list[str] = []
     clock = FakeClock()
-    reporter = rb.ProgressReporter(3, out=lines.append, clock=clock)
+    reporter = rb.ProgressReporter(4, out=lines.append, clock=clock)
 
     reporter("  AAA: resumed from shard (AAA.jsonl)")   # free
     reporter("  BBB: resumed from shard (BBB.jsonl)")   # free
     clock.advance(60)
-    reporter.after_symbol("BBB")                        # ...but only ONE walked
-    reporter("  CCC: 10 walked")
+    reporter("  CCC: 10 walked")                        # ...only these two are really walked
+    reporter.after_symbol("CCC")
+    clock.advance(60)
+    reporter("  DDD: 10 walked")
+    reporter.after_symbol("DDD")
 
-    assert reporter.seen == 3 and reporter.walked == 1
+    assert reporter.seen == 4 and reporter.walked == 2
+    assert "60.0s/symbol" in lines[-1]   # 120s over TWO walks...
+    assert "30.0s/symbol" not in lines[-1]  # ...not 120s spread over four symbols
+    assert "ETA 0:00:00" in lines[-1]    # nothing left after DDD
+
+
+def test_a_resumed_shards_free_interval_is_discarded_not_carried() -> None:
+    """The interval before a RESUMED symbol's line must not survive to be charged to the next
+    walked one. Here the run stalls 500s before replaying a finished shard; that stall belongs
+    to nobody, and the one real walk that follows must still measure 60 seconds."""
+    lines: list[str] = []
+    clock = FakeClock()
+    reporter = rb.ProgressReporter(3, out=lines.append, clock=clock)
+
+    clock.advance(500)
+    reporter("  AAA: resumed from shard (AAA.jsonl)")   # no after_symbol: never charged
+    clock.advance(60)
+    reporter("  BBB: 10 walked")
+    reporter.after_symbol("BBB")
+    clock.advance(60)
+    reporter("  CCC: 10 walked")
+    reporter.after_symbol("CCC")
+
+    assert reporter.walked == 2
     assert "60.0s/symbol" in lines[-1]
-    assert "ETA 0:00:00" in lines[-1]  # nothing left after CCC
+
+
+def test_the_reporter_measures_the_runners_real_call_order(tmp_path: Path) -> None:
+    """The defect was never in the arithmetic -- it was in WHICH interval was measured -- so the
+    regression test drives the REAL runner rather than a hand-written imitation of it:
+    walk_symbol -> shard -> progress -> after_symbol. The fake clock is advanced inside
+    `walk_symbol`, the only place a real run spends its time."""
+    clock = FakeClock()
+    runner = make_runner(tmp_path, symbols=(SYMBOL, "OTHER"))
+    walk = runner.walk_symbol
+
+    def slow(symbol: str):
+        clock.advance(95)
+        return walk(symbol)
+
+    object.__setattr__(runner, "walk_symbol", slow)  # BacktestRunner is a frozen dataclass
+
+    lines: list[str] = []
+    reporter = rb.ProgressReporter(2, out=lines.append, clock=clock)
+    runner.run(tmp_path / "run", progress=reporter, after_symbol=reporter.after_symbol)
+
+    assert reporter.seen == 2 and reporter.walked == 2
+    assert "[2/2]" in lines[-1]
+    assert "95.0s/symbol" in lines[-1]  # the walk -- not the two print statements after it
 
 
 def test_the_reporter_never_reports_a_negative_remaining() -> None:
     lines: list[str] = []
     clock = FakeClock()
     reporter = rb.ProgressReporter(1, out=lines.append, clock=clock)
-    reporter("  AAA: 10 walked")
     clock.advance(10)
+    reporter("  AAA: 10 walked")
     reporter.after_symbol("AAA")
+    clock.advance(10)
     reporter("  BBB: an extra symbol nobody expected")
     assert "ETA 0:00:00" in lines[-1]
 

@@ -671,6 +671,20 @@ class ProgressReporter:
     the ones it actually walked. So the COUNT comes from the progress calls (that is genuine
     remaining work) and the RATE comes from the freshly walked ones (a resumed shard is free and
     would flatter the estimate).
+
+    **Which interval is the walk** (fixed 03-Aug-2026; the first full-history run reached symbol
+    101 of 204 after six hours still printing ``rate -- | ETA --``). The runner does the work
+    FIRST and reports it afterwards: ``walk_symbol`` -> shard -> ``progress`` -> ``after_symbol``.
+    So a symbol's cost is the interval that ENDS at its ``progress`` call, not one that starts
+    there. The old code stamped the clock at the end of ``progress`` and closed the interval in
+    ``after_symbol`` -- two print statements later -- so it measured the printing and never the
+    walking. On this machine that interval is not merely small, it is exactly zero:
+    ``time.monotonic`` resolves to 15.625 ms here (``GetTickCount64``), so the accumulator stayed
+    at 0.0 forever and the ``<= 0`` guard printed "no symbol walked yet" over a hundred walked
+    symbols. The interval is now measured from the END of the previous report to THIS one -- the
+    window that contains exactly this symbol's walk and its shard write -- and is committed to
+    the rate only when ``after_symbol`` confirms the symbol was really walked, which is what
+    keeps a resumed shard out of the estimate.
     """
 
     def __init__(
@@ -678,7 +692,7 @@ class ProgressReporter:
         total: int,
         *,
         out: Callable[[str], None] = print,
-        clock: Callable[[], float] = time.monotonic,
+        clock: Callable[[], float] = time.perf_counter,
         now: Callable[[], datetime] | None = None,
     ) -> None:
         self.total = total
@@ -688,18 +702,24 @@ class ProgressReporter:
         self._started = clock()
         self.seen = 0
         self.walked = 0
-        self._walk_started: float | None = None
+        #: The clock at the end of the last report -- the start of the NEXT symbol's work.
+        self._marked = self._started
+        #: The interval that produced the symbol just reported, held until ``after_symbol``
+        #: says whether it was walked (charge it) or resumed from a shard (discard it).
+        self._pending: float | None = None
         self._walk_seconds = 0.0
 
     def __call__(self, message: str) -> None:
         self.seen += 1
+        self._pending = max(0.0, self._clock() - self._marked)
         self._out(message.rstrip())
         self._out(self._eta_line())
-        self._walk_started = self._clock()
+        self._marked = self._clock()
 
     def after_symbol(self, _symbol: str) -> None:
-        if self._walk_started is not None:
-            self._walk_seconds += max(0.0, self._clock() - self._walk_started)
+        if self._pending is not None:
+            self._walk_seconds += self._pending
+            self._pending = None
         self.walked += 1
 
     def _eta_line(self) -> str:
@@ -709,8 +729,15 @@ class ProgressReporter:
         head = (
             f"    [{self.seen}/{self.total}] {pct:5.1f}% | elapsed {_hms(elapsed)}"
         )
-        if self.walked == 0 or self._walk_seconds <= 0:
+        if self.walked == 0:
             return f"{head} | rate -- | ETA -- (no symbol walked yet)"
+        if self._walk_seconds <= 0:
+            # Honest about WHICH of the two silences this is. The old line claimed nothing had
+            # been walked while the run was a hundred symbols deep, which is what hid the bug.
+            return (
+                f"{head} | rate -- | ETA -- "
+                f"({self.walked} walked, none took a measurable interval yet)"
+            )
         per_symbol = self._walk_seconds / self.walked
         remaining = per_symbol * left
         finish = self._now() + timedelta(seconds=remaining)
@@ -754,7 +781,7 @@ def execute(
     disclosures: tuple[str, ...] = (),
     master_path: Path | None = None,
     out: Callable[[str], None] = print,
-    clock: Callable[[], float] = time.monotonic,
+    clock: Callable[[], float] = time.perf_counter,
 ) -> RunOutcome:
     """Wire the runner (reusing a cached E2 scan when there is one) and walk the whole span.
 
