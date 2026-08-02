@@ -1,0 +1,37 @@
+{
+  "generated_by": "docs/recovery/q18_t3_forensics.py",
+  "ruling": "QUESTIONS.md, ARCHITECT'S TRIAGE RULINGS (01-Aug-2026), T3",
+  "ca_rows_rebuilt": 41372,
+  "ca_rows_sealed": 41351,
+  "symbols": {
+    "APLAPOLLO": {
+      "verdict": "vendor-snapshot-drift",
+      "measures": [
+        "gate-1 effective passes",
+        "status"
+      ],
+      "summary": "2,363/2,431 -> 1,896/2,435 (-467); the failures form a contiguous block of 536 stored days (2016-10-03..2018-11-30) keyed to this symbol's own eras, every hand-verified day carries a SOUND raw bhavcopy row, and the 1-minute fold sits in a different price domain with the reciprocal volume signature of a corporate-action back-adjustment"
+    },
+    "GAIL": {
+      "verdict": "vendor-snapshot-drift",
+      "measures": [
+        "gate-1 effective passes"
+      ],
+      "summary": "2,054/2,431 -> 1,994/2,435 (-60); the failures form a contiguous block of 432 stored days (2016-10-03..2018-06-27) keyed to this symbol's own eras, every hand-verified day carries a SOUND raw bhavcopy row, and the 1-minute fold sits in a different price domain with the reciprocal volume signature of a corporate-action back-adjustment"
+    },
+    "POWERGRID": {
+      "verdict": "vendor-snapshot-drift",
+      "measures": [
+        "gate-1 effective passes"
+      ],
+      "summary": "2,418/2,430 -> 2,395/2,434 (-23); the failures form a contiguous block of 27 stored days (2021-07-29..2021-09-06) keyed to this symbol's own eras, every hand-verified day carries a SOUND raw bhavcopy row, and the 1-minute fold sits in a different price domain with the reciprocal volume signature of a corporate-action back-adjustment"
+    },
+    "LODHA": {
+      "verdict": "vendor-snapshot-drift",
+      "measures": [
+        "gate-1 effective passes"
+      ],
+      "summary": "1,303/1,307 -> 1,282/1,311 (-21); the failures form a contiguous block of 25 stored days (2021-04-19..2021-05-25) keyed to this symbol's own eras, every hand-verified day carries a SOUND raw bhavcopy row, and the 1-minute fold sits in a different price domain with the reciprocal volume signature of a corporate-action back-adjustment"
+    }
+  }
+}
