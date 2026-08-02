@@ -1,6 +1,6 @@
 # Minute backfill report -- chunk 5B (full-universe 1-minute run)
 
-Generated 2026-08-01T05:37:07 from `C:\Users\chinm\acumen\data\universe_backfill\ledger.json` and the stores. Re-runnable at any time; makes no network call.
+Generated 2026-08-02T01:22:10 from `C:\Users\chinm\acumen\data\universe_backfill\ledger.json` and the stores. Re-runnable at any time; makes no network call.
 
 Scope: CONTEXT 3.1's F&O stock underlyings (CONTEXT 7-E5 -- TODAY's list, with the survivorship disclosure the report owes), 1-minute candles from `2016-10-01` (CONTEXT 4.3 depth floor) or the symbol's listing, whichever is later, to `2026-07-31`.
 
@@ -8,29 +8,29 @@ Scope: CONTEXT 3.1's F&O stock underlyings (CONTEXT 7-E5 -- TODAY's list, with t
 
 | Measure | Value |
 |---|---|
-| Universe symbols | 208 |
-| Processed | 208 |
-| Settled | 202 |
+| Universe symbols | 210 |
+| Processed | 210 |
+| Settled | 204 |
 | Quarantined (gate-1 pass rate < 80%) | 6 |
 | Not yet processed | 0 |
-| Symbol-days gated (settled symbols) | 417,985 |
-| Gate-1 PASS (strict band) | 411,271 (98.4%) |
-| Gate-1 AUCTION-RELIEF pass (Q-12 addendum 2) | 411 (0.1%) |
-| Gate-1 EFFECTIVE pass (strict + relief) | 411,682 (98.5%) |
-| Gate-1P PASS (per-day price containment, Q-14) | 409,112 (97.8% of 418,187 stored days) |
-| Gate-1P failures with NO raw daily row (Q-14 closes REVIEW_5B Q4) | 208 |
-| Gate-2 exclusions | 1,072 |
+| Symbol-days gated (settled symbols) | 421,112 |
+| Gate-1 PASS (strict band) | 414,373 (98.4%) |
+| Gate-1 AUCTION-RELIEF pass (Q-12 addendum 2) | 412 (0.1%) |
+| Gate-1 EFFECTIVE pass (strict + relief) | 414,785 (98.5%) |
+| Gate-1P PASS (per-day price containment, Q-14) | 412,234 (97.8% of 421,316 stored days) |
+| Gate-1P failures with NO raw daily row (Q-14 closes REVIEW_5B Q4) | 210 |
+| Gate-2 exclusions | 1,076 |
 | Un-provable days (no map era / unknown factor) | 19,872 |
 | Vendor application floors resolved (Q-11 addendum 2, Q-14 per-side) | 19 over 228 probe(s) -- the Q-14 pass's probes are STORE reads, not credentialed calls (section 3f) |
-| Gate 1 AND gate 2 (overlap-aware) | 411,507 |
-| **USABLE symbol-days (gate 1 AND gate 2 AND gate 1P)** | **406,154** |
+| Gate 1 AND gate 2 (overlap-aware) | 414,609 |
+| **USABLE symbol-days (gate 1 AND gate 2 AND gate 1P)** | **409,252** |
 | **TOTAL coverage** (usable days of every stored symbol-day) | **93.9%** |
-| Coverage on gate 1 alone, gated denominator (the pre-Q-14 headline) | 95.2% |
-| Coverage on gate 1 alone, STRICT band (no relief) | 95.1% |
+| Coverage on gate 1 alone, gated denominator (the pre-Q-14 headline) | 95.3% |
+| Coverage on gate 1 alone, STRICT band (no relief) | 95.2% |
 
-**Definition of done (plan.md chunk 5B): >= 95% of symbol-days pass gates.** The architect's Q-14 ruling of 2026-07-28 put GATE 1P in the battery permanently, so "pass gates" now means gate 1 AND gate 2 AND gate 1P, and the honest denominator is every stored symbol-day (a day with no raw daily row is a gate-1P FAILURE, not an absence -- that is what closes REVIEW_5B's finding Q4). Measured: **406,154 of 432,512 = 93.9%**.
+**Definition of done (plan.md chunk 5B): >= 95% of symbol-days pass gates.** The architect's Q-14 ruling of 2026-07-28 put GATE 1P in the battery permanently, so "pass gates" now means gate 1 AND gate 2 AND gate 1P, and the honest denominator is every stored symbol-day (a day with no raw daily row is a gate-1P FAILURE, not an absence -- that is what closes REVIEW_5B's finding Q4). Measured: **409,252 of 435,641 = 93.9%**.
 
-> **DoD VERDICT: NOT MET** -- 406,154 of 432,512 stored symbol-days pass gate 1, gate 2 AND gate 1P; 4,733 more passing symbol-days would be needed to reach 95%. Every remaining failure is disclosed in section 4 and in the residual register of section 5.
+> **DoD VERDICT: NOT MET** -- 409,252 of 435,641 stored symbol-days pass gate 1, gate 2 AND gate 1P; 4,607 more passing symbol-days would be needed to reach 95%. Every remaining failure is disclosed in section 4 and in the residual register of section 5.
 
 ### 1a. Coverage under every defensible reading (REVIEW_5B section 7, recomputed)
 
@@ -38,21 +38,21 @@ The review tabulated six readings of this chunk's coverage and showed that the o
 
 | Reading | Numerator | Denominator | Coverage | DoD |
 |---|---|---|---|---|
-| A gate 1 only, gated denominator (the pre-Q-14 headline) | 411,682 | 432,304 | 95.2297% | MET |
-| B gate 1 strict, no auction relief | 411,271 | 432,304 | 95.1347% | MET |
-| C gate 1 AND gate 2, OVERLAP-AWARE | 411,507 | 432,304 | 95.1893% | MET |
-| D gate 1 AND gate 2, the naive subtraction (WRONG -- finding Q3) | 410,610 | 432,304 | 94.9818% | **NOT MET** |
-| E gate 1 only, denominator = every stored day | 411,682 | 432,512 | 95.1839% | MET |
-| F gate 1 AND gate 2 overlap-aware, stored-day denominator | 411,507 | 432,512 | 95.1435% | MET |
-| **G gate 1 AND gate 2 AND GATE 1P, stored-day denominator** | 406,154 | 432,512 | 93.9058% | **NOT MET** |
+| A gate 1 only, gated denominator (the pre-Q-14 headline) | 414,785 | 435,431 | 95.2585% | MET |
+| B gate 1 strict, no auction relief | 414,373 | 435,431 | 95.1639% | MET |
+| C gate 1 AND gate 2, OVERLAP-AWARE | 414,609 | 435,431 | 95.2181% | MET |
+| D gate 1 AND gate 2, the naive subtraction (WRONG -- finding Q3) | 413,709 | 435,431 | 95.0114% | MET |
+| E gate 1 only, denominator = every stored day | 414,785 | 435,641 | 95.2126% | MET |
+| F gate 1 AND gate 2 overlap-aware, stored-day denominator | 414,609 | 435,641 | 95.1722% | MET |
+| **G gate 1 AND gate 2 AND GATE 1P, stored-day denominator** | 409,252 | 435,641 | 93.9425% | **NOT MET** |
 
-Reading **D is arithmetically wrong** and is printed only so the correction is visible: it subtracts all 1,072 gate-2 exclusions from the gate-1-passing count, but a gate-2 missing-minutes exclusion can only fire on a day where gate 1 ALSO failed (the completeness ruling), so those days were never in that numerator. Reading C counts the intersection PER DAY instead, and the difference is 897 symbol-days. Reading G is the DoD reading from the Q-14 ruling onward.
+Reading **D is arithmetically wrong** and is printed only so the correction is visible: it subtracts all 1,076 gate-2 exclusions from the gate-1-passing count, but a gate-2 missing-minutes exclusion can only fire on a day where gate 1 ALSO failed (the completeness ruling), so those days were never in that numerator. Reading C counts the intersection PER DAY instead, and the difference is 900 symbol-days. Reading G is the DoD reading from the Q-14 ruling onward.
 
 ## 2. Route classification (QUESTIONS.md Q-11 addendum)
 
 | Route | Symbols | Meaning |
 |---|---|---|
-| `table-path` | 110 | bonus/split-only: our CONTEXT 4.2 factors ARE the vendor's, and gate-1 volume proves the price division |
+| `table-path` | 112 | bonus/split-only: our CONTEXT 4.2 factors ARE the vendor's, and gate-1 volume proves the price division |
 | `map-required` | 98 | carries a non-share-count event (rights / special dividend / demerger) or something unparsed: ingested only through a measured map with per-day price containment |
 
 ### Map inventory
@@ -227,6 +227,7 @@ VOLUME side -- **ours 309**, **price-factor 18**, **measured 28**, **absent 15**
 | DRREDDY | table-path | 2016-10-01 | 2016-10-03 | 2435 | 129/0/0 | 2422/2434 (99.5%) | 0 | 2422/2434 (99.5%) | - | 2 | 373.2 | settled |
 | EICHERMOT | table-path | 2016-10-01 | 2016-10-03 | 2433 | 129/0/0 | 2413/2432 (99.2%) | 3 | 2416/2432 (99.3%) | - | 5 | 373.0 | settled |
 | ETERNAL | table-path | 2025-04-09 | 2025-04-09 | 324 | 18/0/0 | 323/323 (100.0%) | 0 | 323/323 (100.0%) | - | 0 | 374.0 | settled |
+| EXIDEIND | table-path | 2016-10-01 | 2016-10-03 | 2434 | 129/0/0 | 2419/2433 (99.4%) | 0 | 2419/2433 (99.4%) | - | 3 | 372.8 | settled |
 | FEDERALBNK | table-path | 2016-10-01 | 2016-10-03 | 2434 | 129/0/0 | 2419/2433 (99.4%) | 1 | 2420/2433 (99.5%) | - | 2 | 373.2 | settled |
 | FORCEMOT | table-path | 2019-08-19 | 2019-08-19 | 1647 | 88/3/0 | 1618/1646 (98.3%) | 8 | 1626/1646 (98.8%) | - | 17 | 317.7 | settled |
 | FORTIS | table-path | 2016-10-01 | 2016-10-03 | 2434 | 129/0/0 | 2414/2433 (99.2%) | 3 | 2417/2433 (99.3%) | - | 11 | 362.9 | settled |
@@ -307,6 +308,7 @@ VOLUME side -- **ours 309**, **price-factor 18**, **measured 28**, **absent 15**
 | NHPC | map-required | 2016-10-01 | 2016-10-03 | 2433 | 129/0/0 | 2415/2432 (99.3%) | 4 | 2419/2432 (99.5%) | - | 6 | 368.3 | settled |
 | NMDC | map-required | 2016-10-01 | 2016-10-03 | 2436 | 129/0/0 | 2053/2435 (84.3%) | 4 | 2057/2435 (84.5%) | 0 | 6 | 372.8 | settled |
 | NTPC | map-required | 2016-10-01 | 2016-10-03 | 2433 | 129/0/0 | 1844/2432 (75.8%) | 1 | 1845/2432 (75.9%) | 1 | 5 | 373.2 | quarantined |
+| NUVAMA | table-path | 2023-09-26 | 2023-10-11 | 695 | 38/0/0 | 683/694 (98.4%) | 1 | 684/694 (98.6%) | - | 1 | 364.3 | settled |
 | NYKAA | map-required | 2021-11-10 | 2021-11-10 | 1172 | 62/0/0 | 1166/1171 (99.6%) | 3 | 1169/1171 (99.8%) | - | 2 | 373.4 | settled |
 | OBEROIRLTY | table-path | 2016-10-01 | 2016-10-03 | 2434 | 129/0/0 | 2398/2433 (98.6%) | 17 | 2415/2433 (99.3%) | - | 6 | 358.7 | settled |
 | OFSS | map-required | 2016-10-01 | 2016-10-03 | 2434 | 129/0/0 | 2416/2433 (99.3%) | 1 | 2417/2433 (99.3%) | - | 12 | 340.3 | settled |
@@ -480,6 +482,7 @@ REVIEW_5B finding C15: the first column is STORED BARS per day (every bar the ve
 | DRREDDY | 373.2 | 375 | 0 | 115 | 4.7% |
 | EICHERMOT | 373.0 | 375 | 0 | 170 | 7.0% |
 | ETERNAL | 374.0 | 375 | 60 | 1 | 0.3% |
+| EXIDEIND | 372.8 | 375 | 0 | 348 | 14.3% |
 | FEDERALBNK | 373.2 | 375 | 0 | 44 | 1.8% |
 | FORCEMOT | 317.7 | 332 | 0 | 1364 | 82.8% |
 | FORTIS | 362.9 | 375 | 0 | 986 | 40.5% |
@@ -560,6 +563,7 @@ REVIEW_5B finding C15: the first column is STORED BARS per day (every bar the ve
 | NHPC | 368.3 | 375 | 0 | 880 | 36.2% |
 | NMDC | 372.8 | 375 | 0 | 329 | 13.5% |
 | NTPC | 373.2 | 375 | 0 | 72 | 3.0% |
+| NUVAMA | 364.3 | 373 | 0 | 429 | 61.7% |
 | NYKAA | 373.4 | 375 | 0 | 24 | 2.0% |
 | OBEROIRLTY | 358.7 | 374 | 0 | 1282 | 52.7% |
 | OFSS | 340.3 | 367 | 0 | 1647 | 67.7% |
@@ -1563,7 +1567,7 @@ Per-event findings (every event the hunt looked at, including the ones it declin
 
 The architect's ruling: **"the ceiling stays"**. `VOLUME_GAP_MIN_PCT` and `VOLUME_GAP_MAX_PCT` are byte-identical (`[-0.1%, 5.0%]`) and `volume_gate` is untouched. A gate-1 failure ABOVE the ceiling is separately examined and relieved **IFF ALL FOUR** hold: (a) the failure is above the ceiling, never below the floor; (b) the stored 1-min HIGH equals the raw daily HIGH and the 1-min LOW the raw daily LOW, EXACTLY; (c) the first stamp's open equals the raw daily open, exactly; (d) the shortfall is <= 20.0%. Data LOSS clips extremes; a day with intact extremes, a matching opening print and only volume short is a thin day whose pre-open auction exceeds 5% -- a market property.
 
-**414 symbol-day(s) relieved** across 123 symbol(s), out of 432,304 gated days on ALL processed symbols. Of those, **411** land on SETTLED symbols (417,985 gated days) and are the only ones the coverage headline counts; the remaining 3 sit on QUARANTINED symbols, whose whole history is excluded anyway. REVIEW_5B finding C9: the two populations are now named apart instead of an all-symbol numerator being printed over a settled-only denominator. Relieved days are counted SEPARATELY everywhere in this report -- the strict gate-1 numerator is never overwritten.
+**415 symbol-day(s) relieved** across 124 symbol(s), out of 435,431 gated days on ALL processed symbols. Of those, **412** land on SETTLED symbols (421,112 gated days) and are the only ones the coverage headline counts; the remaining 3 sit on QUARANTINED symbols, whose whole history is excluded anyway. REVIEW_5B finding C9: the two populations are now named apart instead of an all-symbol numerator being printed over a settled-only denominator. Relieved days are counted SEPARATELY everywhere in this report -- the strict gate-1 numerator is never overwritten.
 
 | Symbol | Gate-1 strict | Auction-relief pass | Effective | Median shortfall | Relieved days also carrying tradeless minutes | Status |
 |---|---|---|---|---|---|---|
@@ -1678,6 +1682,7 @@ The architect's ruling: **"the ceiling stays"**. `VOLUME_GAP_MIN_PCT` and `VOLUM
 | MUTHOOTFIN | 2416/2432 (99.3%) | 1 | 2417/2432 (99.4%) | 15.46% | 1 | settled |
 | NATIONALUM | 2418/2433 (99.4%) | 1 | 2419/2433 (99.4%) | 5.48% | 0 | settled |
 | NTPC | 1844/2432 (75.8%) | 1 | 1845/2432 (75.9%) | 5.62% | 1 | quarantined |
+| NUVAMA | 683/694 (98.4%) | 1 | 684/694 (98.6%) | 5.68% | 0 | settled |
 | OFSS | 2416/2433 (99.3%) | 1 | 2417/2433 (99.3%) | 5.27% | 0 | settled |
 | PAGEIND | 2406/2433 (98.9%) | 1 | 2407/2433 (98.9%) | 10.91% | 1 | settled |
 | PIIND | 2417/2433 (99.3%) | 1 | 2418/2433 (99.4%) | 5.19% | 1 | settled |
@@ -1691,7 +1696,7 @@ The architect's ruling: **"the ceiling stays"**. `VOLUME_GAP_MIN_PCT` and `VOLUM
 | TRENT | 2416/2433 (99.3%) | 1 | 2417/2433 (99.3%) | 5.69% | 1 | settled |
 | ZYDUSLIFE | 1087/1090 (99.7%) | 1 | 1088/1090 (99.8%) | 5.30% | 0 | settled |
 
-**Decision B122, recorded not assumed.** The completeness ruling excludes a day for missing minutes only "ON A DAY WHERE GATE-1 ALSO FAILS". A relieved day's gate-1 verdict is *pass (by relief)*, so it is handed to gate 2 as reconciled. The relief's own conditions (b) and (c) are the direct evidence that nothing was lost -- exactly the hypothesis the missing-minutes trigger exists to catch -- and the thin days relief targets are precisely the days that carry tradeless minutes, so the other reading would cancel the relief it had just granted. The last column above measures how often it mattered: 77 of 414 relieved days also carried more than 15 tradeless minutes.
+**Decision B122, recorded not assumed.** The completeness ruling excludes a day for missing minutes only "ON A DAY WHERE GATE-1 ALSO FAILS". A relieved day's gate-1 verdict is *pass (by relief)*, so it is handed to gate 2 as reconciled. The relief's own conditions (b) and (c) are the direct evidence that nothing was lost -- exactly the hypothesis the missing-minutes trigger exists to catch -- and the thin days relief targets are precisely the days that carry tradeless minutes, so the other reading would cancel the relief it had just granted. The last column above measures how often it mattered: 77 of 415 relieved days also carried more than 15 tradeless minutes.
 
 ### 3e. Floors in UN-PROVABLE eras -- the FINAL data ruling (QUESTIONS.md Q-11 addendum 4)
 
@@ -1900,7 +1905,7 @@ No symbol carried enough price-unproven days for a cluster signature to be possi
 | RECLTD | 68 | 1 / 66 / 1 | 2,818 | settled | the failing days sit inside UN-PROVABLE eras (1,020 un-provable stored days, 7/12 eras provable). An un-provable era commits no chain, so there is no factor for a floor to drop and no floor could change one stored price -- the Q-11 addendum-2 ruling's own fallback: un-provable remains the honest answer |
 | POWERGRID | 28 | 27 / 0 / 1 | 6,236 | settled | no event showed a gate-1P failure CLUSTER -- the failures are not a contiguous step, so no vendor application floor explains them and none was hunted ("never blanket") |
 | LODHA | 26 | 25 / 0 / 1 | 75,734 | settled | no event showed a gate-1P failure CLUSTER -- the failures are not a contiguous step, so no vendor application floor explains them and none was hunted ("never blanket") |
-| **182 further symbol(s)**, aggregated | **431** | | | settled / quarantined | fewer than 20 price-unproven days each -- below a cluster's minimum length, so no vendor application floor could be measured for them and none was hunted. 182 of these days have no raw daily row at all |
+| **184 further symbol(s)**, aggregated | **438** | | | settled / quarantined | fewer than 20 price-unproven days each -- below a cluster's minimum length, so no vendor application floor could be measured for them and none was hunted. 184 of these days have no raw daily row at all |
 
 Read the register this way: an **above** failure means the stored 1-minute high sits ABOVE the exchange's own daily high, which is impossible on raw prices and means the day is stored too HIGH; a **below** failure means the fold low sits below the daily low, i.e. the day is stored too LOW; **no-oracle** means the day has no bhavcopy row at all and cannot be price-proven either way (the ruling's own words). The worst excess is how far past the tolerated bound the worse side sits, in paise -- a few paise is microstructure, a few thousand is a wrong price scale.
 
@@ -1908,9 +1913,9 @@ Read the register this way: an **above** failure means the stored 1-minute high 
 
 | Reason | Symbol-days | Note |
 |---|---|---|
-| gate-1 (volume reconciliation outside [-0.1%, +5.0%], UNRELIEVED) | 6,303 | CONTEXT 4.5 gate 1; excluded + counted per CONTEXT 7-E3. 411 further above-ceiling failures were relieved as a thin day's auction share (section 3d) and are NOT excluded |
-| **gate-1P (per-day PRICE containment, QUESTIONS.md Q-14)** | **9,075** | the stored 1-minute fold does not sit inside the raw bhavcopy high/low within max(2 paise, 0.1%). Its own reason, never folded into gate 1's count. Of these, 208 have no raw daily row at all and cannot be price-proven (the ruling's own words; REVIEW_5B finding Q4) |
-| gate-2 (candle integrity) | 1,072 | duplicates, impossible OHLC, negative values, or missing minutes ON A DAY WHERE GATE 1 ALSO FAILS (the completeness ruling) |
+| gate-1 (volume reconciliation outside [-0.1%, +5.0%], UNRELIEVED) | 6,327 | CONTEXT 4.5 gate 1; excluded + counted per CONTEXT 7-E3. 412 further above-ceiling failures were relieved as a thin day's auction share (section 3d) and are NOT excluded |
+| **gate-1P (per-day PRICE containment, QUESTIONS.md Q-14)** | **9,082** | the stored 1-minute fold does not sit inside the raw bhavcopy high/low within max(2 paise, 0.1%). Its own reason, never folded into gate 1's count. Of these, 210 have no raw daily row at all and cannot be price-proven (the ruling's own words; REVIEW_5B finding Q4) |
+| gate-2 (candle integrity) | 1,076 | duplicates, impossible OHLC, negative values, or missing minutes ON A DAY WHERE GATE 1 ALSO FAILS (the completeness ruling) |
 | un-provable (no map era / unknown factor in (D, F]) | 19,872 | the Q-11 surgical clamp -- stored so the day is visible, failed by gate 1 |
 | stored days LEFT UNTOUCHED (baseline unidentified) | 998 | not an exclusion reason and mostly not damage: the map application declined to correct these days because their stored bars match neither raw nor the map's chain nor a one-too-many division. Declining is the conservative action -- a day that already needed no correction is unaffected, and gate 1 decides either way. The count measures how often the classifier refuses, not how many days are wrong |
 | quarantined symbols (whole history) | 14,319 | 6 symbol(s) below the 80% gate-1 floor |
@@ -1923,11 +1928,11 @@ The architect's ruling of 2026-07-26 (QUESTIONS.md "CONTEXT 4.5 / 7-E4 AMENDMENT
 
 | Gate-2 trigger | Symbol-days | Note |
 |---|---|---|
-| missing minutes AND gate 1 also failed | 895 | indistinguishable from data loss, so still excluded |
+| missing minutes AND gate 1 also failed | 898 | indistinguishable from data loss, so still excluded |
 | duplicate stamps | 0 | unchanged trigger |
 | impossible OHLC (high<low, close outside range) | 1 | unchanged trigger (CONTEXT 4.5's own two) |
-| negative price or volume | 180 | trigger ADDED by the ruling -- and it fired: see below |
-| **missing minutes with gate 1 PASSING -> INCLUDED** | **90,991** | recorded as liquidity statistics (section 3b), never an exclusion -- this is the redefinition's whole effect |
+| negative price or volume | 181 | trigger ADDED by the ruling -- and it fired: see below |
+| **missing minutes with gate 1 PASSING -> INCLUDED** | **91,768** | recorded as liquidity statistics (section 3b), never an exclusion -- this is the redefinition's whole effect |
 
 **The NEGATIVE-values trigger the ruling added found a real defect on its first run.** Every one of its exclusions lands on 4 date(s) -- `2023-05-03`, `2023-05-04`, `2023-08-21`, `2024-03-02` -- across essentially EVERY symbol processed, not on scattered per-symbol accidents. The vendor serves 1-minute bars with negative VOLUME for those dates (measured: ABB -6,060 and -2 shares, AXISBANK -99,379 and -1, CIPLA -43,534, all stamped 11:15 onwards). `2024-03-02` is a SATURDAY -- one of NSE's disaster-recovery special live sessions. Such a date is already excluded from trading days, bias pairs and trading by QUESTIONS.md Q-5, so nothing was ever going to trade it; what is new is that the day's candles are now excluded EXPLICITLY and counted, instead of passing gate 2 on a minute count and relying on the calendar alone. Before this ruling a negative share count was not a gate-2 trigger at all.
 
@@ -1980,7 +1985,7 @@ Read it this way: an ABOVE-ceiling failure on a day whose raw daily volume is fa
 
 ## 5. Gate 3 -- adjustment sanity across every share-count ex-date
 
-CONTEXT 4.5 gate 3: on every split/bonus ex-date in the stored span, the ADJUSTED series must show |day-over-day gap| < 20%. Checked on the stored RAW closes with the event's own CONTEXT 4.2 factor applied at the comparison. **117 ex-date(s) checked, 15 failed.**
+CONTEXT 4.5 gate 3: on every split/bonus ex-date in the stored span, the ADJUSTED series must show |day-over-day gap| < 20%. Checked on the stored RAW closes with the event's own CONTEXT 4.2 factor applied at the comparison. **118 ex-date(s) checked, 15 failed.**
 
 Every failure, with its numbers. `raw gap` is the two stored closes with NO factor applied; `adjusted gap` is CONTEXT 4.5's own test (the pre-ex close scaled by `k`). Read together they name the defect: a raw gap near `k - 1` with an adjusted gap near zero is a healthy event, while a raw gap near ZERO with a large adjusted gap means the two closes are ALREADY in the same price domain -- i.e. the pre-ex side was never un-adjusted for the event, which is the exact signature of a vendor APPLICATION FLOOR (section 3c) sitting above the pre-ex day.
 
