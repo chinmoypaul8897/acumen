@@ -55,6 +55,15 @@ Backtester + live screener for one frozen trading strategy. Real money depends o
    independent verification sweep of every step's completion evidence read
    from the machine itself — ledgers, files, digests, offline re-runs.
    Pasted transcripts are never the record. (Q-18 recovery lesson.)
+- Stores live OUTSIDE the repository tree (data_root/cache_root in
+   config.yaml). No git command can reach them. (Q-18 layer 1.)
+ - Sessions treat the stores as READ-ONLY unless the architect's prompt
+   explicitly sanctions a named write. Store DELETIONS are never session work
+   — operator only, snapshot verified first. (Q-18 layer 2.)
+ - The operator keeps TWO snapshot generations; a new snapshot never
+   overwrites the previous until verified. The preflight prints the stores'
+   last-changed timestamps so the operator can confirm the snapshot is newer.
+   (Q-18 layer 3.)
 
 ## Code standards
 
