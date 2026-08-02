@@ -2430,6 +2430,34 @@ Either ruling changes which days the ledger contains, so -- exactly like Q44 und
 ruling -- it would mean a spec version bump and a full re-run, with the superseded ledger
 retained and labelled.
 
+**MEASURED ADDENDUM (chunk-9B RESUME-2, 02-Aug-2026) -- the open reading above has FIVE
+candidates on the rebuilt store, not three.** The Q-17 numbers above were measured on the store
+the incident destroyed and the output file was never written; `docs/evidence/
+chunk9b_out_of_session.md` now exists, generated on the REBUILT era. The measurement is
+substantially the same -- **3,100** symbol-days (was 3,099) across **526** dates, the **8**
+Muhurat-shaped dates identical to the list above, **518** mixed dates covering 1,747 symbol-days
+-- with one difference that touches the architect's open follow-up (1) directly:
+
+| date | symbols affected | symbols with data | in the original Q-17 record? |
+|---|---|---|---|
+| 2017-04-28 | 134 | 139 | yes |
+| 2018-11-05 | 135 | 153 | yes |
+| 2019-10-25 | 56 | 159 | yes |
+| **2020-12-08** | **143** | **167** | **NO -- new** |
+| **2021-02-24** | **168** | **169** | **NO -- new** |
+
+**2021-02-24 affects 168 of the 169 symbols that have data that day**, which is as market-wide
+as a date can be. So the follow-up reading the architect was offered -- "are the MARKET-WIDE
+dates special/shortened sessions in E2's sense, to be excluded at the DATE level after all?" --
+is a question about five dates, one of them essentially universal, rather than about three.
+
+**Nothing is decided here and nothing is blocked.** Q-17 is RULED (the candle-level drop is
+spec) and the ruling explicitly did NOT take the date-level widening, so the run proceeds under
+it as written and these five dates trade normally. This addendum only corrects the SIZE of the
+open reading, because the original three-date table is what the architect would otherwise weigh
+it on. Taking the widening would still mean a spec version bump and a full re-run, as the
+paragraph above states.
+
 ---
 
 ## Q-18 · chunk 9B PREP · class A · **RULED 31-Jul-2026 — option (c), rebuild and RECONCILE** · still blocks the chunk-9B RUN until the rebuild completes

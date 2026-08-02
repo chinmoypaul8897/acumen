@@ -263,6 +263,13 @@ def fake_pilot(rows) -> pe.PilotRun:
         "outcomes": bt.outcome_counts(rows),
         "residual_register": {
             "caveat": bt.residual_caveat({}),
+            # `caveat_basis` holds the register entries the caveat QUOTES, which is what the
+            # invariant recomputes it from (`per_symbol` is the universe the run walked, and on
+            # any run smaller than the full universe it does not contain the B149 symbols).
+            # This synthetic register is empty, so the empty basis is the consistent one -- and
+            # it is a real check, not a formality: an empty basis and a non-empty caveat
+            # disagree, which is the drift the invariant exists to catch.
+            "caveat_basis": {},
             "per_symbol": {},
         },
         "capital_flags": {"computed": False},
@@ -392,7 +399,11 @@ def test_a_row_that_oversizes_the_budget_fails_its_invariant() -> None:
         "| Net PnL | -Rs 1,934.95 | -Rs 1,934.95 | YES |",
         "**Reconciliation: 17 of 17 figures identical**",
         "capital-infeasibility flags NOT computed -- the trader's Q43 answer is pending",
-        "IOC (41.9% price-proven) and TATASTEEL (65.8%)",
+        # RE-POINTED 02-Aug-2026: the caveat is now COMPUTED from the register rather than a
+        # frozen string (RESUME-1 decision B232, architect-approved), and the rebuilt register
+        # puts IOC at 42.0% -- so the old 41.9% was WRONG, not merely stale. Both figures now
+        # carry "price-proven" so neither reads as a bare percentage of something unstated.
+        "IOC (42.0% price-proven) and TATASTEEL (65.8% price-proven)",
         "CONTEXT 7-E2 non-standard session",
         "the adjustment changes the BIAS: **YES**",
         "| **Byte-identical** | **YES** |",
@@ -400,9 +411,17 @@ def test_a_row_that_oversizes_the_budget_fails_its_invariant() -> None:
         "| Gross profit (net basis: the winners' net sum) | Rs 96,489.60 |",
         "| Gross loss (net basis: the losers' net sum) | -Rs 98,424.55 |",
         "| Profit factor | 0.9803 |",
-        "Rs 101,099.20 / -Rs 88,434.15 -- the only before-costs figures in this pack",
+        # RE-POINTED 02-Aug-2026 (REVIEW_9A_2 finding Q1, now FIXED in the artefact): the claim
+        # is scoped to "section 7" because section 3's cross-document reconciliation carries
+        # three labelled before-costs rows as its stated exception. The old wording said "in
+        # this pack", which was not literally true -- that was the finding.
+        "Rs 101,099.20 / -Rs 88,434.15 -- the only before-costs figures in section 7",
         # and the two Q-16 figures
-        "NONE of 146 executed trades falls outside the fences",
+        # RE-POINTED 02-Aug-2026 (the GO ruling's condition (3), now visible in the artefact):
+        # the zero branch prints all four quantities -- count, summed net, and both tails'
+        # shares -- in the SAME format the non-zero branch uses, so an empty result cannot be
+        # mistaken for an uncomputed one.
+        "**0** of 146 executed trades, summed net Rs 0.00",
         "| Max drawdown (intra-trade, 15-min path) | Rs 14,231.00 (12.98%)",
         "| Max run-up (intra-trade, 15-min path) | Rs 17,515.10 (19.00%)",
     ],
