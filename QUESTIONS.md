@@ -2699,7 +2699,11 @@ session decided nothing.
 
 ---
 
-## Q-20 · chunk 9B RESUME-1 · class A · **OPEN — STOP** · BLOCKS the chunk-9B RUN's tick input (RESUME-2); nothing in RESUME-1
+## Q-20 · chunk 9B RESUME-1 · class A · **RESOLVED — ruled and executed by RESUME-2 (02-Aug-2026)** · was BLOCKING the chunk-9B RUN's tick input
+
+> **The ruling is recorded verbatim at the end of this item**, with what the RESUME-2 session
+> executed under it beneath. Nothing above the ruling is retracted — it is the question the
+> ruling answers, and its measurements are unchanged.
 
 **Question.** The instrument master is a DAILY LIVE DUMP (CONTEXT 4.3) and CONTEXT 3.3 takes
 `tickSize` per symbol from it. Two snapshots are now cached on this machine and they DISAGREE
@@ -2782,3 +2786,97 @@ evidence instead of being resolved. No master was fetched (this session made no 
 A related fact the architect may want to weigh under any option: the vendor moved these ticks
 in BOTH directions within two days (BANKBARODA 5p -> 1p while INDUSINDBK 5p -> 10p), so
 "newest is most correct" is not obviously true.
+
+---
+
+### ARCHITECT'S RULING (02-Aug-2026) · Q-20 · recorded VERBATIM by the chunk-9B RESUME-2 session
+
+The architect's text, exactly as supplied, quoted whole and unedited. Nothing in this repo may
+narrow or widen it; everything after the quotation is what this session executed under it.
+
+> "ARCHITECT'S RULING (02-Aug-2026), Q-20: the tick changes are NSE's price-
+> banded tick regime — real and time-varying at the exchange. The spec target,
+> however, is the trader's TradingView chart, and TV applies the CURRENT tick to
+> the entire history; exchange-accurate historical ticks would be less faithful
+> to the replication target. Therefore ONE PINNED master snapshot governs the
+> whole backtest: OpenAPIScripMaster_2026-07-31.json. The run manifest records
+> the pin by filename AND sha256; a resume under any other master REFUSES (same
+> discipline as the code SHA); latest-by-filename selection is retired from the
+> run path. The pin is valid only if the POC calibration reproduces under it —
+> verified before any run. Historical tick regimes: v2 backlog ('exchange-
+> accurate mode'). Q-20 RESOLVED."
+
+**What the RESUME-2 session executed under it** (each item is code with a test behind it):
+
+- **The pin is a CONFIG value, not a literal.** `config.yaml` gains a required top-level key
+  `instrument_master: OpenAPIScripMaster_2026-07-31.json`, with its citation to this ruling
+  beside it. CLAUDE.md's code standards forbid a hardcoded date in `src/`, and the filename IS
+  a date; the loader validates it as a bare FILENAME (no separator, no `..`, no absolute path)
+  resolved under `<cache_root>/instrument_master/`, so the pin can never point outside the
+  cache. A config that loses the key REFUSES to load — there is no default, exactly as there is
+  none for the three money keys.
+- **Latest-by-filename is GONE from the run path.** `acumen.backtest.latest_cached_master` is
+  deleted and replaced by `acumen.backtest.pinned_master(cache_dir, filename)`, which resolves
+  exactly one named file, loads it, and returns `(master, path, sha256)`. `build_runner` takes
+  `master_path` explicitly (defaulting to the configured pin, never to "newest"); the preflight
+  resolves the same pin and prints its digest; `acumen.pilot_evidence` reads the pin too. A
+  tripwire test walks every module in `src/acumen` and asserts that no module on the run path
+  selects a master by sorting a `OpenAPIScripMaster_*` glob.
+- **The manifest records the pin, by filename AND sha256.** `RunSpec` gains `master_file` and
+  `master_sha256`; both enter `RunSpec.as_dict()`, therefore the spec digest, therefore the
+  run manifest's own `instrument_master` block. Q-20's own complaint — "a finished ledger
+  cannot be traced back to the ticks that shaped its POCs" — is closed by construction.
+- **A resume under any other master REFUSES, the same way a moved code SHA does.** Because the
+  two fields sit inside the digest, `BacktestRunner._resume_state` raises on a mismatch with no
+  new branch; the refusal is tested exactly like the moved-SHA one (a run interrupted after one
+  symbol, then re-wired against the other cached snapshot, stops rather than mixing two tick
+  regimes into one ledger).
+- **THE PIN IS VALIDATED BY CALIBRATION, BEFORE ANY RUN.** `docs/evidence/chunk9b_tick_pin.{py,md}`
+  recomputes, under the pinned master only: the chunk-6 gate day, all 25 frozen F7 prorata
+  POCs, the F7 tick fixture, and the three walked pilot POCs (HDFCBANK 739.80 / ICICIBANK
+  1245.70 / RELIANCE 1465.85). Every figure reproduces EXACTLY and no calibration symbol's tick
+  differs from the sealed walks. The full-history pilot re-run is the wider proof: it reproduces
+  the committed pack's 290/146/88/56 and net -Rs 1,934.95 to the paisa.
+- **NOT taken, deliberately:** nothing was done about historical tick regimes. The ruling puts
+  "exchange-accurate mode" on the v2 backlog and this session added no era machinery, no second
+  tick source and no per-date tick lookup.
+
+**One correction the session owes the record.** The RESUME-2 card cites the chunk-6 oracle as
+"BHARTIARTL 2026-07-24: POC 1913.9, 25 rows". This repo's own record (receipt R3F-f above,
+`docs/gate_chunk6_poc_evidence.md`, STATUS.md chunk 6) says the gate day is **2026-07-17**, and
+that **1913.9 / 25 rows are the TRADER's chart reading**, not an engine output — the engine's
+8-candle finer-profile answer on that day is **POC 1914.60 in 26 rows**, and R3F-f records the
+price as INCONCLUSIVE (0.70 away, inside CONTEXT §5's documented feed-noise band) with the ROW
+COUNT as the decisive evidence. The session did not choose between the two dates: it recomputed
+**both**, under the pin, and reports both. 2026-07-17 reproduces 1914.60 / 26 rows exactly.
+Recorded here rather than acted on silently.
+
+---
+
+## ARCHITECT'S APPROVALS (02-Aug-2026) · the three RESUME-1 items put to him · recorded by RESUME-2
+
+The chunk-9B RESUME-1 session disclosed three judgement calls on the record rather than making
+them silently, and asked the architect to confirm or revert each. **All three are APPROVED**,
+relayed with the Q-20 ruling above. The approval is recorded here (not quoted, because it was
+relayed as a decision rather than as a text) so that a later session finds the answer beside
+the question instead of in a session transcript. Nothing is re-executed: each item was already
+committed at RESUME-1 and the approval leaves the code exactly as it stands.
+
+- **B220 — CONTEXT.md's header DATE moved with the version (29 July -> 2 August 2026).**
+  APPROVED. The architect's v1.5 instruction named only `"Version 1.4" -> "Version 1.5"`, but
+  the header line is `Version X · <that version's date>` and every prior bump moved both.
+  RESUME-1 moved it, disclosed it in the commit body and offered the one-keystroke revert. The
+  header stands as committed.
+- **B221 — the §10 version-log row committed as ONE line.** APPROVED. The row was supplied
+  wrapped across six lines; a markdown table row cannot span lines and would not have rendered
+  as a row at all. Not one word of the architect's text was changed — only the line breaks.
+- **RESUME-1's RESIDUAL-CAVEAT CORRECTIONS (decision B232).** APPROVED, including the two
+  substantive corrections inside it, which are the reason it needed an approval rather than a
+  note. (i) `RESIDUAL_CAVEAT`, a FROZEN STRING, became `residual_caveat(register)`, computed
+  from the register in `Fraction` and rounded half-even, because CONTEXT 4.6 (v1.5) requires
+  the figures be "quoted from the register's own current figures". (ii) That computation shows
+  the frozen string was **WRONG, not merely stale**: it claimed IOC 41.9% where the rebuilt
+  register says **42.0%** — on the qualification record of a money-bearing ledger. (iii) In the
+  same sentence "a minority of stored history" became "only part of", because TATASTEEL at
+  65.8% is a MAJORITY and the old wording was false for one of the caveat's two subjects. The
+  computed caveat is what every manifest now carries verbatim.
