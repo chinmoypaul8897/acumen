@@ -41,7 +41,7 @@ def _store():
         from acumen.daily_store import DailyStore
     from acumen.config import load_config
 
-    root = load_config(include_env=False).path("data_dir") / "daily_store"
+    root = load_config(include_env=False).path("data_root") / "daily_store"
     return DailyStore.at(root), root
 
 

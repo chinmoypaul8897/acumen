@@ -118,7 +118,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--out", default=str(REPO / "docs/recovery/q18_t5_improvements.md"))
     args = parser.parse_args(argv)
 
-    data = load_config(include_env=False).path("data_dir")
+    data = load_config(include_env=False).path("data_root")
     store = MinuteStore.at(data / "minute_store")
     daily = DailyStore.at(data / "daily_store")
     sealed = read_report(REPO / "docs/backfill_minute_report.md")

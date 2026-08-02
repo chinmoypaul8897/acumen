@@ -1,8 +1,10 @@
-# Q-18 REBUILD RUNBOOK -- the operator's terminal, five ordered steps
+# Q-18 REBUILD RUNBOOK -- the operator's terminal, five ordered steps (+ the run)
 
-**Status: handed to the operator, 31-Jul-2026.** This executes the architect's Q-18 ruling
-(QUESTIONS.md, recorded verbatim): *"option (c) -- rebuild through the existing reviewed
-pipeline; the rebuilt era MUST be reconciled against CONTEXT 4.6's sealed numbers"*.
+**Status: steps 1-5 COMPLETE (operator, 31-Jul/01-Aug-2026); CONTEXT 4.6 v1.5 written and
+committed (architect, 02-Aug-2026); step 6, THE RUN, is STAGED but NOT handed over** -- the
+chunk-9B re-seal review gates it. This executes the architect's Q-18 ruling (QUESTIONS.md,
+recorded verbatim): *"option (c) -- rebuild through the existing reviewed pipeline; the rebuilt
+era MUST be reconciled against CONTEXT 4.6's sealed numbers"*.
 
 Everything below runs the **existing, reviewed entry points**. No ingestion logic was written
 for this rebuild, and nothing in `src/acumen` that ingests, gates or un-adjusts a candle was
@@ -321,14 +323,104 @@ applied are printed inside it**, so they can be overruled by reading.
 
 ## What happens after step 5
 
-Not part of this runbook, and not the operator's to decide:
+**Steps 1-5 are DONE.** The operator ran them 31-Jul/01-Aug-2026; the reconciliation reached
+**zero unexplained** divergences after the architect's T1-T5 triage rulings; and the architect
+wrote **CONTEXT 4.6 v1.5** (committed 02-Aug-2026), which re-seals the era at 435,641 stored
+symbol-days / 409,252 passing = 93.9425%, 204 settled / 6 quarantined, and carries Q-17 and
+Q-19 into CONTEXT law. Everything below this line is the RUN the rebuild existed to unblock.
 
-- the architect reads the reconciliation and either writes the **CONTEXT 4.6 v1.5 amendment**
-  listing the exact accepted deltas (which also carries the Q-17 candle-level drop into CONTEXT
-  law, per the same ruling), or opens the triage on the unexplained divergences;
-- chunk 9B then still owes, before the run: the pilot-pack regeneration and the two annotated
-  probe flips, the smoke re-run for a MEASURED throughput and full-run projection,
-  `docs/evidence/chunk9b_preflight.md` and `docs/evidence/chunk9b_out_of_session.md`.
+---
 
-Nothing in this runbook hands over the chunk-9B full-history run. That happens when the
-preflight goes GO **and** the reconciliation is settled.
+## Step 6 -- THE CHUNK-9B FULL-HISTORY RUN (staged 02-Aug-2026; **NOT yet handed over**)
+
+> **This command is STAGED, not handed over.** The re-seal review gates it: chunk 9B is
+> `resume-2 done -- staged for re-seal review (unreviewed)` in STATUS.md, and a FRESH review
+> session must PASS the span before the operator starts a run whose ledger is the input to
+> every number chunk 10 reports. Everything needed to start is verified and written down here
+> so that handover is a decision, not a scramble.
+
+### The command
+
+```
+python scripts/run_backtest.py
+```
+
+That is the whole thing -- no flags. The label defaults to `chunk9b_full` and the run lands in
+`<data_root>/backtests/chunk9b_full/`. It runs the ten-check preflight first and **refuses to
+start if any check fails**, so there is no separate "check then run" step to forget.
+
+To see the checks without running:
+
+```
+python scripts/run_backtest.py --preflight-only
+```
+
+### Pre-run checklist -- all four, in order
+
+1. **Reboot the machine.** Not superstition: this box is memory-starved and the run is hours
+   long. See item 2 for what "starved" measures at.
+2. **Free memory before starting.** Measured 02-Aug-2026 at 14:12 IST, **eleven minutes after
+   a reboot**: 964 MB available of 7.7 GB physical, with **20.1 GB committed against a 27.1 GB
+   limit**. The reboot did not clear it. Close the browser, the editor and anything else large;
+   the run itself walks ONE symbol at a time and writes that symbol's shard before starting the
+   next, so its own footprint is modest -- what hurts is competing for the last gigabyte.
+   RESUME-1 measured the cost of not doing this: a 21,000-file read took 25 minutes and one
+   verification pass was reaped mid-scan.
+3. **Confirm your snapshot is NEWER than both stores.** `--preflight-only` prints each root's
+   last-changed time under **STORE FRESHNESS**. Keep TWO generations; never overwrite the
+   previous one until the new one is verified (CLAUDE.md Q-18 layer 3). The run WRITES to
+   `<data_root>/backtests/`, so a snapshot taken before it covers everything except the run's
+   own output -- which is exactly what you want to be able to fall back to.
+4. **Do NOT commit, check out, or re-point the tick pin while it runs.** The run spec's digest
+   covers the code SHA **and** the pinned instrument master's filename + sha256, so moving
+   either turns a free resume into a refusal (`... belongs to a different run`). Finish the run,
+   then commit.
+
+### What to expect
+
+| Measure | Value | Basis |
+|---|---|---|
+| Universe | 204 settled symbols | the disclosed-residual register, read (CONTEXT 4.6) |
+| Span | 2016-10-03 -> 2026-07-30, 2,425 trading days | measured from the stores, clamped to the daily oracle |
+| Symbol-days | ~495,312 | 204 x 2,428 rows |
+| **Projected duration** | **~6h 04m** | MEASURED 25.56 symbol-days/s + two measured wiring terms -- `docs/evidence/chunk9b_throughput.md` has the arithmetic |
+| Tick pin | `OpenAPIScripMaster_2026-07-31.json` | `config.yaml`, QUESTIONS.md Q-20 |
+
+Progress is one line per symbol with elapsed / rate / ETA on stdout. **Redirect it to a file**
+(`python scripts/run_backtest.py > logs/chunk9b_run.log 2>&1`) -- it is the only record of the
+rate, and the throughput evidence is built from exactly such a log.
+
+### Resumability
+
+Ctrl-C at any moment and re-run the **same command**. A symbol's shard is written only when
+that symbol is COMPLETE, so an interrupt costs at most the symbol in flight and no row can be
+duplicated. The CONTEXT 7-E2 session scan (~39 minutes of the projection) is cached beside the
+ledger on the first pass and is free on every resume.
+
+### The two manifest stamps -- what the ledger will and will not claim
+
+Both trader questions are still OPEN, and the run says so on its own manifest rather than in a
+note somebody has to remember. This is the architect's GO ruling (31-Jul-2026), conditions (1)
+and (2), and it reflects QUESTIONS.md's state as of 02-Aug-2026 -- **neither answer has
+arrived**:
+
+* **Q43 -- capital-infeasibility flags PENDING.** `config.yaml`'s `capital_reference` and
+  `margin_basis` are both null, the preflight CHECKS that they still are, and every output
+  carries *"capital-infeasibility flags NOT computed -- the trader's Q43 answer is pending"*.
+  No flag VALUE is computed anywhere; when the answer arrives the flags compute POST-HOC from
+  the ledger, with no re-run.
+* **Q44 -- the gap-rule example UNCONFIRMED.** The manifest carries *"PENDING TRADER
+  CONFIRMATION OF Q44 (gap-rule example, POC 2032)"* and, beside it, the escalation: if his
+  answer surprises, that is a CONTEXT 3.4 change -> spec version bump -> **full re-run**, and
+  this ledger is then superseded, retained and labelled, never deleted.
+
+A third disclosure rides with them, measured rather than ruled: the span is clamped to the raw
+daily oracle, which as of 02-Aug-2026 costs exactly ONE day (2026-07-31, the Q-19 residue --
+down from the 178-day store lag the sealed era carried, which step 1 cleared).
+
+### Completion check
+
+The last line reads `RUN COMPLETE:` with the walked / usable / executed counts and the rate,
+and both `ledger.jsonl` and `manifest.json` exist under `<data_root>/backtests/chunk9b_full/`.
+Then **snapshot both stores again** -- the run's output is not reproducible in six hours if it
+is lost -- and the chunk-9B REPORT session takes it from there.

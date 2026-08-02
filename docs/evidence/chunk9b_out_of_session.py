@@ -54,7 +54,7 @@ def main(argv: list[str] | None = None) -> int:
     bt, rb = _bootstrap()
     from acumen.config import load_config
 
-    data = Path(args.data_dir) if args.data_dir else load_config(include_env=False).path("data_dir")
+    data = Path(args.data_dir) if args.data_dir else load_config(include_env=False).path("data_root")
     register = bt.load_residual_register(data / bt.RESIDUAL_LEDGER_RELPATH)
     symbols = rb.settled_symbols(register)
     root = data / "minute_store" / "minute"

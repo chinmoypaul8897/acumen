@@ -475,7 +475,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--json", default=str(REPO / "docs/recovery/q18_t3_forensics.json"))
     args = parser.parse_args(argv)
 
-    data = load_config(include_env=False).path("data_dir")
+    data = load_config(include_env=False).path("data_root")
     store = MinuteStore.at(data / "minute_store")
     daily = DailyStore.at(data / "daily_store")
     register = json.loads((data / "universe_backfill" / "ledger.json").read_text("utf-8"))["symbols"]

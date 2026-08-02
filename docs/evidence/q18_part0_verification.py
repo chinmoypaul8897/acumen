@@ -117,7 +117,7 @@ def step1(sweep: Sweep) -> dict[str, Any]:
     from acumen.config import load_config
     from acumen.daily_store import DailyStore
 
-    data_dir = load_config(include_env=False).path("data_dir")
+    data_dir = load_config(include_env=False).path("data_root")
     store = DailyStore.at(data_dir / "daily_store")
     summary = store.coverage_summary(RANGE_FROM, RANGE_TO)
     outcomes = store.outcomes()
@@ -220,7 +220,7 @@ def step2(sweep: Sweep) -> dict[str, Any]:
     from acumen.config import load_config
     from acumen.minute_backfill import fetch_corp_action_history
 
-    ca_dir = load_config(include_env=False).path("data_dir") / "nse" / "ca"
+    ca_dir = load_config(include_env=False).path("data_root") / "nse" / "ca"
     nse_files = sorted(p.name for p in ca_dir.glob("nse_ca_*.json"))
     bse_files = sorted(p.name for p in ca_dir.glob("bse_ca_*.json"))
 
@@ -314,7 +314,7 @@ def step4(sweep: Sweep, sealed_symbols: list[str]) -> dict[str, Any]:
     from acumen.recovery_reconcile import (REBUILT_REPORT_RELPATH, SEALED_REPORT_RELPATH,
                                            cross_check_store, measure_store, read_report)
 
-    data_dir = load_config(include_env=False).path("data_dir")
+    data_dir = load_config(include_env=False).path("data_root")
     ledger_path = data_dir / "universe_backfill" / "ledger.json"
 
     def register() -> tuple[bool, str]:
