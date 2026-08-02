@@ -147,26 +147,31 @@ class SweepResult:
 # --- wiring -------------------------------------------------------------------------------
 
 
-def latest_cached_master(cache_dir: Path) -> tuple[InstrumentMaster, Path]:
-    """Load the NEWEST cached instrument-master dump, offline.
+def pinned_cached_master(cache_dir: Path, filename: str) -> tuple[InstrumentMaster, Path]:
+    """Load the PINNED instrument master by name, offline. Its PATH is printed in the pack.
 
-    ``load_instrument_master`` serves today's dump or downloads it; an evidence run must never
-    reach the network (CLAUDE.md rule 4 keeps this session offline), and the tick sizes it
-    reads are per-symbol constants, not a daily quantity. So the newest dump already on disk is
-    used and its PATH is printed in the pack, which is what makes the choice auditable.
+    **This replaced a newest-by-filename selector** (the chunk-8 build's own
+    ``latest_cached_master``, decision B175, whose docstring reasoned that "the tick sizes it
+    reads are per-symbol constants, not a daily quantity"). That premise is now MEASURED FALSE:
+    QUESTIONS.md Q-20 found the vendor moving ``tick_size`` in BOTH directions on 11 of the
+    sealed 210 within two days. This module computes POCs, and CONTEXT 3.3 sizes the profile row
+    grid by the tick, so it reads the same one pinned snapshot the run reads -- the repo has ONE
+    tick source, not two that agree until the day they do not.
+
+    ``load_instrument_master`` is still not used here: it serves today's dump or downloads it,
+    and an evidence run must never reach the network (CLAUDE.md rule 4).
     """
-    home = Path(cache_dir) / MASTER_CACHE_SUBDIR
-    candidates = sorted(home.glob("OpenAPIScripMaster_*.json"))
-    if not candidates:
+    path = Path(cache_dir) / MASTER_CACHE_SUBDIR / filename
+    if not path.is_file():
         raise EvidenceError(
-            f"No cached instrument master under {home}: the sweep needs each symbol's own "
-            "tick size (CONTEXT 4.3 -- never hardcode a tick)."
+            f"The pinned instrument master {filename!r} is not at {path}: the sweep needs each "
+            "symbol's own tick size (CONTEXT 4.3 -- never hardcode a tick) and QUESTIONS.md "
+            "Q-20 pins which dump supplies it (config.yaml `instrument_master`)."
         )
-    path = candidates[-1]
     try:
         return load_master_file(path), path
     except InstrumentMasterError as exc:  # pragma: no cover -- a corrupt cache file
-        raise EvidenceError(f"Cached instrument master {path} is unusable: {exc}") from exc
+        raise EvidenceError(f"Pinned instrument master {path} is unusable: {exc}") from exc
 
 
 def build_context(
@@ -183,7 +188,7 @@ def build_context(
 
     daily_store = DailyStore.at(data / "daily_store")
     minute_store = MinuteStore.at(data / "minute_store")
-    master, master_path = latest_cached_master(cache)
+    master, master_path = pinned_cached_master(cache, config.instrument_master)
     calendar = TradingCalendar.from_daily_store_range(
         daily_store, start - timedelta(days=CALENDAR_LEAD_DAYS), end
     )

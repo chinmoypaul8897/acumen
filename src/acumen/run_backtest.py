@@ -5,13 +5,14 @@ at the whole data era, in their own terminal, for hours. It owns no strategy rul
 metric: it decides WHAT to run over (the universe and the span), refuses to start when the
 inputs are not what they must be, and then drives :class:`acumen.backtest.BacktestRunner`.
 
-**PREFLIGHT FIRST, ALWAYS.** Nine checks, every one measured from the machine the run will use
--- both stores, the corporate-action day-cache served offline, the instrument master, the
-disclosed-residual register, `config.yaml`'s money keys, the settled universe, the minute era
-taken FROM THE STORES (never a typed date), and the trading calendar. **If any check fails the
-run command is not emitted and the run does not start.** A backtest that begins on a half-open
-store produces a ledger nobody can qualify, and the failure would surface hours later as a
-refusal count nobody can explain.
+**PREFLIGHT FIRST, ALWAYS.** Ten checks, every one measured from the machine the run will use
+-- `config.yaml`'s money keys, the Q40-d flag keys still null, both stores, the
+disclosed-residual register, the settled universe, the corporate-action day-cache served
+offline, the PINNED instrument master and its digest, the minute era taken FROM THE STORES
+(never a typed date), and the trading calendar. **If any check fails the run command is not
+emitted and the run does not start.** A backtest that begins on a half-open store produces a
+ledger nobody can qualify, and the failure would surface hours later as a refusal count nobody
+can explain.
 
 **THE UNIVERSE IS THE 204 SETTLED SYMBOLS** of CONTEXT 4.6, read from the disclosed-residual
 register rather than from the F&O list: the 6 quarantined symbols (ASTRAL, IEX, NESTLEIND,
@@ -29,9 +30,16 @@ the ledger (decision B181, recorded as a 9B duty in the chunk-9A pack), because 
 the same order as the walk itself and a resume that re-scanned the universe would pay for the
 whole run again before writing its first new row.
 
-**ONE THING WILL REFUSE A RESUME, DELIBERATELY: a moved HEAD.** The run spec's digest covers
-the code SHA, so committing (or checking out) anything while a run is in flight makes the
-resume a different run and it stops rather than mixing two code states into one ledger. Finish
+**THE TICK INPUT IS PINNED** (QUESTIONS.md Q-20, architect 02-Aug-2026). `config.yaml` names ONE
+instrument-master snapshot; the preflight resolves it, prints its sha256, and hands that exact
+file to the run, which records both on the manifest. Latest-by-filename selection is retired
+from this path -- the vendor moved the tick on 11 walked symbols in both directions within two
+days, and CONTEXT 3.3 sizes the profile row grid by it.
+
+**TWO THINGS WILL REFUSE A RESUME, DELIBERATELY: a moved HEAD and a moved MASTER.** The run
+spec's digest covers the code SHA and the pin's filename+sha256, so committing (or checking out)
+anything while a run is in flight -- or re-pointing the pin -- makes the resume a different run
+and it stops rather than mixing two code states, or two tick regimes, into one ledger. Finish
 the run, then commit.
 
 Source files in this package are ASCII-only on purpose (see src/acumen/config.py).
@@ -185,6 +193,11 @@ class Preflight:
     notes: tuple[str, ...] = ()
     #: CLAUDE.md Q-18 layer 3. Printed, never checked, never carried into the manifest.
     store_stamps: tuple[StoreStamp, ...] = ()
+    #: The Q-20 PIN the run will read, resolved by check 7, plus its content digest. ``None``
+    #: when that check FAILED (or was never reached), which is always a NO-GO -- the run path
+    #: takes the master from here and never re-selects one.
+    master_path: Path | None = None
+    master_sha256: str | None = None
 
     @property
     def ok(self) -> bool:
@@ -459,14 +472,22 @@ def preflight(
               ca_ok, ca_detail)
     )
 
-    # 7. the instrument master (per-symbol tick; CONTEXT 4.3 forbids hardcoding it).
+    # 7. the PINNED instrument master (per-symbol tick; CONTEXT 4.3 forbids hardcoding it, and
+    #    QUESTIONS.md Q-20 pins WHICH dump supplies it -- the vendor's tick is not stable).
+    master_path = None
+    master_sha = None
     try:
-        master, master_path = bt.latest_cached_master(cache)
+        master, master_path, master_sha = bt.pinned_master(cache, config.instrument_master)
         master_ok = True
-        master_detail = f"{master_path.name} ({len(master.by_symbol):,} NSE -EQ instruments)"
+        master_detail = (
+            f"PINNED {master_path.name} ({len(master.by_symbol):,} NSE -EQ instruments), "
+            f"sha256 {master_sha}"
+        )
     except Exception as exc:  # noqa: BLE001 -- any failure here is a refusal, not a crash
         master_ok, master_detail = False, f"{type(exc).__name__}: {exc}"
-    checks.append(Check("instrument master named", master_ok, master_detail))
+    checks.append(
+        Check("instrument master PINNED (Q-20) and its digest taken", master_ok, master_detail)
+    )
 
     # 8. the span: the FULL minute era, measured from the stores -- and clamped to the RAW
     #    DAILY ORACLE, which CONTEXT 4.6 records as lagging (the frozen "next-data-work" item
@@ -543,6 +564,8 @@ def preflight(
         run_dir=run_dir,
         notes=tuple(notes),
         store_stamps=stamps,
+        master_path=master_path,
+        master_sha256=master_sha,
     )
 
 
@@ -606,6 +629,9 @@ def render_preflight(report: Preflight, *, label: str, command: str | None) -> l
         lines.append(f"  universe : {len(report.symbols)} symbol(s)")
         lines.append(f"  span     : {report.start} -> {report.end}")
         lines.append(f"  run dir  : {report.run_dir}")
+        if report.master_path is not None:
+            lines.append(f"  tick pin : {report.master_path.name} (Q-20)")
+            lines.append(f"             sha256 {report.master_sha256}")
         lines.append("")
         lines.append("THE RUN COMMAND (paste this; safe to Ctrl-C and re-run):")
         lines.append("")
@@ -726,10 +752,16 @@ def execute(
     data_dir: Path | None = None,
     cache_dir: Path | None = None,
     disclosures: tuple[str, ...] = (),
+    master_path: Path | None = None,
     out: Callable[[str], None] = print,
     clock: Callable[[], float] = time.monotonic,
 ) -> RunOutcome:
-    """Wire the runner (reusing a cached E2 scan when there is one) and walk the whole span."""
+    """Wire the runner (reusing a cached E2 scan when there is one) and walk the whole span.
+
+    ``master_path`` is the Q-20 pin the PREFLIGHT already resolved and printed. It is threaded
+    through rather than re-resolved so that the file the operator was shown is provably the file
+    the run reads; ``None`` falls through to the configured pin, never to "newest on disk".
+    """
     run_dir = Path(run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
     wanted = tuple(symbol.strip().upper() for symbol in symbols)
@@ -739,7 +771,7 @@ def execute(
     cached = load_session_scan(run_dir, wanted, start, end, sha)
     if cached is None:
         out("scanning for CONTEXT 7-E2 non-standard sessions (once per run; cached below)...")
-    runner, master_path, ca_summary = bt.build_runner(
+    runner, resolved_master, ca_summary = bt.build_runner(
         wanted,
         start,
         end,
@@ -749,11 +781,21 @@ def execute(
         progress=None if cached is not None else lambda line: out(line.rstrip()),
         non_standard_sessions=cached,
         disclosures=disclosures,
+        master_path=master_path,
     )
+    if master_path is not None and Path(resolved_master) != Path(master_path):
+        # Unreachable by construction, and checked anyway: the whole point of threading the pin
+        # is that the operator's printed digest belongs to the file the run actually read.
+        raise PreflightError(
+            f"the run wired {resolved_master} but the preflight pinned {master_path}"
+        )
     if cached is None:
         save_session_scan(run_dir, wanted, start, end, sha, runner.non_standard_sessions)
 
-    out(f"instrument master: {master_path.name}")
+    out(
+        f"instrument master: PINNED {runner.spec.master_file} "
+        f"(sha256 {runner.spec.master_sha256}; QUESTIONS.md Q-20)"
+    )
     out(
         f"corporate-action tables built for {len(ca_summary)} symbol(s); "
         f"CONTEXT 7-E2 non-standard sessions excluded: "
@@ -881,6 +923,7 @@ def main(argv: list[str] | None = None) -> int:
             Q44_ESCALATION,
             *report.notes,
         ),
+        master_path=report.master_path,
         out=lambda line: print(line, flush=True),
     )
     return 0

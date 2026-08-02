@@ -35,6 +35,13 @@ missing, relative, or in-repo store root rather than resolving one -- see
 :func:`_require_outside_repo`. Every store and cache path in ``src/`` is derived from these
 two keys; nothing hardcodes a store location.
 
+``instrument_master`` is the third required-and-checked value, for a third reason: it PINS the
+tick regime. CONTEXT 3.3 sizes the volume-profile row grid by each symbol's tick and CONTEXT 4.3
+makes the instrument master a daily live dump; two dumps two days apart disagreed about the tick
+for 11 walked symbols, in both directions (QUESTIONS.md Q-20). The architect ruled ONE pinned
+snapshot for the whole backtest, so the filename lives here beside the money -- not as a literal
+in ``src/`` (CLAUDE.md forbids a hardcoded date) and not as "whatever is newest on disk".
+
 This module performs file I/O and is NOT part of the pure engine layer; engine functions
 receive already-loaded values as arguments (CONTEXT 6).
 
@@ -66,7 +73,14 @@ DEFAULT_ENV_PATH: Path = REPO_ROOT / ".env"
 #: Every key is also REQUIRED to be present -- a missing money key must not resolve to a
 #: default either.
 _ALLOWED_KEYS: frozenset[str] = frozenset(
-    {"risk_per_trade", "cost_per_trade", "initial_capital", "row_size", "paths"}
+    {
+        "risk_per_trade",
+        "cost_per_trade",
+        "initial_capital",
+        "row_size",
+        "instrument_master",
+        "paths",
+    }
 )
 
 #: Keys that MAY be absent. Both belong to the Round-3 Q40-d capital-infeasibility flags and
@@ -88,6 +102,12 @@ PAISE_PER_RUPEE: int = 100
 #: ``git worktree remove --force`` or ``git clean -xfd``.
 STORE_ROOT_KEYS: tuple[str, ...] = ("data_root", "cache_root")
 
+#: Where the date-stamped instrument-master dumps live under ``cache_root``. Duplicated from
+#: :data:`acumen.instrument_master.CACHE_SUBDIR` rather than imported: this module is the one
+#: every other module imports, and it must stay importable with no package-internal dependency.
+#: A test pins the two spellings equal.
+MASTER_CACHE_SUBDIR: str = "instrument_master"
+
 
 class ConfigError(RuntimeError):
     """Configuration is missing, malformed, or blocked by an open spec item."""
@@ -101,6 +121,11 @@ class Config:
     cost_per_trade: float
     initial_capital: float
     row_size: int
+    #: The PINNED instrument-master filename (QUESTIONS.md Q-20, architect 02-Aug-2026). A bare
+    #: filename, resolved under ``<cache_root>/instrument_master/`` by
+    #: :meth:`instrument_master_path`. Never "the newest dump" -- the tick decides the profile
+    #: row grid, and the vendor moves it in both directions from one daily pull to the next.
+    instrument_master: str
     paths: Mapping[str, Path]
     source: Path
     #: Q40-d capital-infeasibility inputs. ``None`` means the trader's Q43 answer has not
@@ -183,6 +208,15 @@ class Config:
         runs, and a Decimal's own string form is exact.
         """
         return None if self.margin_basis is None else str(self.margin_basis)
+
+    def instrument_master_path(self) -> Path:
+        """The PINNED instrument-master file, resolved under ``<cache_root>/instrument_master/``.
+
+        The file itself may not exist yet (a bare clone has no cache); this method only says
+        WHICH file the run is entitled to read. Loading it -- and refusing when it is absent --
+        is :func:`acumen.backtest.pinned_master`'s job.
+        """
+        return self.path("cache_root") / MASTER_CACHE_SUBDIR / self.instrument_master
 
     def path(self, name: str) -> Path:
         """Return the resolved filesystem path registered under ``name``."""
@@ -268,6 +302,7 @@ def load_config(config_path: Path | None = None, *, include_env: bool = True) ->
         cost_per_trade=_validate_cost_per_trade(raw["cost_per_trade"], path),
         initial_capital=_validate_initial_capital(raw["initial_capital"], path),
         row_size=_validate_row_size(raw["row_size"], path),
+        instrument_master=_validate_instrument_master(raw["instrument_master"], path),
         capital_reference=_validate_capital_reference(raw.get("capital_reference"), path),
         margin_basis=_validate_margin_basis(raw.get("margin_basis"), path),
         paths=_validate_paths(raw["paths"], path),
@@ -404,6 +439,42 @@ def _validate_row_size(value: Any, path: Path) -> int:
     if value < 1:
         raise ConfigError(f"row_size in {path} must be >= 1, got {value}.")
     return value
+
+
+def _validate_instrument_master(value: Any, path: Path) -> str:
+    """The Q-20 pin -- a bare instrument-master FILENAME, never null and never a path.
+
+    QUESTIONS.md Q-20 (architect, 02-Aug-2026): ONE pinned master snapshot governs the whole
+    backtest, because CONTEXT 3.3's row grid is sized by the per-symbol tick and the vendor
+    moved that tick in BOTH directions on 11 walked symbols within two days. There is no
+    default and no "newest wins" fallback: a config that lost this key must refuse to load
+    rather than silently pick a different tick regime, which is exactly the silence the ruling
+    ends.
+
+    The value is validated as a bare filename -- no directory separator, no ``..``, not
+    absolute -- so the pin resolves under ``<cache_root>/instrument_master/`` and can never
+    reach outside the cache the operator snapshots.
+    """
+    if value is None:
+        raise ConfigError(
+            f"instrument_master is null in {path}: QUESTIONS.md Q-20 (architect, 02-Aug-2026) "
+            "pins ONE master snapshot for the whole backtest and allows no default -- the "
+            "per-symbol tick sizes CONTEXT 3.3 builds the profile row grid from are not stable "
+            "between daily vendor dumps. Name the pinned file in config.yaml."
+        )
+    if not isinstance(value, str) or not value.strip():
+        raise ConfigError(
+            f"instrument_master in {path} must be the pinned master's FILENAME "
+            f"(QUESTIONS.md Q-20), got {type(value).__name__}."
+        )
+    name = value.strip()
+    if name != Path(name).name or Path(name).is_absolute() or ".." in name:
+        raise ConfigError(
+            f"instrument_master in {path} must be a bare FILENAME, not a path; got {name!r}. "
+            f"The pin is resolved under <cache_root>/{MASTER_CACHE_SUBDIR}/ so that it can "
+            "never point outside the cache the operator snapshots (QUESTIONS.md Q-20)."
+        )
+    return name
 
 
 def _validate_paths(value: Any, path: Path) -> Mapping[str, Path]:

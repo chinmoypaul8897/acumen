@@ -248,6 +248,9 @@ def make_runner(
         cost_paise=COST_PAISE,
         code_sha="0" * 40,
         factor_digest="test-digest",
+        # The Q-20 pin, as a run really carries it: the filename AND the file's own digest.
+        master_file="OpenAPIScripMaster_2026-07-31.json",
+        master_sha256="c" * 64,
         capital_reference_paise=capital_reference_paise,
         margin_basis=margin_basis,
         label="unit",
@@ -636,6 +639,33 @@ def test_a_resume_against_a_different_spec_is_refused(tmp_path: Path) -> None:
         moved.run(run_dir)
 
 
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"master_file": "OpenAPIScripMaster_2026-08-02.json"},
+        {"master_sha256": "b" * 64},
+    ],
+)
+def test_a_resume_under_a_DIFFERENT_INSTRUMENT_MASTER_is_refused(tmp_path: Path, change) -> None:
+    """**QUESTIONS.md Q-20 (architect, 02-Aug-2026): "a resume under any other master REFUSES
+    (same discipline as the code SHA)."**
+
+    Both halves are covered, because both failure shapes are real: the operator re-points the
+    pin at the other cached snapshot (``master_file`` moves), or the vendor's file is
+    overwritten in place under the SAME name (only ``master_sha256`` moves). A different tick
+    is a different CONTEXT 3.3 row grid and therefore a different POC, so mixing two masters
+    into one ledger is exactly as inadmissible as mixing two code states -- and the mechanism
+    is the same one: both fields sit inside :meth:`RunSpec.digest`, which
+    ``_resume_state`` compares. The sibling test above is the moved-SHA case, unchanged.
+    """
+    run_dir = tmp_path / "run"
+    make_runner(tmp_path).run(run_dir)
+    moved = make_runner(tmp_path)
+    object.__setattr__(moved, "spec", replace(moved.spec, **change))
+    with pytest.raises(bt.BacktestError, match="different run"):
+        moved.run(run_dir)
+
+
 def test_the_shard_and_the_ledger_are_written_through_atomic_io(tmp_path: Path) -> None:
     """No temp file survives, and the ledger is exactly the concatenated shards."""
     result = make_runner(tmp_path).run(tmp_path / "run")
@@ -661,6 +691,30 @@ def test_the_manifest_carries_the_spec_version_code_sha_and_config_digest(
     assert manifest["config_digest"] == make_runner(tmp_path).spec.digest()
     assert manifest["universe"] == [SYMBOL]
     assert manifest["span"] == {"start": SEED_A.isoformat(), "end": TRADE_DAY.isoformat()}
+
+
+def test_the_manifest_records_the_pinned_master_by_filename_AND_sha256(tmp_path: Path) -> None:
+    """**QUESTIONS.md Q-20: "the run manifest records the pin by filename AND sha256".**
+
+    Q-20's own complaint was that `build_manifest` carried no master field of any kind, so a
+    finished ledger could not be traced back to the ticks that shaped its POCs -- the filename
+    survived only in whatever console log the operator happened to keep. Both halves are
+    recorded because a filename alone is not enough: a vendor file can be overwritten in place.
+    """
+    manifest = make_runner(tmp_path).run(tmp_path / "run").manifest
+    pin = manifest["instrument_master"]
+    assert pin["pinned_file"] == "OpenAPIScripMaster_2026-07-31.json"
+    assert pin["sha256"] == "c" * 64
+    assert "Q-20" in pin["note"]
+    # ...and it is inside the STABLE digest, not one of the volatile keys: a ledger produced
+    # under a different tick regime must not hash equal to this one.
+    other = make_runner(tmp_path)
+    object.__setattr__(
+        other, "spec", replace(other.spec, master_sha256="d" * 64)
+    )
+    assert bt.stable_manifest_digest(
+        other.run(tmp_path / "run2").manifest
+    ) != bt.stable_manifest_digest(manifest)
 
 
 def test_the_manifest_counts_every_symbol_walked_usable_and_refused(tmp_path: Path) -> None:
@@ -754,6 +808,10 @@ def test_the_stable_digest_ignores_the_commit_dependent_fields(tmp_path: Path) -
         {"cost_paise": 5_000},
         {"code_sha": "deadbeef"},
         {"factor_digest": "other"},
+        # QUESTIONS.md Q-20: the tick input is an input that can move a number, so both halves
+        # of the pin are inside the digest -- the filename AND the bytes behind it.
+        {"master_file": "OpenAPIScripMaster_2099-01-01.json"},
+        {"master_sha256": "a" * 64},
         {"capital_reference_paise": 1},
         {"margin_basis": "5"},
     ],

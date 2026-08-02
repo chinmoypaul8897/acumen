@@ -39,6 +39,7 @@ if str(REPO / "src") not in sys.path:  # a bare clone runs with no install step 
     sys.path.insert(0, str(REPO / "src"))
 
 from acumen import backtest as bt  # noqa: E402
+from acumen import instrument_master as im  # noqa: E402
 from acumen.config import REPO_ROOT, ConfigError, load_config  # noqa: E402
 from acumen.daily_store import DailyStore  # noqa: E402
 from acumen.minute_store import MinuteStore  # noqa: E402
@@ -307,7 +308,12 @@ def run(out_path: Path | None) -> int:
 
     # --- 6. the instrument master --------------------------------------------------------
     def master() -> tuple[bool, str]:
-        loaded, path = bt.latest_cached_master(cache_root)
+        # Newest-by-filename ON PURPOSE, and only here: this check asks whether the MIGRATED
+        # cache resolves a master at all through `cache_root`. It is cache inspection, not a
+        # run: QUESTIONS.md Q-20 retired newest-by-filename from the run path (the run reads the
+        # `config.yaml` pin through `acumen.backtest.pinned_master`), and the helper moved to
+        # `acumen.instrument_master` with it. Same file, same bytes, same output line.
+        loaded, path = im.newest_cached_master(cache_root)
         probes = ("RELIANCE", "TCS", "HDFCBANK", "APLAPOLLO", "NESTLEIND")
         resolved = []
         for symbol in probes:

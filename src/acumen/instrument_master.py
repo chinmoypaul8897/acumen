@@ -307,6 +307,27 @@ def cached_masters(cache_dir: Path | str | None = None) -> tuple[Path, ...]:
     return tuple(sorted(home.glob("OpenAPIScripMaster_*.json")))
 
 
+def newest_cached_master(cache_dir: Path | str | None = None) -> tuple[InstrumentMaster, Path]:
+    """The newest cached dump by FILENAME, for cache INSPECTION only. Never for a run.
+
+    This is where newest-by-filename selection lives now, and it lives here on purpose: this
+    module is the cache's own inspector (:func:`cached_masters` is its neighbour), not the
+    backtest's tick source. QUESTIONS.md Q-20 (architect, 02-Aug-2026) RETIRED newest-by-filename
+    from the run path, because the vendor's ``tick_size`` moved in both directions on 11 walked
+    symbols within two days and CONTEXT 3.3 sizes the profile row grid by it. Anything that
+    computes a POC must go through :func:`acumen.backtest.pinned_master` and the ``config.yaml``
+    pin instead.
+    """
+    candidates = cached_masters(cache_dir)
+    if not candidates:
+        base = Path(cache_dir) if cache_dir is not None else default_cache_dir()
+        raise InstrumentMasterError(
+            f"No cached instrument master under {base / CACHE_SUBDIR}."
+        )
+    path = candidates[-1]
+    return load_master_file(path), path
+
+
 def parse_args(argv: Sequence[str] | None = None) -> Any:
     import argparse
 

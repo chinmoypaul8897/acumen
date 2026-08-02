@@ -47,6 +47,23 @@ margin_basis:        # null -- trader Q43 pending
 # unchanged). OPEN-2's chart-POC reproduction remains chunk 6's gate.
 row_size: 24  # confirmed by trader screenshot, Round 3, 25-Jul-2026
 
+# THE PINNED INSTRUMENT MASTER -- QUESTIONS.md Q-20, architect's ruling 02-Aug-2026.
+#
+# CONTEXT 3.3 takes tickSize per symbol from the instrument master and CONTEXT 4.3 makes that
+# master a DAILY LIVE DUMP. Two snapshots two days apart disagree about the tick for 11 of the
+# sealed 210 -- all of them walked by the run -- and the tick sizes the profile row grid, hence
+# the POC, hence every entry, stop and target on those symbols. The architect ruled that ONE
+# PINNED snapshot governs the whole backtest (the trader's TradingView chart applies the CURRENT
+# tick to the entire history, so an exchange-accurate historical tick would be LESS faithful to
+# the replication target). Historical tick regimes are a v2 backlog item.
+#
+# The value is a bare FILENAME, resolved under <cache_root>/instrument_master/. The loader
+# refuses a separator, a `..` or an absolute path, so the pin can never point outside the cache.
+# There is NO default: a config that loses this key refuses to load, exactly like the money keys.
+# Changing this value changes the ticks the backtest runs on -- it is an architect spec change,
+# never a session decision, and a run started under one pin refuses to resume under another.
+instrument_master: OpenAPIScripMaster_2026-07-31.json  # Q-20 ruling, 02-Aug-2026
+
 # Filesystem roots. Relative values are resolved against this file's directory by the loader.
 #
 # data_root and cache_root are Q-18 LAYER 1 (CLAUDE.md, "Data-store safety"): the mutable

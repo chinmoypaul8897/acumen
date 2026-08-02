@@ -45,6 +45,14 @@ when that symbol is COMPLETE, so an interrupted run leaves no partial symbol beh
 resume re-walks exactly what it lost: zero duplicates. Nothing in the ledger or the manifest
 is read from a clock, so the same code over the same stores produces the same bytes.
 
+**The tick input is PINNED, recorded and resume-checked** (QUESTIONS.md Q-20, architect
+02-Aug-2026). CONTEXT 3.3 sizes the volume-profile row grid by each symbol's tick and CONTEXT
+4.3 makes the instrument master a DAILY LIVE DUMP whose ticks move -- in both directions -- from
+one pull to the next. So the run reads ONE pinned snapshot, named in ``config.yaml``, resolved by
+:func:`pinned_master`; its filename and sha256 sit on :class:`RunSpec` and therefore inside the
+spec digest, so the manifest can be traced back to the ticks that shaped its POCs and a resume
+under any other master REFUSES exactly as a resume after a moved code SHA does.
+
 Source files in this package are ASCII-only on purpose (see src/acumen/config.py).
 """
 
@@ -84,6 +92,18 @@ from .signal_engine import SignalPipeline
 #: ledger always names the law it was produced under. Moved to v1.5 on 02-Aug-2026 with
 #: the Q-18 re-seal (CONTEXT 4.6 rewritten; Q-17 and Q-19 made law).
 SPEC_VERSION: str = "v1.5"
+
+#: What the manifest's ``instrument_master`` block says about itself, so a reader who has never
+#: seen QUESTIONS.md Q-20 still knows why a filename is pinned rather than resolved. Verbatim on
+#: every manifest; it names the ruling, not a session's reasoning.
+MASTER_PIN_NOTE: str = (
+    "ONE PINNED master snapshot governs the whole backtest (QUESTIONS.md Q-20, architect "
+    "02-Aug-2026). CONTEXT 3.3 sizes the profile row grid by each symbol's tick and CONTEXT 4.3 "
+    "makes the master a daily live dump whose ticks move in both directions; the replication "
+    "target is the trader's TradingView chart, which applies the CURRENT tick to the entire "
+    "history. Latest-by-filename selection is retired from the run path; a resume under any "
+    "other master refuses."
+)
 
 #: The session window CONTEXT 3.1 gives NSE cash. Used ONLY by the E2 detector below.
 SESSION_OPEN: time = time(9, 15)
@@ -533,6 +553,11 @@ class RunSpec:
     spec_version: str = SPEC_VERSION
     code_sha: str = ""
     factor_digest: str = ""
+    #: The Q-20 PIN: which instrument-master dump supplied every symbol's tick, by filename AND
+    #: content digest. Both are inside :meth:`as_dict`, therefore inside :meth:`digest`, so a
+    #: resume under a different master refuses exactly as a resume after a moved code SHA does.
+    master_file: str = ""
+    master_sha256: str = ""
     capital_reference_paise: int | None = None
     margin_basis: str | None = None
     label: str = ""
@@ -553,6 +578,8 @@ class RunSpec:
             "spec_version": self.spec_version,
             "code_sha": self.code_sha,
             "factor_digest": self.factor_digest,
+            "master_file": self.master_file,
+            "master_sha256": self.master_sha256,
             "capital_reference_paise": self.capital_reference_paise,
             "margin_basis": self.margin_basis,
             "label": self.label,
@@ -1002,6 +1029,14 @@ class BacktestRunner:
             "code_sha": self.spec.code_sha,
             "config_digest": self.spec.digest(),
             "spec": self.spec.as_dict(),
+            # QUESTIONS.md Q-20 (architect, 02-Aug-2026): "the run manifest records the pin by
+            # filename AND sha256". Its own complaint was that a finished ledger could not be
+            # traced back to the ticks that shaped its POCs; this block is that traceability.
+            "instrument_master": {
+                "pinned_file": self.spec.master_file,
+                "sha256": self.spec.master_sha256,
+                "note": MASTER_PIN_NOTE,
+            },
             "universe": list(self.spec.symbols),
             "span": {"start": self.spec.start.isoformat(), "end": self.spec.end.isoformat()},
             "totals": {
@@ -1183,20 +1218,45 @@ def read_ledger(path: Path) -> tuple[LedgerRow, ...]:
 # --- wiring (the only place stores, the CA table and the calendar are opened) ---------------
 
 
-def latest_cached_master(cache_dir: Path) -> tuple[InstrumentMaster, Path]:
-    """The NEWEST cached instrument-master dump, offline (chunk-8 decision B175)."""
-    home = Path(cache_dir) / MASTER_CACHE_SUBDIR
-    candidates = sorted(home.glob("OpenAPIScripMaster_*.json"))
-    if not candidates:
+def pinned_master(cache_dir: Path, filename: str) -> tuple[InstrumentMaster, Path, str]:
+    """Load the ONE PINNED instrument master by name, offline. Returns (master, path, sha256).
+
+    **This replaced ``latest_cached_master``, which selected the newest dump by filename.**
+    QUESTIONS.md Q-20 (architect, 02-Aug-2026): the vendor's ``tick_size`` is not stable between
+    daily dumps -- two snapshots two days apart disagree for 11 of the sealed 210, in BOTH
+    directions -- and CONTEXT 3.3 sizes the profile row grid by that tick, so "newest wins"
+    silently decided every POC on those symbols and made a re-run non-reproducible. One pinned
+    snapshot governs the whole backtest; the spec target is the trader's TradingView chart, which
+    applies the CURRENT tick to the entire history.
+
+    The sha256 is returned with the path because the manifest records the pin by BOTH (a
+    filename can be overwritten in place; a digest cannot), and because both fields enter
+    :class:`RunSpec`, hence the spec digest, hence the resume check -- so a resume under any
+    other master REFUSES exactly as a resume after a moved code SHA does.
+    """
+    path = Path(cache_dir) / MASTER_CACHE_SUBDIR / filename
+    if not path.is_file():
         raise BacktestError(
-            f"No cached instrument master under {home}: the run needs each symbol's own tick "
-            "size (CONTEXT 4.3 -- never hardcode a tick)."
+            f"The pinned instrument master {filename!r} is not at {path}. The run needs each "
+            "symbol's own tick size (CONTEXT 4.3 -- never hardcode a tick) and QUESTIONS.md "
+            "Q-20 pins WHICH dump supplies it; config.yaml's `instrument_master` names the pin. "
+            "Fetch that dump or correct the pin -- do NOT substitute another snapshot, because "
+            "the vendor's tick moves between dumps."
         )
-    path = candidates[-1]
     try:
-        return load_master_file(path), path
+        master = load_master_file(path)
     except InstrumentMasterError as exc:  # pragma: no cover -- a corrupt cache file
-        raise BacktestError(f"Cached instrument master {path} is unusable: {exc}") from exc
+        raise BacktestError(f"Pinned instrument master {path} is unusable: {exc}") from exc
+    return master, path, file_sha256(path)
+
+
+def file_sha256(path: Path) -> str:
+    """Streaming sha256 of a file. The master is ~34 MB, so it is never slurped whole."""
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 def build_factor_tables(
@@ -1273,11 +1333,17 @@ def build_runner(
     progress: Callable[[str], None] | None = None,
     non_standard_sessions: frozenset[date] | None = None,
     disclosures: tuple[str, ...] = (),
+    master_path: Path | None = None,
 ) -> tuple[BacktestRunner, Path, dict]:
     """Open the local stores read-only and wire the whole machine. Returns (runner, master, ca).
 
-    Money and Row Size come from ``config.yaml`` through the loader -- never typed here
-    (CONTEXT 3.5, chunk-8 decision B169).
+    Money, Row Size and the PINNED instrument master all come from ``config.yaml`` through the
+    loader -- never typed here (CONTEXT 3.5, chunk-8 decision B169; QUESTIONS.md Q-20).
+
+    ``master_path`` names the instrument master explicitly, which is what the run path does:
+    the preflight resolves the Q-20 pin, prints its digest, and hands the same file to the run.
+    ``None`` falls back to the CONFIGURED PIN -- never to "the newest dump on disk", which is
+    the selection the Q-20 ruling retired.
 
     ``non_standard_sessions`` lets a caller supply a CONTEXT 7-E2 scan it already holds instead
     of re-running it. The scan is O(symbols x span days) reads of the minute store -- the same
@@ -1294,7 +1360,13 @@ def build_runner(
 
     daily_store = DailyStore.at(data / "daily_store")
     minute_store = MinuteStore.at(data / "minute_store")
-    master, master_path = latest_cached_master(cache)
+    if master_path is None:
+        master, master_path, master_sha = pinned_master(cache, config.instrument_master)
+    else:
+        master_path = Path(master_path)
+        master, master_path, master_sha = pinned_master(
+            master_path.parent.parent, master_path.name
+        )
     seed = seed_from if seed_from is not None else start
     calendar = TradingCalendar.from_daily_store_range(
         daily_store, seed - timedelta(days=CALENDAR_LEAD_DAYS), end
@@ -1328,6 +1400,8 @@ def build_runner(
         cost_paise=config.cost_per_trade_paise(),
         code_sha=code_sha(),
         factor_digest=digest,
+        master_file=master_path.name,
+        master_sha256=master_sha,
         capital_reference_paise=config.capital_reference_paise(),
         margin_basis=config.margin_basis_text(),
         label=label,

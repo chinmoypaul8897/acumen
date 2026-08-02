@@ -31,7 +31,7 @@ import pytest
 
 from acumen import backtest as bt
 from acumen import run_backtest as rb
-from acumen.config import ConfigError
+from acumen.config import ConfigError, load_config
 from acumen.minute_store import MinuteStore
 
 from tests.test_backtest import (
@@ -495,6 +495,17 @@ def test_the_preflight_passes_on_a_complete_miniature_world(tmp_path: Path) -> N
     assert named["trading calendar loaded over the span"].ok
     assert report.symbols == (SYMBOL,)
     assert (report.start, report.end) == (TRADE_DAY, TRADE_DAY)
+    # ...and the PIN, resolved and digested (QUESTIONS.md Q-20).
+    assert named[MASTER_CHECK].ok
+    assert report.master_path is not None and len(report.master_sha256) == 64
+    # The miniature world deliberately carries no corporate-action day-cache (building one is
+    # chunk-3 work and this fixture is about the stores), so exactly ONE check may fail here.
+    # Naming it is what keeps a check that quietly started failing for everyone -- which is what
+    # the Q-20 pin did to this test before `_cache_with_master` learned the pinned name -- from
+    # hiding behind a per-check assertion list.
+    assert [check.name for check in report.failures] == [
+        "CA day-cache 2005..2026 present and served offline"
+    ]
 
 
 def test_the_preflight_FAILS_when_the_residual_register_is_absent(tmp_path: Path) -> None:
@@ -529,23 +540,64 @@ def test_the_preflight_FAILS_when_a_settled_symbol_has_no_minute_data(tmp_path: 
     assert report.ok is False
 
 
+MASTER_CHECK = "instrument master PINNED (Q-20) and its digest taken"
+
+
 def test_the_preflight_FAILS_when_the_instrument_master_is_missing(tmp_path: Path) -> None:
     """CONTEXT 4.3 forbids hardcoding a tick size, so a run with no master has no tick grid."""
     data = preflight_world(tmp_path)
     report = rb.preflight(data_dir=data, cache_dir=tmp_path / "empty_cache")
     assert report.ok is False
-    assert any(
-        check.name == "instrument master named" and not check.ok for check in report.checks
+    assert any(check.name == MASTER_CHECK and not check.ok for check in report.checks)
+    assert report.master_path is None and report.master_sha256 is None
+
+
+def test_the_preflight_REFUSES_a_cache_holding_only_an_UNPINNED_master(tmp_path: Path) -> None:
+    """**QUESTIONS.md Q-20, the whole point.** A cache carrying a perfectly good, NEWER master
+    that is not the pinned one is NO-GO -- the old newest-by-filename resolver would have taken
+    it happily and silently changed the tick on 11 walked symbols. The refusal names the pin."""
+    data = preflight_world(tmp_path)
+    cache = _cache_with_master(tmp_path, name="OpenAPIScripMaster_2099-01-01.json")
+    report = rb.preflight(data_dir=data, cache_dir=cache)
+    assert report.ok is False
+    failed = next(check for check in report.checks if check.name == MASTER_CHECK)
+    assert not failed.ok
+    assert load_config(include_env=False).instrument_master in failed.detail
+    assert "Q-20" in failed.detail
+
+
+def test_the_preflight_prints_the_pin_and_its_digest_in_the_GO_block(tmp_path: Path) -> None:
+    """The operator is shown WHICH ticks the run will use, by name and by content digest --
+    Q-20's own complaint was that a finished ledger could not be traced back to its ticks."""
+    data = preflight_world(tmp_path)
+    measured = rb.preflight(data_dir=data, cache_dir=_cache_with_master(tmp_path))
+    # The one check this fixture cannot satisfy is the CA day-cache (see the miniature-world
+    # test above); the renderer's GO block is what is under test here, so it is forced.
+    report = replace(
+        measured, checks=tuple(replace(check, ok=True) for check in measured.checks)
     )
+    assert report.ok is True
+    text = "\n".join(rb.render_preflight(report, label="x", command="python go"))
+    assert "VERDICT: GO" in text
+    assert f"tick pin : {report.master_path.name} (Q-20)" in text
+    assert f"sha256 {report.master_sha256}" in text
+    assert len(report.master_sha256) == 64
 
 
-def _cache_with_master(tmp_path: Path) -> Path:
-    """A cache directory holding one instrument-master dump, in the shape the loader expects."""
+def _cache_with_master(tmp_path: Path, name: str | None = None) -> Path:
+    """A cache directory holding one instrument-master dump, in the shape the loader expects.
+
+    The file is written under the PINNED name by default (QUESTIONS.md Q-20): the preflight
+    resolves exactly the filename ``config.yaml`` names and no other, so a miniature world whose
+    dump is called something else is a world with no tick grid, by design.
+    """
+    from acumen.config import load_config
     from acumen.instrument_master import CACHE_SUBDIR
 
     home = tmp_path / "cache" / CACHE_SUBDIR
     home.mkdir(parents=True, exist_ok=True)
-    (home / "OpenAPIScripMaster_2026-07-28.json").write_text(
+    filename = name if name is not None else load_config(include_env=False).instrument_master
+    (home / filename).write_text(
         json.dumps(
             [
                 {

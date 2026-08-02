@@ -1019,7 +1019,14 @@ def render_markdown(
         f"{_money(initial_capital_paise)} | `config.yaml` (CONTEXT 3.5, R1-Q21a) |"
     )
     add("| capital_reference / margin_basis | null / null | trader Q43 PENDING |")
-    add(f"| Instrument master | `{master_name}` | newest cached dump (CONTEXT 4.3 ticks) |")
+    add(
+        f"| Instrument master | `{master_name}` | the PINNED dump, `config.yaml` "
+        f"(CONTEXT 4.3 ticks; QUESTIONS.md Q-20) |"
+    )
+    add(
+        f"| Instrument-master sha256 | `{pilot_runner.spec.master_sha256[:16]}...` | the pin's "
+        f"own digest, on every manifest |"
+    )
     add(f"| Spec version | {manifest['spec_version']} | CONTEXT.md |")
     add(f"| Factor-table digest | `{pilot_runner.spec.factor_digest[:16]}...` | sha256 |")
     add(f"| Pilot symbols | {', '.join(PILOT_SYMBOLS)} | chunk-7/8 window, unchanged |")
@@ -1664,7 +1671,9 @@ def build_everything(
     trade_paths = bt.assemble_trade_paths(
         pilot.result.rows, bars_for=bt.minute_store_bars(pilot_runner.minute_store)
     )
-    master = bt.latest_cached_master(config.path("cache_root"))[1].name
+    # The Q-20 PIN, not "the newest dump": the pack quotes the tick source, and the tick source
+    # is now a ruled constant rather than whatever the last operator pull happened to leave.
+    master = pilot_runner.spec.master_file
     return {
         "pilot": pilot,
         "pilot_runner": pilot_runner,

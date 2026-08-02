@@ -45,6 +45,13 @@ _PATHS = (
     f"  cache_root: {(_OUTSIDE_ROOT / 'cache').as_posix()}\n"
 )
 
+#: The Q-20 pin (QUESTIONS.md, architect 02-Aug-2026) is a REQUIRED top-level key, so every
+#: synthetic config below needs one. It rides with the paths block in ``_TAIL`` to keep the
+#: twenty-odd one-line bodies below readable; the tests that are ABOUT the pin build their own.
+_PIN = "instrument_master: OpenAPIScripMaster_2026-07-31.json\n"
+
+_TAIL = _PIN + _PATHS
+
 _VALID_HEAD = """
 risk_per_trade: null
 cost_per_trade: 100
@@ -52,7 +59,7 @@ initial_capital: 100000
 row_size: 24
 """
 
-_VALID = _VALID_HEAD + _PATHS
+_VALID = _VALID_HEAD + _TAIL
 
 
 def _write_config(tmp_path: Path, body: str) -> Path:
@@ -119,7 +126,8 @@ def test_a_relative_store_root_is_refused(tmp_path: Path, root: str) -> None:
     path = _write_config(
         tmp_path,
         "risk_per_trade: 1000\ncost_per_trade: 100\ninitial_capital: 100000\nrow_size: 24\n"
-        f"paths:\n  data_root: {root}\n"
+        + _PIN
+        + f"paths:\n  data_root: {root}\n"
         f"  cache_root: {(_OUTSIDE_ROOT / 'cache').as_posix()}\n",
     )
     with pytest.raises(ConfigError, match="ABSOLUTE|INSIDE the repository tree"):
@@ -132,7 +140,8 @@ def test_a_store_root_inside_the_repository_tree_is_refused(tmp_path: Path) -> N
     path = _write_config(
         tmp_path,
         "risk_per_trade: 1000\ncost_per_trade: 100\ninitial_capital: 100000\nrow_size: 24\n"
-        f"paths:\n  data_root: {inside}\n"
+        + _PIN
+        + f"paths:\n  data_root: {inside}\n"
         f"  cache_root: {(_OUTSIDE_ROOT / 'cache').as_posix()}\n",
     )
     with pytest.raises(ConfigError) as excinfo:
@@ -147,7 +156,8 @@ def test_a_missing_store_root_is_refused_rather_than_defaulted(tmp_path: Path) -
     path = _write_config(
         tmp_path,
         "risk_per_trade: 1000\ncost_per_trade: 100\ninitial_capital: 100000\nrow_size: 24\n"
-        f"paths:\n  cache_root: {(_OUTSIDE_ROOT / 'cache').as_posix()}\n",
+        + _PIN
+        + f"paths:\n  cache_root: {(_OUTSIDE_ROOT / 'cache').as_posix()}\n",
     )
     with pytest.raises(ConfigError, match="data_root"):
         load_config(path, include_env=False)
@@ -159,7 +169,7 @@ def test_a_missing_store_root_is_refused_rather_than_defaulted(tmp_path: Path) -
 def test_a_null_risk_per_trade_still_blocks(tmp_path: Path) -> None:
     """OPEN-1 is resolved in the repo config, but the GUARD must survive: a null amount
     (a future config that loses the value) still refuses to size, naming OPEN-1."""
-    path = _write_config(tmp_path, "risk_per_trade: null\ncost_per_trade: 100\ninitial_capital: 100000\nrow_size: 24\n" + _PATHS)
+    path = _write_config(tmp_path, "risk_per_trade: null\ncost_per_trade: 100\ninitial_capital: 100000\nrow_size: 24\n" + _TAIL)
     config = load_config(path, include_env=False)
     assert config.risk_per_trade is None
     with pytest.raises(ConfigError) as excinfo:
@@ -173,14 +183,14 @@ def test_a_null_risk_per_trade_still_blocks(tmp_path: Path) -> None:
 def test_require_risk_per_trade_returns_the_amount_once_open_1_is_answered(
     tmp_path: Path,
 ) -> None:
-    path = _write_config(tmp_path, "risk_per_trade: 500\ncost_per_trade: 100\ninitial_capital: 100000\nrow_size: 24\n" + _PATHS)
+    path = _write_config(tmp_path, "risk_per_trade: 500\ncost_per_trade: 100\ninitial_capital: 100000\nrow_size: 24\n" + _TAIL)
     assert load_config(path, include_env=False).require_risk_per_trade() == 500
 
 
 @pytest.mark.parametrize("value", ["0", "-1", "-0.5"])
 def test_non_positive_risk_per_trade_is_rejected(tmp_path: Path, value: str) -> None:
     path = _write_config(
-        tmp_path, f"risk_per_trade: {value}\ncost_per_trade: 100\ninitial_capital: 100000\nrow_size: 24\n" + _PATHS
+        tmp_path, f"risk_per_trade: {value}\ncost_per_trade: 100\ninitial_capital: 100000\nrow_size: 24\n" + _TAIL
     )
     with pytest.raises(ConfigError, match="risk_per_trade"):
         load_config(path, include_env=False)
@@ -189,7 +199,7 @@ def test_non_positive_risk_per_trade_is_rejected(tmp_path: Path, value: str) -> 
 @pytest.mark.parametrize("value", ["'500'", "true", "[500]"])
 def test_non_numeric_risk_per_trade_is_rejected(tmp_path: Path, value: str) -> None:
     path = _write_config(
-        tmp_path, f"risk_per_trade: {value}\ncost_per_trade: 100\ninitial_capital: 100000\nrow_size: 24\n" + _PATHS
+        tmp_path, f"risk_per_trade: {value}\ncost_per_trade: 100\ninitial_capital: 100000\nrow_size: 24\n" + _TAIL
     )
     with pytest.raises(ConfigError, match="risk_per_trade"):
         load_config(path, include_env=False)
@@ -221,7 +231,7 @@ def test_the_repo_amounts_convert_to_the_exact_paise_the_simulator_sizes_with() 
 def test_a_null_risk_per_trade_blocks_the_paise_accessor_too(tmp_path: Path) -> None:
     """The paise door goes through the same guard: a lost amount cannot size a trade."""
     path = _write_config(
-        tmp_path, "risk_per_trade: null\ncost_per_trade: 100\ninitial_capital: 100000\nrow_size: 24\n" + _PATHS
+        tmp_path, "risk_per_trade: null\ncost_per_trade: 100\ninitial_capital: 100000\nrow_size: 24\n" + _TAIL
     )
     with pytest.raises(ConfigError, match="OPEN-1"):
         load_config(path, include_env=False).require_risk_per_trade_paise()
@@ -232,7 +242,7 @@ def test_a_fractional_paisa_amount_is_refused(tmp_path: Path) -> None:
     7-E11: prices and money are integer paise). Refused rather than rounded."""
     path = _write_config(
         tmp_path,
-        "risk_per_trade: 1000.005\ncost_per_trade: 100\ninitial_capital: 100000\nrow_size: 24\n" + _PATHS,
+        "risk_per_trade: 1000.005\ncost_per_trade: 100\ninitial_capital: 100000\nrow_size: 24\n" + _TAIL,
     )
     config = load_config(path, include_env=False)
     with pytest.raises(ConfigError, match="whole number of paise"):
@@ -244,7 +254,7 @@ def test_a_fractional_rupee_amount_that_is_whole_paise_is_accepted(tmp_path: Pat
     classic 12.34 * 100 == 1233.9999999999998 float trap cannot reach the sizer."""
     path = _write_config(
         tmp_path,
-        "risk_per_trade: 1000\ncost_per_trade: 12.34\ninitial_capital: 100000\nrow_size: 24\n" + _PATHS,
+        "risk_per_trade: 1000\ncost_per_trade: 12.34\ninitial_capital: 100000\nrow_size: 24\n" + _TAIL,
     )
     assert load_config(path, include_env=False).cost_per_trade_paise() == 1234
 
@@ -253,7 +263,7 @@ def test_a_null_cost_per_trade_is_rejected_outright(tmp_path: Path) -> None:
     """Unlike risk_per_trade, no open item ever stood behind the cost: CONTEXT 3.5 states it,
     so a null is a config that LOST a spec value and must fail at load."""
     path = _write_config(
-        tmp_path, "risk_per_trade: 1000\ncost_per_trade: null\ninitial_capital: 100000\nrow_size: 24\n" + _PATHS
+        tmp_path, "risk_per_trade: 1000\ncost_per_trade: null\ninitial_capital: 100000\nrow_size: 24\n" + _TAIL
     )
     with pytest.raises(ConfigError, match="cost_per_trade"):
         load_config(path, include_env=False)
@@ -263,7 +273,7 @@ def test_a_null_cost_per_trade_is_rejected_outright(tmp_path: Path) -> None:
 def test_a_bad_cost_per_trade_is_rejected(tmp_path: Path, value: str) -> None:
     path = _write_config(
         tmp_path,
-        f"risk_per_trade: 1000\ncost_per_trade: {value}\ninitial_capital: 100000\nrow_size: 24\n" + _PATHS,
+        f"risk_per_trade: 1000\ncost_per_trade: {value}\ninitial_capital: 100000\nrow_size: 24\n" + _TAIL,
     )
     with pytest.raises(ConfigError, match="cost_per_trade"):
         load_config(path, include_env=False)
@@ -284,7 +294,7 @@ def test_a_null_initial_capital_is_rejected_outright(tmp_path: Path) -> None:
     CONTEXT 3.5 states it, so a null is a config that LOST a spec value."""
     path = _write_config(
         tmp_path,
-        "risk_per_trade: 1000\ncost_per_trade: 100\ninitial_capital: null\nrow_size: 24\n" + _PATHS,
+        "risk_per_trade: 1000\ncost_per_trade: 100\ninitial_capital: null\nrow_size: 24\n" + _TAIL,
     )
     with pytest.raises(ConfigError, match="initial_capital"):
         load_config(path, include_env=False)
@@ -294,7 +304,7 @@ def test_a_null_initial_capital_is_rejected_outright(tmp_path: Path) -> None:
 def test_a_bad_initial_capital_is_rejected(tmp_path: Path, value: str) -> None:
     path = _write_config(
         tmp_path,
-        f"risk_per_trade: 1000\ncost_per_trade: 100\ninitial_capital: {value}\nrow_size: 24\n" + _PATHS,
+        f"risk_per_trade: 1000\ncost_per_trade: 100\ninitial_capital: {value}\nrow_size: 24\n" + _TAIL,
     )
     with pytest.raises(ConfigError, match="initial_capital"):
         load_config(path, include_env=False)
@@ -304,7 +314,7 @@ def test_a_config_missing_the_capital_key_is_rejected(tmp_path: Path) -> None:
     """A missing money key must not resolve to a default -- not even to CONTEXT 3.5's own
     figure, which is precisely what REVIEW_9A finding C1 found typed into portfolio.py."""
     path = _write_config(
-        tmp_path, "risk_per_trade: 1000\ncost_per_trade: 100\nrow_size: 24\n" + _PATHS
+        tmp_path, "risk_per_trade: 1000\ncost_per_trade: 100\nrow_size: 24\n" + _TAIL
     )
     with pytest.raises(ConfigError, match="Missing key"):
         load_config(path, include_env=False)
@@ -313,7 +323,7 @@ def test_a_config_missing_the_capital_key_is_rejected(tmp_path: Path) -> None:
 def test_a_fractional_paisa_initial_capital_is_refused(tmp_path: Path) -> None:
     path = _write_config(
         tmp_path,
-        "risk_per_trade: 1000\ncost_per_trade: 100\ninitial_capital: 100000.005\nrow_size: 24\n" + _PATHS,
+        "risk_per_trade: 1000\ncost_per_trade: 100\ninitial_capital: 100000.005\nrow_size: 24\n" + _TAIL,
     )
     with pytest.raises(ConfigError, match="whole number of paise"):
         load_config(path, include_env=False).initial_capital_paise()
@@ -412,9 +422,88 @@ def test_the_portfolio_layer_has_no_capital_default_left() -> None:
 def test_a_config_missing_the_cost_key_is_rejected(tmp_path: Path) -> None:
     """A missing money key must not resolve to a default (CLAUDE.md rule 1)."""
     path = _write_config(
-        tmp_path, "risk_per_trade: 1000\nrow_size: 24\n" + _PATHS
+        tmp_path, "risk_per_trade: 1000\nrow_size: 24\n" + _TAIL
     )
     with pytest.raises(ConfigError, match="Missing key"):
+        load_config(path, include_env=False)
+
+
+# --- Q-20: the PINNED instrument master ------------------------------------------------
+
+
+def test_the_repo_config_pins_the_instrument_master_the_ruling_names() -> None:
+    """QUESTIONS.md Q-20 (architect, 02-Aug-2026) pins ONE snapshot for the whole backtest.
+
+    The name is asserted because the ruling names it: the run's ticks -- and therefore CONTEXT
+    3.3's profile row grid and every POC on the 11 symbols whose tick the vendor moved -- are
+    the 2026-07-31 dump's, the one the Q-18 rebuild was built and gated under.
+    """
+    config = load_config(include_env=False)
+    assert config.instrument_master == "OpenAPIScripMaster_2026-07-31.json"
+
+
+def test_the_pin_resolves_under_cache_root_and_nowhere_else() -> None:
+    """The pin is a FILENAME; the loader is what turns it into a path, always under the cache."""
+    config = load_config(include_env=False)
+    resolved = config.instrument_master_path()
+    assert resolved.name == config.instrument_master
+    assert resolved.parent == config.path("cache_root") / "instrument_master"
+
+
+def test_the_config_and_the_instrument_master_module_spell_the_subdir_the_same() -> None:
+    """`config.MASTER_CACHE_SUBDIR` is duplicated rather than imported (no package-internal
+    dependency in the module everything imports). This pins the two spellings equal, so the
+    duplication can never drift into a pin that resolves to a directory nobody writes."""
+    from acumen import instrument_master as im
+    from acumen.config import MASTER_CACHE_SUBDIR
+
+    assert MASTER_CACHE_SUBDIR == im.CACHE_SUBDIR
+
+
+def test_a_config_that_loses_the_pin_refuses_to_load(tmp_path: Path) -> None:
+    """No default and no "newest wins" fallback -- that fallback IS what Q-20 retired."""
+    path = _write_config(
+        tmp_path,
+        "risk_per_trade: 1000\ncost_per_trade: 100\ninitial_capital: 100000\nrow_size: 24\n"
+        + _PATHS,
+    )
+    with pytest.raises(ConfigError, match="Missing key.*instrument_master"):
+        load_config(path, include_env=False)
+
+
+def test_a_null_pin_is_refused_and_names_the_ruling(tmp_path: Path) -> None:
+    path = _write_config(
+        tmp_path,
+        "risk_per_trade: 1000\ncost_per_trade: 100\ninitial_capital: 100000\nrow_size: 24\n"
+        "instrument_master: null\n" + _PATHS,
+    )
+    with pytest.raises(ConfigError) as excinfo:
+        load_config(path, include_env=False)
+    message = str(excinfo.value)
+    assert "Q-20" in message
+    assert "no default" in message
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "sub/OpenAPIScripMaster_2026-07-31.json",
+        "../OpenAPIScripMaster_2026-07-31.json",
+        "/tmp/OpenAPIScripMaster_2026-07-31.json",
+        "''",
+        "24",
+        "[a]",
+    ],
+)
+def test_a_pin_that_is_not_a_bare_filename_is_refused(tmp_path: Path, value: str) -> None:
+    """The pin may never reach outside the cache the operator snapshots -- so a separator, a
+    parent-directory hop, an absolute path, an empty value and a non-string are all refused."""
+    path = _write_config(
+        tmp_path,
+        "risk_per_trade: 1000\ncost_per_trade: 100\ninitial_capital: 100000\nrow_size: 24\n"
+        f"instrument_master: {value}\n" + _PATHS,
+    )
+    with pytest.raises(ConfigError, match="instrument_master"):
         load_config(path, include_env=False)
 
 
@@ -424,7 +513,7 @@ def test_a_config_missing_the_cost_key_is_rejected(tmp_path: Path) -> None:
 @pytest.mark.parametrize("value", ["0", "-3", "'24'", "24.5", "true"])
 def test_bad_row_size_is_rejected(tmp_path: Path, value: str) -> None:
     path = _write_config(
-        tmp_path, f"risk_per_trade: null\ncost_per_trade: 100\ninitial_capital: 100000\nrow_size: {value}\n" + _PATHS
+        tmp_path, f"risk_per_trade: null\ncost_per_trade: 100\ninitial_capital: 100000\nrow_size: {value}\n" + _TAIL
     )
     with pytest.raises(ConfigError, match="row_size"):
         load_config(path, include_env=False)
@@ -438,7 +527,7 @@ def test_unknown_key_is_rejected(tmp_path: Path) -> None:
 
 
 def test_missing_key_is_rejected(tmp_path: Path) -> None:
-    path = _write_config(tmp_path, "risk_per_trade: null\ncost_per_trade: 100\n" + _PATHS)
+    path = _write_config(tmp_path, "risk_per_trade: null\ncost_per_trade: 100\n" + _TAIL)
     with pytest.raises(ConfigError, match="Missing key"):
         load_config(path, include_env=False)
 
@@ -476,7 +565,7 @@ def test_missing_config_file_is_rejected(tmp_path: Path) -> None:
     ],
 )
 def test_bad_paths_block_is_rejected(tmp_path: Path, body: str) -> None:
-    path = _write_config(tmp_path, "risk_per_trade: null\ncost_per_trade: 100\ninitial_capital: 100000\nrow_size: 24\n" + body)
+    path = _write_config(tmp_path, "risk_per_trade: null\ncost_per_trade: 100\ninitial_capital: 100000\nrow_size: 24\n" + _PIN + body)
     with pytest.raises(ConfigError, match="paths"):
         load_config(path, include_env=False)
 
@@ -484,7 +573,10 @@ def test_bad_paths_block_is_rejected(tmp_path: Path, body: str) -> None:
 def test_absolute_path_values_are_kept_as_given(tmp_path: Path) -> None:
     absolute = (tmp_path / "store").as_posix()
     path = _write_config(
-        tmp_path, f"risk_per_trade: null\ncost_per_trade: 100\ninitial_capital: 100000\nrow_size: 24\npaths:\n  data_root: {absolute}\n  cache_root: {absolute}/cache\n"
+        tmp_path,
+        "risk_per_trade: null\ncost_per_trade: 100\ninitial_capital: 100000\nrow_size: 24\n"
+        + _PIN
+        + f"paths:\n  data_root: {absolute}\n  cache_root: {absolute}/cache\n",
     )
     assert load_config(path, include_env=False).path("data_root") == Path(absolute)
 
