@@ -1,6 +1,6 @@
 # CONTEXT.md — ACUMEN INTELLIGENCE · Master Specification
 
-**Version 1.4 · 29 July 2026 · THIS FILE IS LAW.**
+**Version 1.5 · 2 August 2026 · THIS FILE IS LAW.**
 Every build/review session reads this before touching code. Nothing here may be changed by any Claude Code session — spec changes flow only through the architect (the Cowork chat), arrive as a new version of this file, and are logged in §10. If reality and this file disagree, STOP and write it to QUESTIONS.md.
 
 ## Table of contents
@@ -197,15 +197,48 @@ Test oracle: NSE's official "Adjustment of F&O contracts Calculator" XLSX (`nsea
 3. **Adjustment sanity**: on every split/bonus ex-date in history, adjusted series must show |day-over-day gap| < 20% (unadjusted 1:10 split = −90% fake gap must disappear); validated against §4.2 oracle. **Also settles OPEN: SmartAPI 1-min adjustment status is UNVERIFIED — treated as RAW; this gate checks known split dates during backfill; if candles turn out pre-adjusted, architect updates §7-E11 before chunk 5 completes.**
 4. Old-history spot-check rides along with the full backfill (first run over 2016–2018) — same gates.
 
-## 4.6 MINUTE-LAKE FINAL STATE (v1.3 — the data era, sealed at tag chunk5B-pass)
-
-Everything below was proven by build + adversarial review (REVIEW_5A, REVIEW_5B, REVIEW_5B_2); the full ruling chain lives in QUESTIONS.md (Q-10…Q-14 with addenda).
-
-- **The vendor's 1-min feed is corporate-action back-adjusted, era-inconsistently, with per-EVENT and per-SIDE (price vs volume) application floors.** The store holds RAW prices, restored on ingest via measured per-symbol adjustment maps: candidates {ours, measured, absent} per event per side; application floors binary-searched; same-ex-date events compose into compound nodes; unparsed events enter as measured-or-absent nodes. All maps carry full probe provenance.
-- **Gate battery (per symbol-day, all three required for "usable"):** GATE 1 — volume reconciliation vs raw bhavcopy, band [−0.1%, +5.0%], with the evidence-gated auction-relief branch (above-ceiling only, extremes+open exact-match, ≤20% shortfall, counted separately). GATE 2 — integrity: duplicates, impossible OHLC, negatives, and missing-minutes only when gate 1 also fails (completeness = volume reconciliation, NOT minute counts; E4's minute-count trigger is retired; tradeless minutes are liquidity statistics). GATE 1P — per-day price containment: the day's fold [low,high] inside raw daily [low,high], tolerance max(2 paise, 0.1%) per side; no bhavcopy row → fail.
-- **Final coverage: 411,690 / 434,769 stored symbol-days pass all three gates = 94.69% — DoD (95%) NOT MET and formally architect-accepted** (under the battery the target was written against: 95.22%). 204 symbols settled, 6 quarantined (ASTRAL, IEX, NESTLEIND, NTPC, UPL, VBL). The **disclosed-residual register** (backfill report §3f) is the authoritative list of what is excluded and why.
-- **Chunk-9 duties (from REVIEW_5B_2):** recompute gate 1P per day (pure function, both stores local — there is no per-day exclusion file); read the residual register before any per-symbol statistic; note IOC (41.9% price-proven) and TATASTEEL (65.8%) are settled-but-partial under B149 — their backtests cover a minority of stored history, concentrated in recent years.
-- **Next-data-work list (frozen, not chased):** volume_measured one-word semantic fix (REVIEW_5B_2 Q2); bhavcopy ingest to clear the 178-day store-lag no-oracle failures (C2); probe-tolerance shape (quorum vs universal — the IOC 0.34-paise cascade, REVIEW_5B Q9); prose sites still saying "2-paise" (Q1).
+## 4.6 MINUTE-LAKE FINAL STATE (v1.5 — the data era, RE-SEALED after Q-18)
+The original era (sealed at chunk5B-pass: 434,769 stored / 411,690 passing =
+94.6917%, 204 settled / 6 quarantined) was destroyed by the Q-18 incident and
+rebuilt through the same reviewed pipeline, then reconciled divergence by
+divergence against the sealed numbers. docs/recovery/q18_reconciliation.md is
+the authoritative delta record: 422 divergences, ZERO unexplained.
+- RE-SEALED NUMBERS: 435,641 stored symbol-days; 409,252 pass all three gates
+  = 93.9425%; 204 settled; 6 quarantined (APLAPOLLO, ASTRAL, IEX, NTPC, UPL,
+  VBL). Minute era 2016-10-03 → 2026-07-31; daily store 2000-01-01 →
+  2026-07-30 (6,610 file-present, error 0, never-attempted 0 — the v1.3
+  178-day store lag is CLEARED).
+- DIVERGENCE CLASSES vs the original seal, all explained: sealed-fetch-horizon
+  414 (the original backfill's per-symbol fetch horizon ended 2026-07-24..28,
+  earlier than its report label — an artifact, not drift); vendor-snapshot-
+  drift 5 (the vendor's minute feed is a TODAY-snapshot of its own back-
+  adjustment; contiguous era-keyed blocks with exact CA-factor price ratios
+  and reciprocal volume: APLAPOLLO −467 gate-1 days → QUARANTINED at 77.9%,
+  GAIL −60 incl. a per-side floor no longer earned, POWERGRID −23, LODHA −21;
+  days honestly refused by the gates); vendor-repair 3 (NESTLEIND's
+  pre-2020-10-29 era repaired → SETTLED, 998 days recovered, hand-verified;
+  BSE VOLUME-ONLY: gate-1 +80 but prices at exactly 3.0× the exchange →
+  usable +2, NOT +84 — reading BSE's gate-1 improvement as coverage is WRONG).
+- GATE BATTERY unchanged (gate 1 volume band + evidence-gated auction relief;
+  gate 2 integrity; gate 1P price containment, max(2 paise, 0.1%)/side; no
+  raw daily row → gate-1P fail). The gates were re-run, never edited.
+- Q-17 IS LAW: a stored 1-minute bar stamped outside 09:15..15:29 is dropped
+  at the CANDLE level, flagged and counted, never silently — uniform for
+  pre-open and post-close strays; gates still see the whole stored day for
+  volume (NSE daily volume includes auctions).
+- Q-19 IS LAW: a confirmed-404 bhavcopy may be SEALED as a non-trading day
+  only when the date is more than 7 calendar days in the past; younger 404s
+  record as PENDING and are retried. Measured residue at re-seal: 208 gate-1P
+  no-oracle days, all 2026-07-31 (minute store one day ahead of the daily
+  store), 0.048 pp — cleared by the next bhavcopy top-up.
+- E5 CLARIFICATION: a REBUILD uses the sealed universe list (frozen snapshot
+  docs/recovery/sealed_universe_210.json); today's F&O list applies only to a
+  deliberate, architect-signed universe refresh.
+- The disclosed-residual register is the REBUILT one and governs; settled-but-
+  partial symbols (IOC, TATASTEEL — B149) are quoted from the register's own
+  current figures, which every manifest carries verbatim. Chunk-9 duties
+  (recompute gate 1P per day; read the register before any per-symbol
+  statistic) unchanged.
 
 ## 5. TradingView replication facts (why our POC = his POC)
 
@@ -286,6 +319,7 @@ Precedence if conflict is ever found: trader's R2 answers > R1 answers > PDF tex
 
 | Version | Date | Change |
 |---|---|---|
+| 1.5 | 02-Aug-2026 | Q-18 re-seal: era rebuilt and reconciled to ZERO unexplained (docs/recovery/q18_reconciliation.md is the delta record); §4.6 rewritten with the re-sealed numbers (435,641 / 409,252 = 93.9425%; APLAPOLLO in, NESTLEIND out of quarantine; BSE volume-only caveat); Q-17 candle-level drop and Q-19 7-day 404-sealing guard made law; E5 rebuild-universe clarification; daily store extended to 2026-07-30 |
 | 1.4 | 29-Jul-2026 | Q-15 ruling (option a): F1/F2's illustrative POC → 2032 (PDF's 2030 provably inconsistent with the trader's own gap rule — while ARMED no prior close exceeds the POC, so a gap-branch stop can never be 2032; precedence §10: later answers correct earlier text). §3.4 untouched; F4 remains the gap witness; low == POC → NORMAL branch is the taught boundary |
 | 1.3 | 29-Jul-2026 | Round-3 answers + data-era close, batched: §3.2 tie rule rewritten (color irrelevant — trader overturned green-mirror + doji-carry; bullish-precedence close-vs-body rule); §3.3 window confirmed 8-candle, tpr-tie → finer (Q-13 ruled), rounding half-even pinned, N=24 confirmed; §3.4 ==POC wait rule + side-only first distinct close (Q34b/Q41-A); §3.5 risk ₹1,000 + take-all confirmed (Q40-d) with capital-infeasibility flags; NEW §4.6 minute-lake final state (measured adjustment maps, floors per event per side, 3-gate battery incl. gate 1P, coverage 94.69% architect-accepted, residual register, chunk-9 duties, next-data-work list); §8 F5 extended to 3 sub-fixtures; §9 registry: everything resolved except OPEN-5 (v2); both trader gates recorded CLOSED |
 | 1.2 | 23-Jul-2026 | Added E13 (authoritative report-metric list & conventions incl. buy&hold benchmark definition — plan.md chunk 10 depends on it); repo layout gains STATUS.md ledger + docs/reviews/; DESIGN.md corrected to chunk 11 |
