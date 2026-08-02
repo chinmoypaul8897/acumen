@@ -261,7 +261,10 @@ def fake_pilot(rows) -> pe.PilotRun:
     )
     manifest = {
         "outcomes": bt.outcome_counts(rows),
-        "residual_register": {"caveat": bt.RESIDUAL_CAVEAT},
+        "residual_register": {
+            "caveat": bt.residual_caveat({}),
+            "per_symbol": {},
+        },
         "capital_flags": {"computed": False},
     }
     result = bt.RunResult(

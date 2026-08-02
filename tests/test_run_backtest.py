@@ -22,7 +22,8 @@ ASCII-only, like every other source file in this repo (chunk-0 B7).
 from __future__ import annotations
 
 import json
-from dataclasses import replace
+import os
+from dataclasses import fields, replace
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
 
@@ -30,6 +31,7 @@ import pytest
 
 from acumen import backtest as bt
 from acumen import run_backtest as rb
+from acumen.config import ConfigError
 from acumen.minute_store import MinuteStore
 
 from tests.test_backtest import (
@@ -559,3 +561,122 @@ def _cache_with_master(tmp_path: Path) -> Path:
         encoding="utf-8",
     )
     return tmp_path / "cache"
+
+
+# --- CLAUDE.md Q-18 layer 3: the store-freshness stamps ------------------------------------
+#
+# The layer's own words: "The operator keeps TWO snapshot generations; a new snapshot never
+# overwrites the previous until verified. The preflight prints the stores' last-changed
+# timestamps so the operator can confirm the snapshot is newer." These pin the instrument that
+# sentence promises. It is advisory -- it must never fail a preflight and must never reach the
+# run manifest, which stays byte-identical across runs and therefore carries no clock read.
+
+
+def test_a_store_stamp_reports_the_newest_mtime_anywhere_under_the_root(
+    tmp_path: Path,
+) -> None:
+    """A file rewritten DEEP inside the tree must move the number the operator compares to.
+
+    This is the whole point: the stores are nested (minute_store/minute/<SYMBOL>/*.parquet), so
+    a stamp taken from the root directory's own mtime would sit still while the lake changed
+    underneath it, and an out-of-date snapshot would be accepted.
+    """
+    root = tmp_path / "store"
+    deep = root / "minute_store" / "minute" / "ACME"
+    deep.mkdir(parents=True)
+    (deep / "ACME_2016-10.parquet").write_text("x", encoding="utf-8")
+
+    old = datetime(2020, 1, 1, 9, 15).timestamp()
+    for path in (root, root / "minute_store", root / "minute_store" / "minute", deep,
+                 deep / "ACME_2016-10.parquet"):
+        os.utime(path, (old, old))
+    assert rb.store_last_changed("data_root", root).last_changed == datetime(2020, 1, 1, 9, 15)
+
+    newer = datetime(2026, 8, 2, 1, 21, 16).timestamp()
+    os.utime(deep / "ACME_2016-10.parquet", (newer, newer))
+    stamp = rb.store_last_changed("data_root", root)
+    assert stamp.last_changed == datetime(2026, 8, 2, 1, 21, 16)
+    assert stamp.exists is True
+    assert stamp.entries == 4, "3 nested directories + 1 parquet"
+
+
+def test_a_missing_store_root_stamps_as_missing_rather_than_raising(tmp_path: Path) -> None:
+    """A store that is not there is an operator fact, not an exception."""
+    stamp = rb.store_last_changed("cache_root", tmp_path / "gone")
+    assert stamp.exists is False
+    assert stamp.last_changed is None
+    assert stamp.entries == 0
+    assert "MISSING" in stamp.line(len("cache_root"))
+
+
+def test_the_freshness_block_is_rendered_with_both_roots_and_the_two_generation_rule() -> None:
+    """The operator must be able to answer "is my snapshot newer?" from the print-out alone."""
+    report = rb.Preflight(
+        checks=(rb.Check("a", True, ""),),
+        symbols=("AAA",),
+        start=date(2016, 10, 3),
+        end=date(2026, 7, 30),
+        data_dir=Path("X:/acumen-data"),
+        run_dir=Path("X:/acumen-data/backtests/x"),
+        store_stamps=(
+            rb.StoreStamp("data_root", Path("X:/acumen-data"), True,
+                          datetime(2026, 8, 2, 1, 21, 16), 21_837),
+            rb.StoreStamp("cache_root", Path("X:/acumen-data/cache"), True,
+                          datetime(2026, 8, 2, 1, 17, 8), 2),
+        ),
+    )
+    text = "\n".join(rb.render_preflight(report, label="unit", command="cmd"))
+    assert "STORE FRESHNESS" in text
+    assert "2026-08-02 01:21:16" in text and "2026-08-02 01:17:08" in text
+    assert "21,837 entries" in text
+    assert "data_root" in text and "cache_root" in text
+    assert "TWO generations" in text
+    assert "OPERATOR" in text, "snapshotting is never a session's job"
+
+
+def test_the_freshness_stamps_never_reach_the_run_manifest() -> None:
+    """`notes` flow into the manifest's disclosures; `store_stamps` must NOT.
+
+    A clock read on the manifest would move its digest on every run and destroy the
+    byte-identical-resume property chunk 9A proved.
+    """
+    assert "store_stamps" not in {field.name for field in fields(bt.RunSpec)}
+    stamped = rb.Preflight(
+        checks=(rb.Check("a", True, ""),),
+        symbols=("AAA",),
+        start=date(2016, 10, 3),
+        end=date(2026, 7, 30),
+        data_dir=Path("X:/acumen-data"),
+        run_dir=Path("X:/acumen-data/backtests/x"),
+        notes=("a real disclosed condition",),
+        store_stamps=(
+            rb.StoreStamp("data_root", Path("X:/acumen-data"), True, datetime.now(), 1),
+        ),
+    )
+    # main() builds disclosures from report.notes ONLY -- this is that expression, pinned.
+    disclosures = (bt.CAPITAL_FLAGS_PENDING_NOTE, rb.Q44_PENDING_STAMP, rb.Q44_ESCALATION,
+                   *stamped.notes)
+    assert "a real disclosed condition" in disclosures
+    assert not any("last changed" in sentence for sentence in disclosures)
+    assert not any("STORE FRESHNESS" in sentence for sentence in disclosures)
+
+
+def test_a_preflight_that_could_not_read_the_config_invents_no_store_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The one branch where the store roots are UNKNOWN must say so, not guess `data/`.
+
+    Before the Q-18 migration this branch fell back to a repo-relative ``Path("data")``, which
+    is precisely the in-repo location CLAUDE.md layer 1 abolished.
+    """
+    def refuse(*_args: object, **_kwargs: object):
+        raise ConfigError("config.yaml is unreadable")
+
+    monkeypatch.setattr(rb, "load_config", refuse)
+    report = rb.preflight(label="unit")
+    assert report.ok is False
+    assert report.data_dir is None and report.run_dir is None
+    # And the renderer must survive it: NO-GO reads neither field.
+    text = "\n".join(rb.render_preflight(report, label="unit", command="cmd"))
+    assert "NO-GO" in text
+    assert "data/backtests" not in text

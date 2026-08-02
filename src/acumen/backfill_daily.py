@@ -114,11 +114,31 @@ def default_store_root() -> Path:
 
 
 def resolve_dates(store: DailyStore, start: date, end: date, *, retry_errors: bool) -> list[date]:
-    """The dates this run should attempt, oldest first."""
+    """The dates this run should attempt, oldest first.
+
+    ``--no-retry-errors`` suppresses exactly ONE thing: re-asking a date whose last outcome was
+    an ``error``. It must not also suppress a Q-19 ``pending`` date. The two are both
+    non-terminal but they mean opposite things -- an error is "we asked and the network
+    failed", a pending is "we asked, got a 404, and the file is too young for that 404 to be
+    final" (CONTEXT 4.6 v1.5). A pending date settles by simply being asked again once it is
+    more than seven calendar days old, so dropping it would leave the last week of the store
+    permanently unsettled and the trading calendar refusing to derive over it -- while the run
+    summary told the operator that re-running would settle it.
+
+    Filtering on ledger MEMBERSHIP would do exactly that, because a pending row IS in the
+    ledger. This mirrors :meth:`acumen.minute_store.MinuteStore.pending_windows`, which keys on
+    terminality and treats the error case as the only opt-out.
+    """
     if retry_errors:
         return list(store.pending_dates(start, end))
-    known = store.outcomes()
-    return [day for day in bhavcopy.date_range(start, end) if day not in known]
+    settled_or_errored = {
+        day
+        for day, outcome in store.outcomes().items()
+        if outcome.is_terminal or outcome.outcome == bhavcopy.OUTCOME_ERROR
+    }
+    return [
+        day for day in bhavcopy.date_range(start, end) if day not in settled_or_errored
+    ]
 
 
 def run(args: argparse.Namespace) -> int:

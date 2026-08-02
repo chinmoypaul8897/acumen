@@ -99,12 +99,50 @@ REASON_BIAS_UNRESOLVED: str = "bias unresolvable (CONTEXT 3.2 pair could not be 
 STATUS_EVALUATED: str = "evaluated"
 STATUS_REFUSED: str = "refused"
 
-#: CONTEXT 4.6's chunk-9 duty, carried VERBATIM into every manifest and every report built on
-#: it: the two settled-but-partial symbols whose backtests cover a minority of stored history.
-RESIDUAL_CAVEAT: str = (
-    "IOC (41.9% price-proven) and TATASTEEL (65.8%) are settled-but-partial under B149 -- "
-    "their backtests cover a minority of stored history, concentrated in recent years."
-)
+#: The settled-but-partial symbols CONTEXT 4.6 names under B149. The SYMBOLS are spec (the
+#: section names them outright); their FIGURES are not, and are never typed here.
+SETTLED_BUT_PARTIAL: tuple[str, ...] = ("IOC", "TATASTEEL")
+
+
+def residual_caveat(register: Mapping[str, ResidualEntry]) -> str:
+    """CONTEXT 4.6's chunk-9 caveat, quoted from the REGISTER'S OWN CURRENT FIGURES.
+
+    CONTEXT 4.6 (v1.5) is explicit about where the numbers come from: *"settled-but-partial
+    symbols (IOC, TATASTEEL -- B149) are quoted from the register's own current figures, which
+    every manifest carries verbatim."* Before v1.5 this was a frozen string carrying the
+    pre-Q-18 era's percentages; after the re-seal those percentages describe a store that no
+    longer exists. The rebuilt register puts IOC at 1,024/2,436 -- **42.0%**, not the 41.9%
+    the frozen sentence claimed -- so the old constant was not merely stale, it was wrong, and
+    it was wrong on the manifest, which is the qualification record of a money-bearing ledger.
+
+    Percentages are computed in :class:`~fractions.Fraction` and rounded half-even to one
+    decimal, so no float ever touches a figure that goes into a manifest (CONTEXT 7-E11).
+
+    Args:
+        register: the disclosed-residual register, as loaded by
+            :func:`load_residual_register`.
+
+    Returns:
+        The caveat sentence. A symbol the register does not carry is named as absent rather
+        than silently dropped -- a caveat that quietly loses one of its two subjects would
+        read as an all-clear.
+    """
+    parts: list[str] = []
+    for symbol in SETTLED_BUT_PARTIAL:
+        entry = register.get(symbol)
+        if entry is None:
+            parts.append(f"{symbol} (ABSENT from the register)")
+            continue
+        ratio = entry.price_proven_ratio
+        if ratio is None:
+            parts.append(f"{symbol} (no gate-1P denominator in the register)")
+            continue
+        tenths = round(ratio * 100 * 10)  # Fraction -> exact, half-even, tenths of a percent
+        parts.append(f"{symbol} ({tenths // 10}.{tenths % 10}% price-proven)")
+    return (
+        f"{' and '.join(parts)} are settled-but-partial under B149 -- their backtests cover "
+        "only part of stored history, concentrated in recent years."
+    )
 
 #: Where the chunk-5B run ledger lives, relative to ``data_root``. It is the machine-readable
 #: face of the disclosed-residual register (backfill report section 3f).
@@ -1039,7 +1077,7 @@ class BacktestRunner:
         return {
             "acknowledged": True,
             "source": RESIDUAL_LEDGER_RELPATH,
-            "caveat": RESIDUAL_CAVEAT,
+            "caveat": residual_caveat(self.residual),
             "per_symbol": entries,
             "not_in_register": missing,
         }

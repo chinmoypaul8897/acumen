@@ -143,9 +143,12 @@ def run(out_path: Path | None) -> int:
         "on this machine -- re-running the same backtest two days apart would build a different",
         "row grid for these symbols, and CONTEXT 3.3's POC would move with it, silently.",
         "",
-        "The run manifest already RECORDS which master a run used, by filename. Nothing PINS",
-        "it. Which snapshot a historical backtest must use is unanswered by CONTEXT.md, so the",
-        "chunk-9B RESUME-1 session refused to choose and raised **QUESTIONS.md Q-20**.",
+        "The run manifest does NOT record which master a run used: `build_manifest` in",
+        "`src/acumen/backtest.py` has no master field, and `execute` prints the filename to",
+        "stdout and drops it. So the tick input is neither PINNED nor RECORDED -- a finished",
+        "ledger cannot be traced back to the ticks that shaped its POCs. Which snapshot a",
+        "historical backtest must use is unanswered by CONTEXT.md, so the chunk-9B RESUME-1",
+        "session refused to choose and raised **QUESTIONS.md Q-20**.",
         "",
     ]
     text = "\n".join(lines) + "\n"

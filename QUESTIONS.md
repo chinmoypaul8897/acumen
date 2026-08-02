@@ -2743,8 +2743,15 @@ day out by Rs 0.87 to Rs 78, which is why Q-2 was ruled the way it was.
 
 It also touches CONTEXT 6's no-drift property and the run's reproducibility: re-running the
 same span two days apart would move POCs on these 11 symbols with no code change and no data
-change. The manifest RECORDS the master by filename (so a ledger is at least attributable);
-nothing PINS it.
+change.
+
+**And the ledger cannot even be traced back to its tick source.** This session first wrote
+that the run manifest "records the master by filename"; that is FALSE and is corrected here.
+`BacktestRunner.build_manifest` (`src/acumen/backtest.py`) carries no master field of any
+kind -- `build_runner` returns `master_path`, and `execute` prints it to stdout and drops it.
+So the master's filename survives only in whatever console log the operator happened to keep.
+Nothing PINS the tick input and nothing RECORDS it either, which removes the one mitigation
+option (b) below appeared to have.
 
 **What blocks.** The chunk-9B RUN (RESUME-2) — specifically which master it reads. Nothing in
 RESUME-1: this session shipped CONTEXT v1.5, the store migration and the Q-19 guard, none of
@@ -2762,7 +2769,9 @@ evidence instead of being resolved. No master was fetched (this session made no 
     costs a stale tick for any symbol NSE genuinely re-banded since.
 (b) **Newest wins, disclosed** (status quo behaviour, ruled rather than inherited): the run
     uses the newest cached master and the manifest carries the 11-symbol delta as a disclosed
-    condition, so a reader knows which symbols' grids depend on the pull date.
+    condition, so a reader knows which symbols' grids depend on the pull date. NOTE: this
+    option is only meaningful if the manifest also starts RECORDING the master filename, which
+    today it does not.
 (c) **Freeze a tick snapshot for the sealed universe**, committed like
     `docs/recovery/sealed_universe_210.json`, with the master remaining the source for
     everything else — the Q-2 precedent (a frozen fixture for the calibration ticks) extended

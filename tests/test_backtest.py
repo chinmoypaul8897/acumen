@@ -684,12 +684,24 @@ def test_the_manifest_counts_every_rare_shape_even_at_zero(tmp_path: Path) -> No
 def test_the_manifest_carries_the_residual_register_acknowledgment_verbatim(
     tmp_path: Path,
 ) -> None:
-    manifest = make_runner(tmp_path).run(tmp_path / "run").manifest
+    # CONTEXT 4.6 (v1.5): the settled-but-partial figures are "quoted from the register's own
+    # current figures", never a frozen string. These are the REBUILT register's real numbers.
+    residual = {
+        SYMBOL: bt.ResidualEntry(SYMBOL, "settled", 100, 100, 0, ""),
+        "IOC": bt.ResidualEntry("IOC", "settled", 1024, 2436, 1, ""),
+        "TATASTEEL": bt.ResidualEntry("TATASTEEL", "settled", 1604, 2436, 1, ""),
+    }
+    manifest = make_runner(tmp_path, residual=residual).run(tmp_path / "run").manifest
     register = manifest["residual_register"]
     assert register["acknowledged"] is True
-    assert register["caveat"] == bt.RESIDUAL_CAVEAT
-    assert "IOC (41.9% price-proven)" in register["caveat"]
-    assert "TATASTEEL (65.8%)" in register["caveat"]
+    assert register["caveat"] == (
+        "IOC (42.0% price-proven) and TATASTEEL (65.8% price-proven) are settled-but-partial "
+        "under B149 -- their backtests cover only part of stored history, concentrated in "
+        "recent years."
+    )
+    # The pre-Q-18 era's IOC figure was 41.9%; the rebuilt register says 42.0%. A frozen
+    # string would still be claiming the destroyed era's number here.
+    assert "41.9%" not in register["caveat"]
     assert register["per_symbol"][SYMBOL]["status"] == "settled"
 
 

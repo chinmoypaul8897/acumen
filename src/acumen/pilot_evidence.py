@@ -970,7 +970,8 @@ def render_markdown(
     add(
         f"* **The disclosed-residual register was read before any per-symbol statistic** "
         f"(`{bt.RESIDUAL_LEDGER_RELPATH}`, CONTEXT 4.6's chunk-9 duty). Carried verbatim into "
-        f"every manifest this runner writes: \"{bt.RESIDUAL_CAVEAT}\""
+        f"every manifest this runner writes: "
+        f"\"{manifest['residual_register']['caveat']}\""
     )
     add(
         f"* **{bt.CAPITAL_FLAGS_PENDING_NOTE}.** `capital_reference` and `margin_basis` are "
@@ -1516,8 +1517,26 @@ def invariant_report(
         resume.identical,
     )
     check(
-        "the manifest carries CONTEXT 4.6's residual caveat verbatim",
-        manifest["residual_register"]["caveat"] == bt.RESIDUAL_CAVEAT,
+        # CONTEXT 4.6 (v1.5): the settled-but-partial figures are "quoted from the register's
+        # own current figures, which every manifest carries verbatim". So the invariant is
+        # INTERNAL CONSISTENCY -- the caveat sentence must be the one this manifest's OWN
+        # per-symbol register entries produce. Reconstructing the entries from the manifest
+        # keeps the check offline and makes it impossible to satisfy with a frozen string.
+        "the manifest's residual caveat quotes its own register entries (CONTEXT 4.6 v1.5)",
+        manifest["residual_register"]["caveat"]
+        == bt.residual_caveat(
+            {
+                symbol: bt.ResidualEntry(
+                    symbol=entry["symbol"],
+                    status=entry["status"],
+                    gate1p_pass=entry["gate1p_pass"],
+                    gate1p_total=entry["gate1p_total"],
+                    gate1p_no_oracle=entry["gate1p_no_oracle"],
+                    residual_reason=entry["residual_reason"],
+                )
+                for symbol, entry in manifest["residual_register"]["per_symbol"].items()
+            }
+        ),
     )
     check(
         "the capital-infeasibility flags are NOT computed (Q43 pending)",

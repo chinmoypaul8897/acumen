@@ -48,6 +48,7 @@ from acumen.bhavcopy import (
     url_for,
 )
 from acumen.calendar import CalendarError, TradingCalendar
+from acumen import backfill_daily as bd
 from acumen.daily_store import DailyStore
 
 #: The Q-19 incident's own clock: Friday 2026-07-31, 10:21 IST, market open.
@@ -313,3 +314,39 @@ def test_the_deferred_day_is_recovered_by_the_next_run_not_lost(tmp_path: Path) 
     assert calendar.is_trading_day(date(2026, 7, 31)) is True
     assert calendar.is_trading_day(date(2026, 7, 26)) is False, "a Sunday, sealed on the retry"
     assert calendar.bias_pair(date(2026, 7, 31)) == (date(2026, 7, 30), date(2026, 7, 29))
+
+
+def test_no_retry_errors_still_re_asks_a_pending_date(tmp_path: Path) -> None:
+    """`--no-retry-errors` opts out of ERRORS only -- never out of a Q-19 deferral.
+
+    The two are both non-terminal and they mean opposite things. An error is "we asked and the
+    network failed"; a pending is "we asked, got a 404, and the file is too young for that 404
+    to be final". A pending date settles simply by being asked again once it is more than seven
+    calendar days old, so dropping it from the resume list would leave the last week of the
+    store permanently unsettled -- and the trading calendar refuses to derive over it, forever.
+
+    Filtering the resume list on ledger MEMBERSHIP would do exactly that, because a pending row
+    IS in the ledger. This is the regression for that.
+    """
+    store = DailyStore.at(tmp_path / "store")
+    young = date(2026, 7, 31)
+    old_error = date(2026, 7, 20)
+    settled = date(2026, 7, 30)
+
+    store.ingest(_fetch(young, now=SMOKE_RUN))  # 404, too young -> pending
+    store.record_outcomes(
+        [
+            DateOutcome(trade_date=settled, outcome=OUTCOME_PRESENT, row_count=1),
+            DateOutcome(trade_date=old_error, outcome=OUTCOME_ERROR, reason="timeout"),
+        ]
+    )
+    assert store.outcomes()[young].outcome == OUTCOME_PENDING
+
+    window = (date(2026, 7, 20), date(2026, 7, 31))
+    with_retries = bd.resolve_dates(store, *window, retry_errors=True)
+    without = bd.resolve_dates(store, *window, retry_errors=False)
+
+    assert old_error in with_retries and old_error not in without, "the flag's actual job"
+    assert young in with_retries, "a pending date is always re-asked"
+    assert young in without, "and --no-retry-errors must NOT silently drop it"
+    assert settled not in with_retries and settled not in without, "settled stays settled"

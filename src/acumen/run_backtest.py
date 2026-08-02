@@ -417,7 +417,7 @@ def preflight(
         register = bt.load_residual_register(data / bt.RESIDUAL_LEDGER_RELPATH)
         register_ok, register_detail = True, (
             f"{len(register)} symbol(s) from {bt.RESIDUAL_LEDGER_RELPATH}; caveat carried "
-            f'verbatim: "{bt.RESIDUAL_CAVEAT}"'
+            f'verbatim: "{bt.residual_caveat(register)}"'
         )
     except bt.BacktestError as exc:
         register_ok, register_detail = False, str(exc)
