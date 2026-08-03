@@ -245,6 +245,26 @@ def test_the_disclosures_reach_the_manifest_verbatim_and_in_order(tmp_path: Path
     assert manifest["capital_flags"]["note"] == bt.CAPITAL_FLAGS_PENDING_NOTE
 
 
+def test_the_q21b_disclosure_names_the_ruling_its_evidence_and_its_own_limits() -> None:
+    """QUESTIONS.md Q-21(b)'s blast radius rides on the manifest, so a reader of the LEDGER
+    alone knows how many rows the ruling costs before opening the repo.
+
+    Three properties are pinned, all of which keep the sentence honest as the era moves: it
+    names the RULING (not a session's paraphrase), it cites the committed evidence that produced
+    its figures, and it says outright that the figures are a PRE-RUN measurement while this
+    ledger's own count is the rare-shape counter -- so a stale figure can never be read as a
+    claim about the ledger it is stamped on.
+    """
+    assert "Q-21(b)" in rb.Q21B_BLAST_RADIUS
+    assert "docs/evidence/chunk9b_q21b_blast_radius.md" in rb.Q21B_BLAST_RADIUS
+    assert "pre-run measurement" in rb.Q21B_BLAST_RADIUS
+    assert "rare-shape counter" in rb.Q21B_BLAST_RADIUS
+    # ...and the counter it points at is a real one, spelled the same way
+    assert any(
+        "battery-failing D-1" in label for label in bt.RARE_SHAPE_LABELS
+    ), "the disclosure points at a rare shape the manifest does not carry"
+
+
 def test_the_q44_stamp_is_the_rulings_own_sentence() -> None:
     """Pinned as a literal so a later edit cannot soften it into something the architect did
     not write, and so the escalation travels with it."""
@@ -787,7 +807,7 @@ def test_the_freshness_stamps_never_reach_the_run_manifest() -> None:
     )
     # main() builds disclosures from report.notes ONLY -- this is that expression, pinned.
     disclosures = (bt.CAPITAL_FLAGS_PENDING_NOTE, rb.Q44_PENDING_STAMP, rb.Q44_ESCALATION,
-                   *stamped.notes)
+                   rb.Q21B_BLAST_RADIUS, *stamped.notes)
     assert "a real disclosed condition" in disclosures
     assert not any("last changed" in sentence for sentence in disclosures)
     assert not any("STORE FRESHNESS" in sentence for sentence in disclosures)

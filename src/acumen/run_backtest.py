@@ -91,6 +91,27 @@ Q44_ESCALATION: str = (
     "(architect's GO ruling, 31-Jul-2026)"
 )
 
+#: The architect's Q-21(b) ruling and the blast radius MEASURED under it before the relaunch,
+#: stamped on the manifest so a reader of the ledger alone knows how many rows the ruling costs
+#: and why they are refusals rather than trades.
+#:
+#: The figures are a PRE-RUN measurement of the sealed era, dated and traceable to the committed
+#: evidence that produced them -- they are not this ledger's own count. The ledger's own count is
+#: the manifest's ``rare_shapes`` entry, derived from the row flags and recomputable from the
+#: committed ledger alone; the last sentence says so, so a future era whose measurement has moved
+#: leaves a disclosure that is still true rather than one that is quietly wrong.
+Q21B_BLAST_RADIUS: str = (
+    "QUESTIONS.md Q-21(b) (architect, 03-Aug-2026): a day's minutes may serve a CONTEXT 3.2 "
+    "Rule-3 first-break scan ONLY if that day passes the CONTEXT 4.5/4.6 gate battery, so a "
+    "battery-failing D-1 makes the bias UNRESOLVABLE and its trade day is REFUSED and counted "
+    "under 'rule-3 day refused on a battery-failing D-1'. MEASURED read-only over the sealed era "
+    "before this run (03-Aug-2026, docs/evidence/chunk9b_q21b_blast_radius.md): of the 7,031 "
+    "trade days that reach the Rule-3 scan across the 204 settled symbols, 209 have a "
+    "battery-failing D-1 -- 121 refused by gate 1, 88 by gate 1P -- spread over 59 symbols, with "
+    "189 of the 209 (90%) taking a D-1 from 2016-2021. That figure is the pre-run measurement; "
+    "THIS ledger's own count is the rare-shape counter below, derived from the row flags."
+)
+
 
 class PreflightError(RuntimeError):
     """A preflight check could not even be attempted -- distinct from a check that FAILED."""
@@ -948,6 +969,7 @@ def main(argv: list[str] | None = None) -> int:
             bt.CAPITAL_FLAGS_PENDING_NOTE,
             Q44_PENDING_STAMP,
             Q44_ESCALATION,
+            Q21B_BLAST_RADIUS,
             *report.notes,
         ),
         master_path=report.master_path,
