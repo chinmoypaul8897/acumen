@@ -105,10 +105,14 @@ Q21B_BLAST_RADIUS: str = (
     "Rule-3 first-break scan ONLY if that day passes the CONTEXT 4.5/4.6 gate battery, so a "
     "battery-failing D-1 makes the bias UNRESOLVABLE and its trade day is REFUSED and counted "
     "under 'rule-3 day refused on a battery-failing D-1'. MEASURED read-only over the sealed era "
-    "before this run (03-Aug-2026, docs/evidence/chunk9b_q21b_blast_radius.md): of the 7,031 "
-    "trade days that reach the Rule-3 scan across the 204 settled symbols, 209 have a "
-    "battery-failing D-1 -- 121 refused by gate 1, 88 by gate 1P -- spread over 59 symbols, with "
-    "189 of the 209 (90%) taking a D-1 from 2016-2021. That figure is the pre-run measurement; "
+    "before this run, under CONTEXT v1.6's completed gate 2 (03-Aug-2026, "
+    "docs/evidence/chunk9b_q21b_blast_radius.md): of the 7,031 "
+    "trade days that reach the Rule-3 scan across the 204 settled symbols, 210 have a "
+    "battery-failing D-1 -- 121 refused by gate 1, 88 by gate 1P, 1 by gate 2 -- spread over 59 "
+    "symbols, with 189 of the 210 (90%) taking a D-1 from 2016-2021. The gate-2 row is the "
+    "Q-21(a) completion's own arrival (JUBLFOOD 2023-03-06, whose D-1 carries the bar that "
+    "killed the first run): it was already refused under the malformed-bar case, so no ledger "
+    "row was added by it, only re-counted. That figure is the pre-run measurement; "
     "THIS ledger's own count is the rare-shape counter below, derived from the row flags."
 )
 

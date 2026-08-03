@@ -263,6 +263,11 @@ def test_the_q21b_disclosure_names_the_ruling_its_evidence_and_its_own_limits() 
     assert any(
         "battery-failing D-1" in label for label in bt.RARE_SHAPE_LABELS
     ), "the disclosure points at a rare shape the manifest does not carry"
+    # ...and it was REMEASURED under the law the run actually implements. The Q-21(a) completion
+    # (CONTEXT v1.6) moved the radius from 209 to 210 and gave gate 2 its first row, so a
+    # disclosure still naming only gates 1 and 1P would be a v1.5 figure stamped on a v1.6 ledger.
+    assert "v1.6" in rb.Q21B_BLAST_RADIUS and bt.SPEC_VERSION == "v1.6"
+    assert "1 by gate 2" in rb.Q21B_BLAST_RADIUS
 
 
 def test_the_q44_stamp_is_the_rulings_own_sentence() -> None:

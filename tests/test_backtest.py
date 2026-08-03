@@ -696,7 +696,7 @@ def test_the_manifest_carries_the_spec_version_code_sha_and_config_digest(
     tmp_path: Path,
 ) -> None:
     manifest = make_runner(tmp_path).run(tmp_path / "run").manifest
-    assert manifest["spec_version"] == "v1.5"
+    assert manifest["spec_version"] == "v1.6"
     assert manifest["code_sha"] == "0" * 40
     assert manifest["config_digest"] == make_runner(tmp_path).spec.digest()
     assert manifest["universe"] == [SYMBOL]
@@ -1052,22 +1052,56 @@ def test_q21_the_loader_names_the_offending_bar_instead_of_dying_anonymously(
     assert load(SYMBOL, TRADE_DAY) is not None  # a clean day still loads
 
 
-def test_q21_a_malformed_bar_refuses_the_day_and_counts_it_instead_of_crashing(
-    tmp_path: Path,
-) -> None:
-    """The architect's ruling: the day joins REASON_BIAS_UNRESOLVED as its third case, counted,
-    never a crash, with the offending bar's stamp and OHLCV in the refusal detail."""
-    runner = make_runner(tmp_path, stores=q21_world(tmp_path))
+def test_q21a_the_crash_day_now_refuses_under_GATE_2s_own_name(tmp_path: Path) -> None:
+    """The JUBLFOOD pair, walked through the RUN path after the Q-21(a) completion.
+
+    This test asserted the THIRD case until CONTEXT v1.6: the same fixture came back
+    `minutes-malformed`, flagged `FLAG_MALFORMED_MINUTE_BAR`, because gate 2's enumeration did
+    not test the open and the corrupt bar reached `bias.Candle`. The architect's Q-21(a) ruling
+    completed that enumeration, so the day now FAILS gate 2 -- and the battery is a precondition
+    of the scan, checked before a single candle is built (decision B250), so the SAME day arrives
+    as Q-21(b)'s FOURTH case, `minutes-ungated`, naming gate 2 and quoting gate 2's own words.
+
+    It is flipped rather than weakened: one counted refusal either way, the day never trades, and
+    what moved is WHICH case counts it. The third case keeps its own coverage at the bare loader
+    (`test_q21_the_loader_names_the_offending_bar_instead_of_dying_anonymously`) and stays
+    reachable on the run path through a malformed OUT-OF-SESSION bar, which gate 2 drops at the
+    candle level (CONTEXT 7-E2 / Q-17) and therefore never inspects.
+    """
+    stores = q21_world(tmp_path)
+    runner = make_runner(tmp_path, stores=stores)
+    battery = q21b_battery(stores)
 
     rows = runner.walk_symbol(SYMBOL).rows  # it does not raise
     row = next(row for row in rows if row.day == TRADE_DAY)
 
+    assert battery.gate2.passed is False and battery.refusal == se.NOT_EVALUATED_GATE2
+    assert "OHLC-sanity" in battery.refusal_detail[1]
     assert len(rows) == 3  # every other day of the span still walked
     assert row.status == bt.STATUS_REFUSED
-    assert row.reason == f"{bt.REASON_BIAS_UNRESOLVED}: {Q21_DETAIL}"
-    assert row.bias_rule == RULE_MINUTES_MALFORMED
-    assert row.flags == (bt.FLAG_MALFORMED_MINUTE_BAR,)
+    assert row.reason == (
+        f"{bt.REASON_BIAS_UNRESOLVED}: minutes-ungated {SYMBOL} {SEED_B.isoformat()} "
+        f"gate {se.NOT_EVALUATED_GATE2} reason {battery.refusal_detail[1]}"
+    )
+    assert row.bias_rule == RULE_MINUTES_UNGATED
+    assert row.flags == (bt.FLAG_UNGATED_MINUTE_DAY,)
     assert row.executed is False and row.signalled is False and row.qty == 0
+
+
+def test_q21a_gate_2_is_what_now_sees_the_crash_bar_and_the_close_only_list_did_not(
+    tmp_path: Path,
+) -> None:
+    """The measured claim behind the ruling, on the fixture: the corrupt bar's CLOSE sits inside
+    its own [low, high] and its high is above its low, so CONTEXT 4.5's sealed two clauses saw
+    nothing -- only the open is out of range, and only the completed enumeration catches it."""
+    bar = q21_prior_minutes(malformed=True)[0]
+
+    assert bar.low_paise <= bar.high_paise  # the first sealed clause: satisfied
+    assert bar.low_paise <= bar.close_paise <= bar.high_paise  # the second: satisfied
+    assert not (bar.low_paise <= bar.open_paise <= bar.high_paise)  # only the OPEN is impossible
+
+    day = q21b_battery(q21_world(tmp_path)).gate2
+    assert day.ohlc_violations == 1 and day.passed is False
 
 
 def test_q21_the_same_day_with_the_bar_corrected_is_an_ordinary_rule_3_bias(
@@ -1129,21 +1163,30 @@ def test_q21_skipping_the_corrupt_bar_would_have_reversed_the_bias(tmp_path: Pat
 
 
 def test_q21_the_manifest_counts_the_rare_shape(tmp_path: Path) -> None:
-    """The ruling requires a rare-shape counter. Like every other one it is DERIVED from the
-    row flags, so a resumed run replaying the shard counts it identically."""
+    """The ruling requires a rare-shape counter, DERIVED from the row flags so a resumed run
+    replaying the shard counts it identically.
+
+    Under CONTEXT v1.6 this fixture's row is counted by the Q-21(b) label rather than the Q-21
+    one, because the completed gate 2 refuses the day before its bar is ever built (B250). BOTH
+    labels are still asserted, at 1 and at 0: a counter that quietly stopped being printed is
+    exactly the failure a derived counter exists to prevent, and the Q-21 case remains reachable
+    for a malformed bar gate 2 never inspects (an out-of-session stamp -- CONTEXT 7-E2 / Q-17).
+    """
     runner = make_runner(tmp_path, stores=q21_world(tmp_path))
     rows = runner.walk_symbol(SYMBOL).rows
     clean = make_runner(tmp_path / "clean")
 
     manifest = runner.build_manifest(rows, {SYMBOL: {}})
-    label = "rule-3 day refused on a malformed 1-minute bar (QUESTIONS.md Q-21)"
+    malformed = "rule-3 day refused on a malformed 1-minute bar (QUESTIONS.md Q-21)"
+    ungated = "rule-3 day refused on a battery-failing D-1 (QUESTIONS.md Q-21(b))"
 
-    assert label in bt.RARE_SHAPE_LABELS
-    assert manifest["rare_shapes"][label] == 1
+    assert malformed in bt.RARE_SHAPE_LABELS and ungated in bt.RARE_SHAPE_LABELS
+    assert manifest["rare_shapes"][ungated] == 1
+    assert manifest["rare_shapes"][malformed] == 0
     assert set(manifest["rare_shapes"]) == set(bt.RARE_SHAPE_LABELS)
     # ...and a window without one still says so out loud, rather than omitting the row.
     spotless = clean.build_manifest(clean.walk_symbol(SYMBOL).rows, {SYMBOL: {}})
-    assert spotless["rare_shapes"][label] == 0
+    assert spotless["rare_shapes"][malformed] == 0 and spotless["rare_shapes"][ungated] == 0
 
 
 # ==============================================================================================

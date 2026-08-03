@@ -33,8 +33,9 @@ excludes a flagged day and counts it (CONTEXT 7-E3).
   measured by gate 1, not by a minute count: **the vendor omits minutes in which nothing traded**,
   so a missing stamp on a day whose gate-1 volume reconciliation PASSES is a NO-TRADE minute and
   every traded rupee is already accounted for. The exclusion triggers are exactly four: any
-  duplicate stamp; impossible OHLC (``high < low`` or a CLOSE outside ``[low, high]`` -- CONTEXT
-  4.5's own two, ``open`` is not among them); any NEGATIVE price or volume; and missing minutes
+  duplicate stamp; impossible OHLC (``high < low``, or an OPEN **or** CLOSE outside
+  ``[low, high]`` -- the enumeration COMPLETED by the architect's Q-21(a) ruling, CONTEXT v1.6);
+  any NEGATIVE price or volume; and missing minutes
   ``> 15`` **on a day where gate 1 ALSO fails** (there, missing stamps are indistinguishable from
   data loss). Missing minutes alone, with gate 1 passing, are recorded as LIQUIDITY STATISTICS and
   never exclude. An out-of-session bar is dropped at the candle level (CONTEXT 7-E2), not counted
@@ -439,9 +440,22 @@ def integrity_gate(
             conservative pre-amendment behaviour and ``missing > 15`` excludes.
 
     A day is EXCLUDED (``passed == False``) on exactly the ruling's four triggers: any duplicate
-    stamp; impossible OHLC (``high < low`` or a CLOSE outside ``[low, high]`` -- the two CONTEXT
-    4.5 enumerates; ``open`` is deliberately NOT tested); any NEGATIVE price or volume; and
-    ``missing > 15`` when gate 1 did not pass. Bars stamped outside the 09:15..15:29 session are
+    stamp; impossible OHLC (``high < low``, or an OPEN **or** CLOSE outside ``[low, high]``); any
+    NEGATIVE price or volume; and ``missing > 15`` when gate 1 did not pass.
+
+    **The OPEN test (QUESTIONS.md Q-21(a); CONTEXT v1.6 4.5).** CONTEXT 4.5 used to enumerate two
+    OHLC-sanity triggers, ``high < low`` and a CLOSE outside ``[low, high]``, and this function
+    deliberately did not test the open. The architect's ruling of 2026-08-03 COMPLETED that
+    enumeration: *"a bar whose open lies outside [low, high] fails integrity, exactly as a close
+    outside does ... the sealed enumeration was an incomplete list, proven by 47 corrupt bars
+    passing it"*. Those 47 are real and measured -- one market-wide vendor defect in the
+    2023-03-03 09:15 print, plus JIOFIN 2023-08-21 -- and one of them killed the chunk-9B run
+    through ``bias.Candle``'s CONTEXT 7-E11 invariant, which validates the open and always did.
+    A day carrying such a bar is REFUSED, never repaired: nothing here clamps a low, and no
+    caller may. All three clauses share ONE counter (:attr:`IntegrityGateResult.ohlc_violations`)
+    and ONE exclusion reason, because they are one question -- can this bar exist?
+
+    Bars stamped outside the 09:15..15:29 session are
     counted (``out_of_session``, for the report) but do NOT by themselves exclude the day: CONTEXT
     7-E2 excludes an out-of-session candle at the CANDLE level (drop the stray bar), not at the day
     level. A day that is ENTIRELY a non-standard session (e.g. a Muhurat evening) has all 375
@@ -470,13 +484,19 @@ def integrity_gate(
             duplicates += 1
         seen.add(stamp)
         present_in_session.add(stamp)
-        if not (bar.low_paise <= bar.high_paise and bar.low_paise <= bar.close_paise <= bar.high_paise):
-            ohlc_violations += 1  # CONTEXT 4.5 gate-2: high<low or close-outside-[low,high] ONLY
+        if not (
+            bar.low_paise <= bar.high_paise
+            and bar.low_paise <= bar.open_paise <= bar.high_paise
+            and bar.low_paise <= bar.close_paise <= bar.high_paise
+        ):
+            # CONTEXT v1.6 4.5 gate 2: high<low, or an OPEN or CLOSE outside [low, high]. The open
+            # clause is the Q-21(a) completion; a bar tripping several clauses still counts once.
+            ohlc_violations += 1
         # The ruling's third trigger: a negative price or share count is IMPOSSIBLE, not merely
         # improbable. Volume is included -- a negative share count is as impossible as a negative
-        # price and would poison gate 1's own sum. ``open`` IS tested here: the OHLC-sanity trigger
-        # deliberately omits it (CONTEXT 4.5 does not list it), but "negative values" names no
-        # field, and a negative open is impossible on any reading.
+        # price and would poison gate 1's own sum. It stays a SEPARATE trigger from the OHLC one
+        # even now that both look at the open: "negative" names no field and catches a bar whose
+        # whole range is negative, which the containment test above cannot see.
         if min(bar.open_paise, bar.high_paise, bar.low_paise, bar.close_paise, bar.volume) < 0:
             negative_values += 1
 
@@ -510,7 +530,10 @@ def integrity_gate(
     if duplicates:
         reasons.append(f"{duplicates} duplicate stamp(s)")
     if ohlc_violations:
-        reasons.append(f"{ohlc_violations} OHLC-sanity violation(s) (high<low or close out of range)")
+        reasons.append(
+            f"{ohlc_violations} OHLC-sanity violation(s) "
+            "(high<low, or open or close out of range)"
+        )
     if negative_values:
         reasons.append(f"{negative_values} bar(s) carry a NEGATIVE price or volume (impossible)")
 

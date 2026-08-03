@@ -136,8 +136,11 @@ def test_gate2_duplicates_and_impossible_ohlc_still_exclude_on_a_gate1_passing_d
 def test_gate2_negative_values_exclude_the_day(bad: Bar, label: str) -> None:
     """The completeness ruling ADDS "negative values" as an exclusion trigger. A negative price or
     share count is impossible, not merely improbable, so it excludes even on a gate-1-passing day.
-    Note the negative OPEN: the OHLC-sanity trigger deliberately omits ``open`` (CONTEXT 4.5 does
-    not list it), but "negative values" names no field."""
+
+    The two triggers stay SEPARATE even now that Q-21(a) has the OHLC-sanity clause reading the
+    open too: "negative values" names no field, so it catches the negative VOLUME and the
+    negative LOW that no containment test can see (both are inside their own bar's range here),
+    while the negative-OPEN bar trips both triggers at once."""
     bars = _full_day(DAY)
     bars[10] = bad
     result = qg.integrity_gate(bars, DAY, volume_reconciled=True)
@@ -166,13 +169,75 @@ def test_gate2_close_outside_range_excludes() -> None:
     assert not qg.integrity_gate(bars, DAY).passed
 
 
-def test_gate2_open_outside_range_is_not_a_spec_exclusion() -> None:
-    """CONTEXT 4.5 gate-2 enumerates only high<low and close-outside; OPEN out of range is NOT
-    a listed criterion, so a clean day with one open-out-of-range bar must PASS (REVIEW finding)."""
+def test_gate2_open_below_low_excludes_the_jublfood_shape() -> None:
+    """The architect's Q-21(a) ruling (03-Aug-2026, CONTEXT v1.6) COMPLETED the enumeration: an
+    OPEN outside ``[low, high]`` fails integrity exactly as a close outside does.
+
+    This test PINNED THE OPPOSITE until v1.6 (``..._open_outside_range_is_not_a_spec_exclusion``):
+    it asserted that a day carrying such a bar must PASS, because CONTEXT 4.5 listed only
+    ``high < low`` and a CLOSE outside the range. It is flipped, not weakened -- the rule it
+    pinned was retired by the ruling, and it now asserts the rule that replaced it.
+
+    The shape is the real one, scaled: JUBLFOOD 2023-03-03 09:15 stored O 44210 H 44440 L 44295
+    C 44295 -- the open 85 paise BELOW the low, the close sitting exactly ON the low so that
+    nothing the SEALED enumeration tested was violated. That bar killed the chunk-9B run through
+    ``bias.Candle``'s CONTEXT 7-E11 invariant while its day passed all three gates.
+    """
     bars = _full_day(DAY)
-    bars[10] = Bar(bars[10].stamp, 90, 110, 100, 105)  # open 90 < low 100, but close in range
+    bars[10] = Bar(bars[10].stamp, 90, 110, 100, 100)  # open 90 < low 100; close ON the low
     result = qg.integrity_gate(bars, DAY)
-    assert result.ohlc_violations == 0 and result.passed
+    assert result.ohlc_violations == 1
+    assert not result.passed
+    assert any("OHLC-sanity" in reason for reason in result.reasons)
+
+
+def test_gate2_open_above_high_excludes() -> None:
+    """The mirror: an open ABOVE the high is as impossible as one below the low, and 19 of the
+    lake's 48 malformed bars are that way round (docs/evidence/chunk9b_q21_malformed_bar.md)."""
+    bars = _full_day(DAY)
+    bars[10] = Bar(bars[10].stamp, 120, 110, 90, 105)  # open 120 > high 110
+    result = qg.integrity_gate(bars, DAY)
+    assert result.ohlc_violations == 1 and not result.passed
+
+
+@pytest.mark.parametrize(
+    "bar,label",
+    [
+        (Bar(datetime.combine(DAY, time(9, 25)), 100, 110, 90, 999), "close above high"),
+        (Bar(datetime.combine(DAY, time(9, 25)), 100, 110, 90, 1), "close below low"),
+        (Bar(datetime.combine(DAY, time(9, 25)), 100, 90, 110, 100), "high below low"),
+    ],
+)
+def test_gate2_the_sealed_clauses_still_exclude_after_the_completion(bar: Bar, label: str) -> None:
+    """The completion ADDS a clause; it removes none. Both of CONTEXT 4.5's original two still
+    exclude, under the same counter and the same reason."""
+    bars = _full_day(DAY)
+    bars[10] = bar
+    result = qg.integrity_gate(bars, DAY, volume_reconciled=True)
+    assert result.ohlc_violations == 1, label
+    assert not result.passed, label
+
+
+def test_gate2_a_bar_tripping_several_clauses_is_counted_once() -> None:
+    """JIOFIN 2023-08-21 09:15's real shape (O 30000 H 26185 L 29995 C 26185) trips all three
+    clauses at once. It is ONE impossible bar and must be counted once -- the completion widened
+    the question, not the arithmetic."""
+    stamp = datetime.combine(DAY, time(9, 25))
+    bars = _full_day(DAY)
+    bars[10] = Bar(stamp, 30000, 26185, 29995, 26185)
+    result = qg.integrity_gate(bars, DAY, volume_reconciled=True)
+    assert result.ohlc_violations == 1 and not result.passed
+
+
+def test_gate2_a_valid_day_still_passes_the_completed_enumeration() -> None:
+    """The control. Every bar of a clean day has its open INSIDE [low, high] -- including the
+    boundary cases, open == low and open == high, which are legal prints and must not become
+    exclusions the day the open starts being tested."""
+    bars = _full_day(DAY)
+    bars[10] = Bar(bars[10].stamp, 90, 110, 90, 105)   # open == low
+    bars[11] = Bar(bars[11].stamp, 110, 110, 90, 105)  # open == high
+    result = qg.integrity_gate(bars, DAY, volume_reconciled=True)
+    assert result.ohlc_violations == 0 and result.passed and result.reasons == ()
 
 
 def test_gate2_a_single_out_of_session_bar_does_not_exclude_the_day() -> None:

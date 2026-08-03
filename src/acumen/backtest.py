@@ -107,8 +107,11 @@ from .signal_engine import SignalPipeline
 
 #: The CONTEXT.md version this runner implements. Written into every manifest, so a
 #: ledger always names the law it was produced under. Moved to v1.5 on 02-Aug-2026 with
-#: the Q-18 re-seal (CONTEXT 4.6 rewritten; Q-17 and Q-19 made law).
-SPEC_VERSION: str = "v1.5"
+#: the Q-18 re-seal (CONTEXT 4.6 rewritten; Q-17 and Q-19 made law), and to v1.6 on
+#: 03-Aug-2026 with the Q-21(a) completion of gate 2's impossible-OHLC enumeration (the
+#: OPEN test), which changes which stored days are usable and therefore which rows a run
+#: may walk -- so a ledger written under it must not be readable as a v1.5 ledger.
+SPEC_VERSION: str = "v1.6"
 
 #: What the manifest's ``instrument_master`` block says about itself, so a reader who has never
 #: seen QUESTIONS.md Q-20 still knows why a filename is pinned rather than resolved. Verbatim on

@@ -114,7 +114,18 @@ DEFAULT_REPORT_PATH: Path = Path("docs") / "backfill_minute_report.md"
 #: carries a different marker and is RE-GATED from the stored candles -- no window refetched. Bump
 #: this string whenever a gate's definition changes; it is what makes a re-gate automatic, bounded
 #: (a row already on the current definition is skipped) and auditable.
-GATE_DEFINITION: str = "gate1p-price-containment+gate2-completeness+auction-relief-2026-07-28"
+#:
+#: The architect's Q-21(a) ruling (2026-08-03, CONTEXT v1.6) COMPLETED gate 2's impossible-OHLC
+#: enumeration with the OPEN test, so the marker moves again and every ledger row written under the
+#: close-only enumeration is stale BY DEFINITION rather than by anyone's memory. The re-gate that
+#: clears it reads stored candles and fetches nothing; the FIX-3 session did not run it, because a
+#: re-gate WRITES the ledger and that session was forbidden every store write. The cost of the
+#: ruling is measured instead, day by day, in docs/evidence/chunk9b_q21a_gate2_completion.md, and
+#: CONTEXT v1.6 4.6 carries the post-completion coverage.
+GATE_DEFINITION: str = (
+    "gate1p-price-containment+gate2-completeness+auction-relief-2026-07-28"
+    "+gate2-open-test-2026-08-03"
+)
 
 #: The route reason a quarantine-recovery reroute stamps on a symbol (Q-12 addendum ruling).
 _RECOVERY_REASON: str = "quarantine-recovery (Q-12 addendum ruling)"
