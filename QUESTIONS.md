@@ -3056,3 +3056,73 @@ ruling says; the ledger still re-runs whole under ONE code SHA per the resume la
 **What it costs the run: ONE symbol-day.** JUBLFOOD 2023-03-06 becomes a counted refusal.
 2023-03-03 is also the D-2 of trade day 2023-03-08 for those symbols, but Rule 3 reads only
 D-1's minutes, so no D-2 is touched.
+
+---
+
+### ARCHITECT'S RULING (03-Aug-2026) · Q-21(b) · recorded VERBATIM by the chunk-9B FIX-2 session
+
+The architect's text, exactly as supplied, quoted whole and unedited. It answers the SECOND of
+the two things the run-crash fix session recorded above -- that a day's gate verdicts have never
+gated its use as bias EVIDENCE. Nothing in this repo may narrow or widen it; everything after
+the quotation is what this session executed under it.
+
+> "ARCHITECT'S RULING (03-Aug-2026), Q-21(b): a day's minutes may serve a Rule-3
+> first-break scan ONLY if that day passes the CONTEXT 4.5/4.6 gate battery.
+> Rationale: a D-1 in a wrong-price-domain era would have its minutes compared
+> against correct-scale daily thresholds -- a garbage first-break that trades.
+> A battery-failing D-1 makes the bias UNRESOLVABLE: fourth counted case
+> (minutes-ungated), same machinery as Q-21's third, detail naming which gate
+> failed. Q-21(a) -- whether gate 2's enumeration gains the OPEN test -- is
+> DEFERRED pending measurement (Part C); the sealed battery is not touched by
+> this session. Architect."
+
+**EXECUTED by the chunk-9B FIX-2 session (2026-08-03).** The same machinery as Q-21's third
+case, one layer earlier -- at the RUN's Rule-3 minute-load boundary, which is the only site in
+`src/acumen` that turns stored minute bars into `bias.Candle` objects on the run path:
+
+- **The battery runs BEFORE any candle is built, and the gate check comes FIRST.**
+  `acumen.backtest.gated_minute_loader(minute_store, pipeline)` loads D-1's stored bars, hands
+  the WHOLE stored day to `SignalPipeline.gate_day` (chunk-5B semantics: gate 1 and gate 1P fold
+  the pre-open print too), and raises `acumen.bias_engine.UngatedMinuteDay` naming the refusing
+  gate and ITS OWN words when the battery refuses. Only if the battery PASSES are candles built,
+  so the Q-21 malformed-bar refusal is now reached only by a day the gates already trust. A day
+  failing both -- JIOFIN 2023-08-21, whose bar has `high < low` AND a close outside the range --
+  is counted as `minutes-ungated`, because the gate is the ruling's precondition.
+- **The verdict is computed once per (symbol, D-1) and REUSED.** The loader memoises the
+  refusal (a two-string tuple, or `None`), so a symbol's walk pays for each D-1 once however
+  many times it is asked. The ruling's "computes (or reuses)" is a memo, never a persisted
+  exclusion file -- CONTEXT 4.6 forbids one ("there is no per-day exclusion file"), and the
+  battery is recomputed from the stores exactly as `SignalPipeline.stock_day` recomputes it.
+- **`REASON_BIAS_UNRESOLVED`, fourth case.** `BiasEngine._bias_for` catches it exactly as it
+  catches `MalformedMinuteBar` (both are now `UnusableMinuteEvidence`), returns a `DailyBias`
+  with `rule="minutes-ungated"`, `tradeable=False` and the detail in `unresolved_detail`, and
+  **leaves the carried bias UNCHANGED** -- a day whose evidence is not admissible decides
+  nothing, in either direction. `BacktestRunner.walk_symbol` emits ONE refused ledger row whose
+  reason is `bias unresolvable (CONTEXT 3.2 pair could not be assembled): minutes-ungated
+  <SYMBOL> <D-1> gate <which gate> reason <that gate's own reason>`, flagged
+  `FLAG_UNGATED_MINUTE_DAY`.
+- **Counted in the manifest**, under the rare-shape label *"rule-3 day refused on a
+  battery-failing D-1 (QUESTIONS.md Q-21(b))"*, DERIVED from the row flag like every other rare
+  shape -- so a resumed run replaying a shard counts it identically to a fresh walk and a reader
+  can recompute it from the committed ledger alone.
+- **Rules 1 and 2 are UNTOUCHED.** `bias.evaluate_pair` calls the minute provider only in the
+  Rule-3 branch (CONTEXT 3.2: only Rule 3 asks which extreme broke first), so a battery-failing
+  D-1 under an inside bar, a Rule-1 breakout or a Rule-2 sweep is never read and never refused.
+  That is asserted on a fixture whose D-1 genuinely fails gate 1P.
+- **NOT taken, deliberately:** the sealed battery is not touched -- no gate's enumeration, band,
+  tolerance or order changed, and `quality_gates.py` is byte-identical to its committed blob.
+  Q-21(a) is measured, not decided (below).
+
+**THE BLAST RADIUS, measured on the real lake** (`docs/evidence/chunk9b_q21b_blast_radius.{py,md}`,
+offline and READ-ONLY): across all 204 settled symbols over the run's own span, every trade day
+whose CONTEXT 3.2 pair reaches the Rule-3 branch was asked of the real engine with that symbol's
+own factor table and suppression list wired, and each such day's D-1 was put through the CONTEXT
+4.6 battery. The count, the per-symbol list and the era breakdown are in that evidence file and
+in the FIX-2 report; the same number is carried on the run manifest as a disclosure sentence, so
+a reader of the ledger alone knows how many rows the ruling costs before opening this file.
+
+**Q-21(a) IS MEASURED, NOT DECIDED** (`docs/evidence/chunk9b_q21a_poc_impact.{py,md}`). For all
+48 malformed-bar days taken AS TRADE DAYS, the CONTEXT 3.3 POC is computed twice -- once with the
+bar exactly as stored, once with its low clamped to `min(low, open)` -- and the two are reported
+side by side per day with the row-count change. This session decides NOTHING from it: whether
+CONTEXT 4.5's gate-2 enumeration gains the OPEN test is the architect's call on those numbers.
