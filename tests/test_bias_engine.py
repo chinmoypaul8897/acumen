@@ -33,8 +33,12 @@ from acumen.bhavcopy import (
 from acumen.bias import BEARISH, BULLISH, Candle
 from acumen.bias_engine import (
     RULE_MINUTES_MALFORMED,
+    RULE_MINUTES_UNGATED,
     BiasEngine,
+    BiasEngineError,
     MalformedMinuteBar,
+    UngatedMinuteDay,
+    UnusableMinuteEvidence,
     csv_minute_loader,
 )
 from acumen.calendar import TradingCalendar
@@ -337,3 +341,121 @@ def test_q21_is_not_the_missing_minute_carry(tmp_path) -> None:
     assert missing.rule == "rule-3-no-1min-carry" and missing.tradeable is True
     assert malformed.rule == RULE_MINUTES_MALFORMED and malformed.tradeable is False
     assert missing.unresolved_detail is None and malformed.unresolved_detail is not None
+
+
+# ==============================================================================================
+# QUESTIONS.md Q-21(b): a Rule-3 scan that asks for a D-1 the gate battery refuses
+#
+# Same world, same Thursday, same machinery -- only the reason the minutes are inadmissible is
+# different. The architect's 03-Aug-2026 ruling: "a day's minutes may serve a Rule-3 first-break
+# scan ONLY if that day passes the CONTEXT 4.5/4.6 gate battery ... same machinery as Q-21's
+# third, detail naming which gate failed."
+# ==============================================================================================
+
+Q21B_GATE = "gate-1P (per-day price containment)"
+Q21B_REASON = "not price-proven: fold HIGH 401000 is 200299.5 paise past the tolerated daily high"
+
+
+def _ungated_loader(day: date):
+    """A MinuteLoader that refuses exactly the way the RUN's gated loader refuses (Q-21(b))."""
+
+    def load(sym: str, when: date):
+        if when == day:
+            raise UngatedMinuteDay(
+                symbol=sym, day=when, gate=Q21B_GATE, gate_reason=Q21B_REASON
+            )
+        return None
+
+    return load
+
+
+def _low_first_loader(day: date):
+    """Day C's real minutes, with P.low (10400) broken FIRST -- so the admissible Rule-3 answer
+    is BEARISH, the OPPOSITE of the bias carried into Thursday. That is what makes the
+    carry-untouched assertion below discriminating rather than a coincidence."""
+
+    def load(sym: str, when: date):
+        if when != day:
+            return None
+        return (
+            Candle(open=10450, high=10500, low=8000, close=10450,
+                   stamp=datetime(when.year, when.month, when.day, 9, 15)),
+            Candle(open=10450, high=13000, low=10450, close=13000,
+                   stamp=datetime(when.year, when.month, when.day, 9, 16)),
+        )
+
+    return load
+
+
+def test_q21b_a_battery_failing_D1_makes_the_day_unresolvable_and_never_raises(tmp_path) -> None:
+    """The fourth REASON_BIAS_UNRESOLVED case, in the third's shape: a counted verdict, not a
+    propagated exception, with the refusing gate and its own reason in the detail."""
+    d, store, calendar = _q21_world(tmp_path)
+    engine = BiasEngine(store=store, calendar=calendar, minute_loader=_ungated_loader(d[2]))
+
+    thu = {b.trade_date: b for b in engine.bias_series("ACME", d[2], d[3])}[d[3]]
+
+    assert thu.rule == RULE_MINUTES_UNGATED
+    assert thu.tradeable is False
+    assert thu.unresolved_detail == (
+        f"minutes-ungated ACME 2024-07-03 gate {Q21B_GATE} reason {Q21B_REASON}"
+    )
+    # the detail NAMES WHICH GATE failed -- the ruling's own requirement
+    assert Q21B_GATE in thu.unresolved_detail
+
+
+def test_q21b_a_battery_failing_day_leaves_the_carry_untouched(tmp_path) -> None:
+    """The discriminating carry test. Fed ADMISSIBLE minutes this Thursday flips the bias to
+    BEARISH (P.low breaks first); refused, it reports the carried BULLISH unchanged and is not
+    tradeable on it. A day whose evidence is inadmissible decides nothing, in either direction."""
+    d, store, calendar = _q21_world(tmp_path)
+    admissible = BiasEngine(store=store, calendar=calendar, minute_loader=_low_first_loader(d[2]))
+    refused = BiasEngine(store=store, calendar=calendar, minute_loader=_ungated_loader(d[2]))
+
+    would_have = admissible.bias_for_day("ACME", d[3], seed_from=d[2])
+    actual = refused.bias_for_day("ACME", d[3], seed_from=d[2])
+
+    assert would_have.rule == "rule-3-outside-bar" and would_have.bias == BEARISH
+    assert actual.rule == RULE_MINUTES_UNGATED
+    assert actual.bias == BULLISH  # the carry, UNCHANGED -- not the BEARISH answer it lost
+    assert actual.tradeable is False
+
+
+def test_q21b_is_neither_the_missing_minute_carry_nor_the_malformed_bar(tmp_path) -> None:
+    """Three different questions, three different answers. ABSENT data carries and TRADES
+    (R1-Q6); a CORRUPT bar refuses the day naming the bar (Q-21); an INADMISSIBLE day refuses
+    the day naming the gate (Q-21(b)). Collapsing any pair would trade a day it should not."""
+    d, store, calendar = _q21_world(tmp_path)
+    make = lambda loader: BiasEngine(  # noqa: E731 -- three engines, one differing field
+        store=store, calendar=calendar, minute_loader=loader
+    )
+
+    missing = make(None).bias_for_day("ACME", d[3], seed_from=d[2])
+    malformed = make(_malformed_loader(d[2])).bias_for_day("ACME", d[3], seed_from=d[2])
+    ungated = make(_ungated_loader(d[2])).bias_for_day("ACME", d[3], seed_from=d[2])
+
+    assert missing.rule == "rule-3-no-1min-carry" and missing.tradeable is True
+    assert malformed.rule == RULE_MINUTES_MALFORMED and malformed.tradeable is False
+    assert ungated.rule == RULE_MINUTES_UNGATED and ungated.tradeable is False
+    assert missing.unresolved_detail is None
+    assert malformed.unresolved_detail.startswith("malformed-minute-bar")
+    assert ungated.unresolved_detail.startswith("minutes-ungated")
+
+
+def test_q21b_both_unusable_evidence_cases_escape_as_a_counted_symbol_no_trade(tmp_path) -> None:
+    """Defence in depth, unchanged from Q-21's B244 and now shared by both cases: each is an
+    `UnusableMinuteEvidence`, which is a `BiasEngineError`, so an escape past the per-day catch
+    is still a COUNTED whole-symbol no-trade in `BacktestRunner.bias_map` rather than a dead
+    run over 400,000 stock-days."""
+    for exc in (
+        MalformedMinuteBar(
+            symbol="ACME", day=date(2024, 7, 3), stamp=None,
+            open_paise=1, high_paise=2, low_paise=3, close_paise=4, volume=5,
+        ),
+        UngatedMinuteDay(
+            symbol="ACME", day=date(2024, 7, 3), gate=Q21B_GATE, gate_reason=Q21B_REASON
+        ),
+    ):
+        assert isinstance(exc, UnusableMinuteEvidence)
+        assert isinstance(exc, BiasEngineError)
+        assert exc.detail() and exc.rule in (RULE_MINUTES_MALFORMED, RULE_MINUTES_UNGATED)

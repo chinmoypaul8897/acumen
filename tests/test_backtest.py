@@ -56,7 +56,12 @@ from acumen.bhavcopy import (
     DateOutcome,
 )
 from acumen.bias import BEARISH, BULLISH, BiasError, Candle, evaluate_pair
-from acumen.bias_engine import RULE_MINUTES_MALFORMED, MalformedMinuteBar
+from acumen.bias_engine import (
+    RULE_MINUTES_MALFORMED,
+    RULE_MINUTES_UNGATED,
+    MalformedMinuteBar,
+    UngatedMinuteDay,
+)
 from acumen.calendar import TradingCalendar
 from acumen.daily_store import DailyStore
 from acumen.instrument_master import InstrumentMaster
@@ -256,14 +261,15 @@ def make_runner(
         margin_basis=margin_basis,
         label="unit",
     )
+    pipeline = SignalPipeline(
+        minute_store=minute_store,
+        daily_store=daily_store,
+        master=master,
+        row_size=ROW_SIZE,
+    )
     return bt.BacktestRunner(
         spec=spec,
-        pipeline=SignalPipeline(
-            minute_store=minute_store,
-            daily_store=daily_store,
-            master=master,
-            row_size=ROW_SIZE,
-        ),
+        pipeline=pipeline,
         calendar=calendar,
         minute_store=minute_store,
         daily_store=daily_store,
@@ -275,7 +281,10 @@ def make_runner(
             symbol: bt.ResidualEntry(symbol, "settled", 100, 100, 0, "") for symbol in symbols
         },
         non_standard_sessions=frozenset(non_standard),
-        minute_loader=bt.minute_loader(minute_store),
+        # Exactly what ``build_runner`` wires (QUESTIONS.md Q-21(b)): the GATED loader, sharing
+        # the pipeline that gates the day being traded. A test runner on the bare loader would
+        # be testing a machine the operator never runs.
+        minute_loader=bt.gated_minute_loader(minute_store, pipeline),
     )
 
 
@@ -1135,3 +1144,332 @@ def test_q21_the_manifest_counts_the_rare_shape(tmp_path: Path) -> None:
     # ...and a window without one still says so out loud, rather than omitting the row.
     spotless = clean.build_manifest(clean.walk_symbol(SYMBOL).rows, {SYMBOL: {}})
     assert spotless["rare_shapes"][label] == 0
+
+
+# ==============================================================================================
+# QUESTIONS.md Q-21(b): the Rule-3 scan asks for a D-1 that fails the CONTEXT 4.6 battery
+#
+# The architect's ruling of 03-Aug-2026: "a day's minutes may serve a Rule-3 first-break scan
+# ONLY if that day passes the CONTEXT 4.5/4.6 gate battery ... a battery-failing D-1 makes the
+# bias UNRESOLVABLE: fourth counted case (minutes-ungated) ... detail naming which gate failed."
+#
+# The world below is the Q-21 Rule-3 pair with its corrupt bar REPAIRED, so the only thing under
+# test is the gate:
+#
+#   D-2 = SEED_A  O 199000 H 200000 L 198000 C 199500   -> body [199000, 199500]
+#   D-1 = SEED_B  O 199200 H 200500 L 197500 C 199300   -> outside bar, close inside the body
+#
+# and D-1's three stored minutes are broken ONE GATE AT A TIME:
+#
+#   "1P" -- every PRICE doubled, every VOLUME untouched. That is the Q-14 wrong-price-domain
+#           shape exactly: gate 1 reconciles (the volume is right), gate 2 sees nothing wrong
+#           (each bar is internally consistent at 2x), and only gate 1P catches it, because the
+#           fold interval [395000, 401000] cannot sit inside the raw bhavcopy [197500, 200500].
+#           It is the same population the Q-14 ruling was written for -- 1,963 stored symbol-days
+#           at 0.1x-5x the traded price that passed every gate there was.
+#   "1"  -- the raw daily volume is 20,000 against a 13,409 minute sum: a 32.955% gap, above the
+#           +5.0% ceiling and beyond auction relief's 20% cap.
+#   "2"  -- the 09:15 bar is JIOFIN 2023-08-21's real shape (high BELOW low, close outside the
+#           range), which gate 2 DOES enumerate -- and which `bias.Candle` would also refuse.
+#           That day is the precedence witness: the gate is the ruling's precondition, so the
+#           refusal names the GATE, not the bar.
+# ==============================================================================================
+
+
+def q21b_minutes(*, gate: str | None) -> list[Minute]:
+    """D-1's three bars, broken for exactly one gate (or for none -- the control)."""
+    scale = 2 if gate == "1P" else 1
+    minutes = [
+        Minute(at(time(9, 15), SEED_B), R(1992.00) * scale, R(2005.00) * scale,
+               R(1991.00) * scale, R(1992.50) * scale, 12909),
+        Minute(at(time(9, 16), SEED_B), R(1992.50) * scale, R(1993.00) * scale,
+               R(1975.00) * scale, R(1976.00) * scale, 300),
+        Minute(at(time(9, 17), SEED_B), R(1976.00) * scale, R(1993.50) * scale,
+               R(1975.50) * scale, R(1993.00) * scale, 200),
+    ]
+    if gate == "2":
+        # JIOFIN 2023-08-21's shape, in this world's prices: high below low, close outside.
+        minutes[0] = Minute(
+            at(time(9, 15), SEED_B), R(1992.00), R(1991.50), R(1993.00), R(1991.50), 12909
+        )
+    return minutes
+
+
+def q21b_world(tmp_path: Path, *, gate: str | None = "1P", rule_3: bool = True):
+    """The standard trade day, with a Rule-3 (or, for the control, a Rule-1) D-1 that fails ``gate``."""
+    minutes = synthetic_minutes(TRADE_DAY)
+    prior = q21b_minutes(gate=gate)
+    rows = dict(lead_rows())
+    rows.update(
+        {
+            SEED_A: daily_row(SEED_A, R(1990), R(2000), R(1980), R(1995), 1000),
+            # The Rule-3 outside bar, or a Rule-1 breakout for the blast-radius control. Its
+            # OHLC is the RAW bhavcopy: gate 1P measures the stored fold against exactly this.
+            SEED_B: daily_row(
+                SEED_B, R(1992), R(2005), R(1975), R(1993), 20000 if gate == "1" else 13409
+            )
+            if rule_3
+            else daily_row(
+                SEED_B, R(1995), R(2010), R(1990), R(2008), 20000 if gate == "1" else 13409
+            ),
+            TRADE_DAY: row_for_minutes(TRADE_DAY, minutes),
+        }
+    )
+    return build_stores(
+        tmp_path, minute_days={SEED_B: prior, TRADE_DAY: minutes}, daily_rows=rows
+    )
+
+
+def q21b_battery(stores, day: date = SEED_B):
+    """The CONTEXT 4.6 battery for ``day``, asked of the same pipeline the runner uses."""
+    minute_store, daily_store, master, _ = stores
+    pipeline = SignalPipeline(
+        minute_store=minute_store, daily_store=daily_store, master=master, row_size=ROW_SIZE
+    )
+    return pipeline.gate_day(SYMBOL, day, minute_store.minutes(SYMBOL, day))
+
+
+@pytest.mark.parametrize(
+    "gate, expected",
+    [
+        ("1P", se.NOT_EVALUATED_GATE1P),
+        ("1", se.NOT_EVALUATED_GATE1),
+        ("2", se.NOT_EVALUATED_GATE2),
+    ],
+)
+def test_q21b_the_gated_loader_refuses_a_battery_failing_day_and_names_the_gate(
+    tmp_path: Path, gate: str, expected: str
+) -> None:
+    """The load boundary is where the ruling bites, and the refusal carries the battery's OWN
+    verdict -- which gate, and that gate's own reason -- rather than a sentence composed here."""
+    stores = q21b_world(tmp_path / gate, gate=gate)
+    minute_store, daily_store, master, _ = stores
+    pipeline = SignalPipeline(
+        minute_store=minute_store, daily_store=daily_store, master=master, row_size=ROW_SIZE
+    )
+    load = bt.gated_minute_loader(minute_store, pipeline)
+
+    with pytest.raises(UngatedMinuteDay) as excinfo:
+        load(SYMBOL, SEED_B)
+
+    battery = q21b_battery(stores)
+    assert not battery.usable and battery.refusal == expected
+    assert excinfo.value.gate == expected
+    assert excinfo.value.gate_reason == battery.refusal_detail[1]
+    assert excinfo.value.detail() == (
+        f"minutes-ungated {SYMBOL} {SEED_B.isoformat()} gate {expected} "
+        f"reason {battery.refusal_detail[1]}"
+    )
+    # ...and the day the battery passes still loads, through the same loader.
+    assert load(SYMBOL, TRADE_DAY) is not None
+
+
+def test_q21b_a_battery_failing_D1_refuses_the_trade_day_and_counts_it(tmp_path: Path) -> None:
+    """The ruling's own shape: a Rule-3 pair whose D-1 fails gate 1P becomes ONE counted refusal
+    naming gate 1P -- no trade, no crash, and the carried bias untouched."""
+    stores = q21b_world(tmp_path, gate="1P")
+    runner = make_runner(tmp_path, stores=stores)
+
+    rows = runner.walk_symbol(SYMBOL).rows  # it does not raise
+    row = next(r for r in rows if r.day == TRADE_DAY)
+    battery = q21b_battery(stores)
+
+    assert len(rows) == 3  # every other day of the span still walked
+    assert battery.gate1 is not None and battery.gate1.passed  # the volume DOES reconcile...
+    assert battery.gate2.passed  # ...and each bar is internally consistent...
+    assert battery.gate1p.passed is False  # ...only the PRICE DOMAIN is wrong (Q-14's shape)
+    assert row.status == bt.STATUS_REFUSED
+    assert row.reason == (
+        f"{bt.REASON_BIAS_UNRESOLVED}: minutes-ungated {SYMBOL} {SEED_B.isoformat()} "
+        f"gate {se.NOT_EVALUATED_GATE1P} reason {battery.gate1p.reason}"
+    )
+    assert se.NOT_EVALUATED_GATE1P in row.reason and "fold HIGH" in row.reason
+    assert row.bias_rule == RULE_MINUTES_UNGATED
+    assert row.flags == (bt.FLAG_UNGATED_MINUTE_DAY,)
+    assert row.executed is False and row.signalled is False and row.qty == 0
+    # the carry is printed UNCHANGED -- the refused day moved nothing (the engine-level test
+    # `test_q21b_a_battery_failing_day_leaves_the_carry_untouched` is the discriminating one,
+    # where the Rule-3 answer and the carry differ)
+    assert row.bias == next(r for r in rows if r.day == SEED_B).bias
+
+
+def test_q21b_the_same_pair_with_a_gated_D1_is_an_ordinary_rule_3_bias(tmp_path: Path) -> None:
+    """The CONTROL. The prices come back to their true scale -- nothing else moves -- and the
+    day is a normal Rule-3 bullish bias that trades the golden trade. So the refusal above is
+    caused by the failing battery and by nothing else in the fixture."""
+    stores = q21b_world(tmp_path, gate=None)
+    runner = make_runner(tmp_path, stores=stores)
+
+    row = next(r for r in runner.walk_symbol(SYMBOL).rows if r.day == TRADE_DAY)
+
+    assert q21b_battery(stores).usable is True
+    assert row.status == bt.STATUS_EVALUATED
+    assert row.bias == BULLISH and row.bias_rule == "rule-3-outside-bar"
+    assert row.flags == ()
+    assert row.executed is True
+    assert (row.entry_paise, row.stop_paise, row.target_paise) == (200100, 199900, 200700)
+    assert row.qty == 500 and row.net_pnl_paise == 290_000  # the hand-computed golden trade
+
+
+def test_q21b_a_rule_1_day_with_a_battery_failing_D1_is_UNTOUCHED(tmp_path: Path) -> None:
+    """CONTEXT 3.2: Rules 1 and 2 read NO minutes -- only Rule 3 asks which extreme broke first.
+    So a D-1 that fails the battery outright is invisible to a day the daily candles decide, and
+    the ruling costs that day nothing. This is the measure of the fix's blast radius."""
+    stores = q21b_world(tmp_path, gate="1P", rule_3=False)
+    runner = make_runner(tmp_path, stores=stores)
+
+    row = next(r for r in runner.walk_symbol(SYMBOL).rows if r.day == TRADE_DAY)
+
+    assert q21b_battery(stores).usable is False, "the fixture must really fail the battery"
+    assert row.status == bt.STATUS_EVALUATED
+    assert row.bias == BULLISH and row.bias_rule == "rule-1-breakout"
+    assert row.flags == ()  # never asked for, so never refused
+    assert row.executed is True and row.net_pnl_paise == 290_000
+
+
+def test_q21b_the_gate_is_the_precondition_so_it_outranks_the_malformed_bar(
+    tmp_path: Path,
+) -> None:
+    """JIOFIN 2023-08-21's real shape: a bar gate 2 CAN see (high < low, close outside) and that
+    `bias.Candle` would also refuse. The ruling makes the battery a PRECONDITION of the scan, so
+    the day is counted as `minutes-ungated` -- one day, one reason, and the reason is the gate."""
+    stores = q21b_world(tmp_path, gate="2")
+    minute_store, daily_store, master, _ = stores
+    pipeline = SignalPipeline(
+        minute_store=minute_store, daily_store=daily_store, master=master, row_size=ROW_SIZE
+    )
+
+    # both faults are genuinely present on that stored day
+    assert q21b_battery(stores).gate2.passed is False
+    with pytest.raises(MalformedMinuteBar):
+        bt.minute_loader(minute_store)(SYMBOL, SEED_B)  # the UNgated loader still names the bar
+
+    row = next(
+        r for r in make_runner(tmp_path, stores=stores).walk_symbol(SYMBOL).rows
+        if r.day == TRADE_DAY
+    )
+    assert bt.gated_minute_loader is not bt.minute_loader
+    assert row.bias_rule == RULE_MINUTES_UNGATED
+    assert row.flags == (bt.FLAG_UNGATED_MINUTE_DAY,)
+    assert RULE_MINUTES_MALFORMED not in (row.bias_rule or "")
+
+
+def test_q21b_the_manifest_counts_the_rare_shape_and_a_resume_counts_it_identically(
+    tmp_path: Path,
+) -> None:
+    """The counter is DERIVED from the row flag, so a resumed run -- which replays a shard it
+    did not walk -- prints the same number as an uninterrupted one, and the manifest bytes are
+    identical. That is the invariant a running counter would break."""
+    stores = q21b_world(tmp_path, gate="1P")
+    label = "rule-3 day refused on a battery-failing D-1 (QUESTIONS.md Q-21(b))"
+    assert label in bt.RARE_SHAPE_LABELS
+
+    whole = make_runner(tmp_path, stores=stores).run(tmp_path / "whole")
+    assert whole.manifest["rare_shapes"][label] == 1
+    assert set(whole.manifest["rare_shapes"]) == set(bt.RARE_SHAPE_LABELS)
+
+    class Interrupt(RuntimeError):
+        pass
+
+    run_dir = tmp_path / "resumed"
+    with pytest.raises(Interrupt):
+        make_runner(tmp_path, stores=stores).run(
+            run_dir, after_symbol=lambda symbol: (_ for _ in ()).throw(Interrupt(symbol))
+        )
+    resumed = make_runner(tmp_path, stores=stores).run(run_dir)
+
+    assert resumed.manifest["rare_shapes"][label] == 1
+    assert resumed.ledger_path.read_bytes() == whole.ledger_path.read_bytes()
+    assert resumed.manifest_path.read_bytes() == whole.manifest_path.read_bytes()
+
+    # ...and a window with no such day still prints the label, at zero, rather than omitting it.
+    clean = make_runner(tmp_path / "clean")
+    spotless = clean.build_manifest(clean.walk_symbol(SYMBOL).rows, {SYMBOL: {}})
+    assert spotless["rare_shapes"][label] == 0
+
+
+def test_q21b_the_battery_verdict_is_computed_once_per_symbol_day_and_reused(
+    tmp_path: Path,
+) -> None:
+    """The ruling says "computes (or reuses)". Reuse is a MEMO, not a persisted exclusion file:
+    CONTEXT 4.6 says outright there is no per-day exclusion file, so the verdict is recomputed
+    from the stores on every run and merely not recomputed twice within one."""
+    minute_store, daily_store, master, _ = q21b_world(tmp_path, gate="1P")
+    pipeline = SignalPipeline(
+        minute_store=minute_store, daily_store=daily_store, master=master, row_size=ROW_SIZE
+    )
+    calls: list[tuple[str, date]] = []
+    original = pipeline.gate_day
+
+    def counted(symbol, day, minutes):
+        calls.append((symbol, day))
+        return original(symbol, day, minutes)
+
+    object.__setattr__(pipeline, "gate_day", counted)
+    load = bt.gated_minute_loader(minute_store, pipeline)
+
+    for _ in range(4):
+        with pytest.raises(UngatedMinuteDay):
+            load(SYMBOL, SEED_B)
+
+    assert calls == [(SYMBOL, SEED_B)]
+
+
+def test_q21b_a_day_with_no_stored_minutes_is_the_documented_carry_not_a_gate_verdict(
+    tmp_path: Path,
+) -> None:
+    """CONTEXT 3.2 / R1-Q6: a Rule-3 day with no 1-minute data carries the last bias. That is a
+    SPEC branch, not a data verdict, and the battery cannot be run on a day with no bars at all
+    -- so an empty day must come back as None and never as a refusal."""
+    minute_store, daily_store, master, _ = standard_world(tmp_path)
+    pipeline = SignalPipeline(
+        minute_store=minute_store, daily_store=daily_store, master=master, row_size=ROW_SIZE
+    )
+
+    assert minute_store.minutes(SYMBOL, SEED_A) == ()
+    assert bt.gated_minute_loader(minute_store, pipeline)(SYMBOL, SEED_A) is None
+
+
+def test_every_unusable_minute_evidence_case_has_a_flag_and_a_counter() -> None:
+    """The tripwire that keeps a FIFTH case from reaching the ledger unflagged and uncounted.
+
+    `walk_symbol` looks the row flag up in `UNRESOLVED_FLAG_BY_RULE` rather than branching per
+    case, so a new `UnusableMinuteEvidence` subclass that forgets its entry fails HERE -- at
+    import time in the suite -- instead of writing refused rows that no rare shape counts. Every
+    flag must also key a real rare-shape label, or the manifest would carry a flag it never
+    totals."""
+    from acumen.bias_engine import UnusableMinuteEvidence
+
+    def subclasses(cls):
+        for child in cls.__subclasses__():
+            yield child
+            yield from subclasses(child)
+
+    cases = list(subclasses(UnusableMinuteEvidence))
+    assert {case.rule for case in cases} == {RULE_MINUTES_MALFORMED, RULE_MINUTES_UNGATED}
+    for case in cases:
+        assert case.rule in bt.UNRESOLVED_FLAG_BY_RULE, f"{case.__name__} has no ledger flag"
+    counted = {
+        flag
+        for flag, label in (
+            (bt.FLAG_MALFORMED_MINUTE_BAR, "malformed 1-minute bar"),
+            (bt.FLAG_UNGATED_MINUTE_DAY, "battery-failing D-1"),
+        )
+        if any(label in shape for shape in bt.RARE_SHAPE_LABELS)
+    }
+    assert counted == set(bt.UNRESOLVED_FLAG_BY_RULE.values())
+
+
+def test_q21b_the_run_path_wires_the_GATED_loader(tmp_path: Path) -> None:
+    """A tripwire on the wiring itself. `build_runner` needs real stores, so what is pinned here
+    is the property that makes the wiring checkable: the gated loader REFUSES a day the bare one
+    happily returns, so the two are not interchangeable and a runner carrying the bare one is
+    visibly a different machine."""
+    minute_store, daily_store, master, _ = q21b_world(tmp_path, gate="1P")
+    pipeline = SignalPipeline(
+        minute_store=minute_store, daily_store=daily_store, master=master, row_size=ROW_SIZE
+    )
+
+    assert bt.minute_loader(minute_store)(SYMBOL, SEED_B) is not None
+    with pytest.raises(UngatedMinuteDay):
+        bt.gated_minute_loader(minute_store, pipeline)(SYMBOL, SEED_B)

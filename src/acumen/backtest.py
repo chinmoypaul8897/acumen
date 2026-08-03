@@ -29,9 +29,17 @@ parenthesis):
       -> BIAS UNRESOLVABLE (:data:`REASON_BIAS_UNRESOLVED`: the calendar cannot answer for the
          date, the symbol's whole bias series could not be assembled, this particular day has
          no CONTEXT 3.2 pair inside the run's own history, or -- QUESTIONS.md Q-21 -- its
-         Rule-3 minute scan met a vendor-corrupt bar on D-1 and the pair cannot be decided)
+         Rule-3 minute scan met a vendor-corrupt bar on D-1, or -- Q-21(b) -- its Rule-3 scan
+         asked for a D-1 that does not pass the CONTEXT 4.5/4.6 gate battery)
       -> no minutes -> gate 1 -> gate 2 -> gate 1P -> suppressed -> no bias yet (seeding)
       -> no POC -> the signal outcome
+
+**A day's gates now gate BOTH of its jobs** (QUESTIONS.md Q-21(b), architect 03-Aug-2026).
+Step 3 below has always decided whether a day may be TRADED. It now also decides whether that
+day's minutes may serve the NEXT day's Rule-3 first-break scan: :func:`gated_minute_loader`
+puts the same battery in front of the Rule-3 load, so a D-1 in a wrong price domain can no
+longer hand the scan minutes measured on one scale to compare against daily thresholds on
+another.
 
 The first TWO are decided by :meth:`BacktestRunner.walk_symbol` -- it emits
 :data:`REASON_E2_NON_STANDARD` and :data:`REASON_BIAS_UNRESOLVED` and nothing else. Every
@@ -75,7 +83,15 @@ from . import simulate as sim
 from .aggregate import Bar, aggregate_15min, in_session_bars
 from .atomic_io import atomic_write_text
 from .bias import RULE_3_NO_MINUTE, BiasError, Candle
-from .bias_engine import BiasEngine, BiasEngineError, DailyBias, MalformedMinuteBar
+from .bias_engine import (
+    RULE_MINUTES_MALFORMED,
+    RULE_MINUTES_UNGATED,
+    BiasEngine,
+    BiasEngineError,
+    DailyBias,
+    MalformedMinuteBar,
+    UngatedMinuteDay,
+)
 from .calendar import CalendarError, TradingCalendar
 from .config import load_config
 from .daily_store import DailyStore
@@ -182,6 +198,7 @@ RARE_SHAPE_LABELS: tuple[str, ...] = (
     "rule-3 day with no 1-minute data (carried, CONTEXT 3.2)",
     "E10 fallback reference (no 11:00-stamped candle)",
     "rule-3 day refused on a malformed 1-minute bar (QUESTIONS.md Q-21)",
+    "rule-3 day refused on a battery-failing D-1 (QUESTIONS.md Q-21(b))",
 )
 
 #: Ledger / manifest / progress file names inside a run directory.
@@ -813,11 +830,13 @@ class BacktestRunner:
                 continue
             bias = biases.get(day)
             if bias is not None and bias.unresolved_detail is not None:
-                # QUESTIONS.md Q-21's third REASON_BIAS_UNRESOLVED case: the Rule-3 scan met a
-                # vendor-corrupt 1-minute bar on D-1. The offending bar's stamp and OHLCV ride
-                # in the reason, and the row carries the flag the manifest's rare-shape counter
-                # is derived from. The carried bias is printed unchanged -- the day did not
-                # move it -- but the day is REFUSED, so nothing trades on corrupt evidence.
+                # QUESTIONS.md Q-21's THIRD REASON_BIAS_UNRESOLVED case (the Rule-3 scan met a
+                # vendor-corrupt 1-minute bar on D-1) and Q-21(b)'s FOURTH (D-1 does not pass
+                # the CONTEXT 4.5/4.6 gate battery). Both refuse the DAY the same way: the
+                # offending bar -- or the refusing gate and its own reason -- rides in the
+                # reason, and the row carries the flag the manifest's rare-shape counter is
+                # derived from. The carried bias is printed unchanged (the day did not move it)
+                # but the day is REFUSED, so nothing trades on evidence that cannot be used.
                 rows.append(
                     LedgerRow(
                         symbol=symbol,
@@ -826,7 +845,7 @@ class BacktestRunner:
                         reason=f"{REASON_BIAS_UNRESOLVED}: {bias.unresolved_detail}",
                         bias=bias.bias,
                         bias_rule=bias.rule,
-                        flags=(FLAG_MALFORMED_MINUTE_BAR,),
+                        flags=(UNRESOLVED_FLAG_BY_RULE[bias.rule],),
                     )
                 )
                 continue
@@ -1163,6 +1182,23 @@ FLAG_MALFORMED_MINUTE_BAR: str = (
     "rule-3 minute scan met a malformed 1-minute bar (QUESTIONS.md Q-21)"
 )
 
+#: Set on the refused ledger row of a trade day whose Rule-3 scan asked for a D-1 that does NOT
+#: pass the CONTEXT 4.5/4.6 gate battery (QUESTIONS.md Q-21(b)). Same carrier as the flag above,
+#: for the same two reasons: a day without one writes exactly the bytes it always did, and the
+#: manifest's counter is DERIVED from the flag rather than accumulated during the walk.
+FLAG_UNGATED_MINUTE_DAY: str = (
+    "rule-3 minute scan met a D-1 that fails the CONTEXT 4.5/4.6 gate battery "
+    "(QUESTIONS.md Q-21(b))"
+)
+
+#: Which flag (and therefore which rare-shape counter) an UNRESOLVED bias day carries, keyed by
+#: the rule :mod:`acumen.bias_engine` gave it. One mapping rather than a branch per case, so a
+#: fifth case cannot be added to the engine and silently reach the ledger unflagged and uncounted.
+UNRESOLVED_FLAG_BY_RULE: Mapping[str, str] = {
+    RULE_MINUTES_MALFORMED: FLAG_MALFORMED_MINUTE_BAR,
+    RULE_MINUTES_UNGATED: FLAG_UNGATED_MINUTE_DAY,
+}
+
 
 #: What every output says while the trader's Q43 answer is outstanding. Verbatim, everywhere.
 CAPITAL_FLAGS_PENDING_NOTE: str = (
@@ -1192,6 +1228,10 @@ def rare_shape_counts(rows: Sequence[LedgerRow]) -> dict[str, int]:
             (
                 FLAG_MALFORMED_MINUTE_BAR,
                 "rule-3 day refused on a malformed 1-minute bar (QUESTIONS.md Q-21)",
+            ),
+            (
+                FLAG_UNGATED_MINUTE_DAY,
+                "rule-3 day refused on a battery-failing D-1 (QUESTIONS.md Q-21(b))",
             ),
             (sim.FLAG_QTY_ZERO_UNSIZABLE, "qty-zero unsizable days"),
             (sim.FLAG_SIGNAL_UNSIZABLE, "signal-unsizable (degenerate) days"),
@@ -1454,14 +1494,15 @@ def build_runner(
         margin_basis=config.margin_basis_text(),
         label=label,
     )
+    pipeline = SignalPipeline(
+        minute_store=minute_store,
+        daily_store=daily_store,
+        master=master,
+        row_size=config.row_size,
+    )
     runner = BacktestRunner(
         spec=spec,
-        pipeline=SignalPipeline(
-            minute_store=minute_store,
-            daily_store=daily_store,
-            master=master,
-            row_size=config.row_size,
-        ),
+        pipeline=pipeline,
         calendar=calendar,
         minute_store=minute_store,
         daily_store=daily_store,
@@ -1469,10 +1510,58 @@ def build_runner(
         suppressions=suppressions,
         residual=residual,
         non_standard_sessions=frozenset(non_standard),
-        minute_loader=minute_loader(minute_store),
+        # QUESTIONS.md Q-21(b): the RUN reads D-1's minutes through the GATED loader -- the
+        # same pipeline that gates the day being traded also gates the day being used as
+        # evidence, so one battery answers both questions and they can never disagree.
+        minute_loader=gated_minute_loader(minute_store, pipeline),
         disclosures=tuple(disclosures),
     )
     return runner, master_path, ca_summary
+
+
+def gated_minute_loader(store: MinuteStore, pipeline: SignalPipeline):
+    """The RUN's Rule-3 minute loader, with the CONTEXT 4.5/4.6 battery IN FRONT of it.
+
+    **QUESTIONS.md Q-21(b)** (architect, 03-Aug-2026): *"a day's minutes may serve a Rule-3
+    first-break scan ONLY if that day passes the CONTEXT 4.5/4.6 gate battery ... a
+    battery-failing D-1 makes the bias UNRESOLVABLE: fourth counted case (minutes-ungated)."*
+    Until that ruling, a day's gate verdicts gated only its own TRADING: the bias engine read
+    D-1's minutes straight from the store, consulting no gate, so a D-1 in a wrong-price-domain
+    era could hand a Rule-3 scan minutes on one price scale to compare against P's levels on
+    another -- and the winner of that comparison then decided a real trade.
+
+    The order is the ruling's own: the BATTERY FIRST, before a single :class:`acumen.bias.Candle`
+    is built. A day that fails a gate is refused as ``minutes-ungated`` even if it also carries a
+    malformed bar (JIOFIN 2023-08-21 is exactly that day), because the gate is the ruling's
+    precondition rather than a second opinion about the bar.
+
+    The verdict is computed ONCE per ``(symbol, day)`` and reused -- the ruling's "computes (or
+    reuses)". It is a memo and never a persisted exclusion file: CONTEXT 4.6 says outright that
+    there is no per-day exclusion file, and the battery is recomputed from the two local stores
+    exactly as :meth:`acumen.signal_engine.SignalPipeline.stock_day` recomputes it for the day
+    being traded. Only the two-string verdict is held, never the day's bars.
+
+    A day with NO stored minutes is NOT gated and NOT refused: it is CONTEXT 3.2's documented
+    missing-1-minute carry (R1-Q6), which is a spec branch and not a data verdict, and the
+    battery cannot be run on a day with no bars at all.
+    """
+    refusals: dict[tuple[str, date], tuple[str, str] | None] = {}
+
+    def gated(symbol: str, day: date):
+        bars = store.minutes(symbol, day)
+        if not bars:
+            return None  # CONTEXT 3.2 / R1-Q6: the documented carry, not a gate verdict
+        key = (symbol.upper(), day)
+        if key not in refusals:
+            refusals[key] = pipeline.gate_day(symbol, day, bars).refusal_detail
+        refusal = refusals[key]
+        if refusal is not None:
+            raise UngatedMinuteDay(
+                symbol=symbol, day=day, gate=refusal[0], gate_reason=refusal[1]
+            )
+        return candles_for(symbol, day, bars)
+
+    return gated
 
 
 def minute_loader(store: MinuteStore):
@@ -1488,39 +1577,52 @@ def minute_loader(store: MinuteStore):
 
     The bar is never dropped and the scan is never continued without it: Rule 3 decides on
     which extreme broke FIRST, so a scan minus one corrupt bar could reverse the bias.
+
+    **This loader does NOT gate the day.** The RUN path uses :func:`gated_minute_loader`, which
+    puts the CONTEXT 4.5/4.6 battery in front of this one (QUESTIONS.md Q-21(b)); the bare
+    loader is what the evidence scripts and the unit tests exercise when the question is the
+    BAR rather than the day.
     """
 
     def load(symbol: str, day: date):
         bars = store.minutes(symbol, day)
-        if not bars:
-            return None
-        candles = []
-        for bar in bars:
-            try:
-                candles.append(
-                    Candle(
-                        open=int(bar.open_paise),
-                        high=int(bar.high_paise),
-                        low=int(bar.low_paise),
-                        close=int(bar.close_paise),
-                        stamp=bar.stamp,
-                        day=bar.stamp.date(),
-                    )
-                )
-            except BiasError as exc:
-                raise MalformedMinuteBar(
-                    symbol=symbol,
-                    day=day,
-                    stamp=bar.stamp,
-                    open_paise=int(bar.open_paise),
-                    high_paise=int(bar.high_paise),
-                    low_paise=int(bar.low_paise),
-                    close_paise=int(bar.close_paise),
-                    volume=int(bar.volume),
-                ) from exc
-        return tuple(candles)
+        return candles_for(symbol, day, bars) if bars else None
 
     return load
+
+
+def candles_for(symbol: str, day: date, bars: Sequence) -> tuple[Candle, ...]:
+    """Stored 1-minute bars -> :class:`acumen.bias.Candle` objects, in stored order.
+
+    The one place on the run path that turns stored bars into candles, so it is the one place
+    a vendor-corrupt bar can be NAMED (QUESTIONS.md Q-21). Both loaders above call it, which is
+    what keeps the gated and ungated paths building identical candles from identical bytes.
+    """
+    candles: list[Candle] = []
+    for bar in bars:
+        try:
+            candles.append(
+                Candle(
+                    open=int(bar.open_paise),
+                    high=int(bar.high_paise),
+                    low=int(bar.low_paise),
+                    close=int(bar.close_paise),
+                    stamp=bar.stamp,
+                    day=bar.stamp.date(),
+                )
+            )
+        except BiasError as exc:
+            raise MalformedMinuteBar(
+                symbol=symbol,
+                day=day,
+                stamp=bar.stamp,
+                open_paise=int(bar.open_paise),
+                high_paise=int(bar.high_paise),
+                low_paise=int(bar.low_paise),
+                close_paise=int(bar.close_paise),
+                volume=int(bar.volume),
+            ) from exc
+    return tuple(candles)
 
 
 def iter_trading_days(calendar: TradingCalendar, start: date, end: date) -> Iterable[date]:

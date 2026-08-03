@@ -50,8 +50,38 @@ class BiasEngineError(RuntimeError):
 #: ``REASON_BIAS_UNRESOLVED``.
 RULE_MINUTES_MALFORMED: str = "minutes-malformed"
 
+#: The rule a day carries when its Rule-3 minute evidence is INADMISSIBLE -- D-1 did not pass
+#: the CONTEXT 4.5/4.6 gate battery (QUESTIONS.md Q-21(b), architect 03-Aug-2026). Same shape
+#: and same machinery as :data:`RULE_MINUTES_MALFORMED`: the pair is UNRESOLVABLE and the whole
+#: DAY is refused under ``REASON_BIAS_UNRESOLVED``.
+RULE_MINUTES_UNGATED: str = "minutes-ungated"
 
-class MalformedMinuteBar(BiasEngineError):
+
+class UnusableMinuteEvidence(BiasEngineError):
+    """Rule-3 minute evidence that may not decide a bias -- for two different reasons.
+
+    QUESTIONS.md Q-21 and its Q-21(b) addendum give the SAME answer to two different questions
+    about day C's minutes: if they cannot be trusted, the bias for the pair is UNRESOLVABLE and
+    the DAY is refused and counted -- never a crash, and never a scan quietly continued without
+    them, because Rule 3 decides on which extreme broke FIRST and evidence that is missing or
+    wrong can reverse that.
+
+    Subclasses carry :attr:`rule` (the tag the refused day's ledger row prints) and
+    :meth:`detail` (the refusal detail, which must name the specific thing that was wrong).
+
+    It subclasses :class:`BiasEngineError` deliberately: :class:`BiasEngine` turns it into a
+    refused DAY, and any escape past that is still a COUNTED no-trade for the symbol rather
+    than a dead run.
+    """
+
+    #: The :class:`DailyBias` rule tag for this kind of refusal. Set by each subclass.
+    rule: str = ""
+
+    def detail(self) -> str:  # pragma: no cover -- every subclass overrides it
+        raise NotImplementedError
+
+
+class MalformedMinuteBar(UnusableMinuteEvidence):
     """A stored 1-minute bar a Rule-3 scan asked for is impossible: O or C outside [L, H].
 
     Raised by the RUN's minute loader (:func:`acumen.backtest.minute_loader`) at the LOAD
@@ -60,11 +90,9 @@ class MalformedMinuteBar(BiasEngineError):
     evidence makes the bias unresolvable for that pair, so the DAY is refused and counted --
     never a crash, and never a scan with the corrupt bar quietly dropped, because a scan minus
     a bar could reverse a first-break and therefore the bias itself.
-
-    It subclasses :class:`BiasEngineError` deliberately: :meth:`acumen.bias_engine.BiasEngine`
-    turns it into a refused DAY, and any escape past that is still a COUNTED no-trade for the
-    symbol rather than a dead run.
     """
+
+    rule: str = RULE_MINUTES_MALFORMED
 
     def __init__(
         self,
@@ -98,6 +126,42 @@ class MalformedMinuteBar(BiasEngineError):
         )
 
 
+class UngatedMinuteDay(UnusableMinuteEvidence):
+    """A Rule-3 scan asked for a day's minutes and that day FAILS the CONTEXT 4.6 battery.
+
+    QUESTIONS.md **Q-21(b)** (architect, 03-Aug-2026): *"a day's minutes may serve a Rule-3
+    first-break scan ONLY if that day passes the CONTEXT 4.5/4.6 gate battery ... a
+    battery-failing D-1 makes the bias UNRESOLVABLE: fourth counted case (minutes-ungated),
+    same machinery as Q-21's third, detail naming which gate failed."*
+
+    The rationale is the ruling's own: a D-1 sitting in a wrong-price-domain era would have its
+    minutes compared against correct-scale daily thresholds (``P.high`` / ``P.low``, brought
+    into C's scale by the pairwise adjustment), so the first break the scan finds is arithmetic
+    on two different price scales -- a garbage answer that then trades.
+
+    Raised by :func:`acumen.backtest.gated_minute_loader`, which is the only place on the run
+    path that holds the stored day AND can reach the battery. ``gate`` and ``gate_reason`` are
+    the battery's OWN verdict (:attr:`acumen.signal_engine.DayGates.refusal_detail`), never a
+    sentence composed here -- a refusal that paraphrased a gate could drift from it.
+    """
+
+    rule: str = RULE_MINUTES_UNGATED
+
+    def __init__(self, *, symbol: str, day: date, gate: str, gate_reason: str) -> None:
+        self.symbol = symbol
+        self.day = day
+        self.gate = gate
+        self.gate_reason = gate_reason
+        super().__init__(self.detail())
+
+    def detail(self) -> str:
+        """The refusal detail Q-21(b) requires: which gate failed, and its own reason."""
+        return (
+            f"minutes-ungated {self.symbol} {self.day.isoformat()} gate {self.gate} "
+            f"reason {self.gate_reason}"
+        )
+
+
 @dataclass(frozen=True)
 class DailyBias:
     """The bias in effect for one trading day, with everything the evidence pack needs."""
@@ -119,9 +183,11 @@ class DailyBias:
     tie_case: bool = False
     log: str | None = None
     #: Set ONLY when this day's bias could not be resolved at all -- QUESTIONS.md Q-21's third
-    #: ``REASON_BIAS_UNRESOLVED`` case, malformed Rule-3 minute evidence. It carries the
-    #: offending bar verbatim so the orchestration can log it in the refusal without ever
-    #: re-reading the store. ``None`` on every other day, so no existing row's bytes move.
+    #: ``REASON_BIAS_UNRESOLVED`` case (malformed Rule-3 minute evidence) and Q-21(b)'s fourth
+    #: (a D-1 that fails the CONTEXT 4.6 battery). It carries the offending bar, or the refusing
+    #: gate and its reason, verbatim -- so the orchestration can log it in the refusal without
+    #: ever re-reading the store. ``None`` on every other day, so no existing row's bytes move;
+    #: :attr:`rule` says WHICH of the two it is.
     unresolved_detail: str | None = None
 
 
@@ -245,17 +311,20 @@ class BiasEngine:
         provider: MinuteProvider = self._provider(symbol, current_date)
         try:
             outcome = evaluate_pair(previous_adj, current, provider, last_bias)
-        except MalformedMinuteBar as exc:
+        except UnusableMinuteEvidence as exc:
             # QUESTIONS.md Q-21 (architect, 03-Aug-2026): "malformed minute evidence makes the
             # bias UNRESOLVABLE for that pair -- the day joins REASON_BIAS_UNRESOLVED as its
-            # third case (minutes-malformed), counted, never a crash". The carried bias is left
-            # UNCHANGED: a day whose evidence is corrupt decides nothing, in either direction.
+            # third case (minutes-malformed), counted, never a crash", and Q-21(b) adds the
+            # FOURTH case in the same shape -- a D-1 that fails the CONTEXT 4.6 battery is not
+            # admissible evidence either ("same machinery as Q-21's third"). The carried bias is
+            # left UNCHANGED in both: a day whose evidence cannot be used decides nothing, in
+            # either direction.
             return (
                 DailyBias(
                     trade_date=day,
                     bias=last_bias,
                     tradeable=False,
-                    rule=RULE_MINUTES_MALFORMED,
+                    rule=exc.rule,
                     detail=exc.detail(),
                     current_date=current_date,
                     previous_date=previous_date,
@@ -263,8 +332,8 @@ class BiasEngine:
                     current_candle=current,
                     unresolved_detail=exc.detail(),
                     log=(
-                        f"{symbol} {day}: Rule-3 minute evidence malformed on {current_date} "
-                        "-> bias unresolvable, day refused (Q-21)"
+                        f"{symbol} {day}: Rule-3 minute evidence unusable on {current_date} "
+                        f"({exc.rule}) -> bias unresolvable, day refused (Q-21)"
                     ),
                 ),
                 last_bias,  # unchanged

@@ -82,21 +82,35 @@ class DayGates:
 
     @property
     def refusal(self) -> str | None:
-        """Which gate refused the day, in the battery's own order, or ``None`` if none did.
+        """Which gate refused the day, in the battery's own order, or ``None`` if none did."""
+        detail = self.refusal_detail
+        return None if detail is None else detail[0]
+
+    @property
+    def refusal_detail(self) -> tuple[str, str] | None:
+        """``(which gate refused, that gate's OWN reason)``, or ``None`` if none did.
+
+        The battery's order, decided in exactly one place so the gate NAME and the gate's own
+        words can never come from two different verdicts. :attr:`refusal` is the first half of
+        this pair, which is what every chunk-9 refusal count keys on.
 
         A day with NO raw daily row is counted under gate 1P and never under gate 1: gate 1
         could not run at all (there is nothing to reconcile against), while gate 1P FAILS it
         outright -- the Q-14 ruling's own words, and the reason its denominator is every stored
         day. Folding such a day into gate 1's count is exactly what that ruling forbids.
+
+        The REASON half is what QUESTIONS.md Q-21(b) puts in a refused ledger row: a Rule-3 scan
+        that is denied a battery-failing D-1 must say which gate denied it and why, in that
+        gate's own words rather than in a sentence written here.
         """
         if self.gate1 is None:
-            return NOT_EVALUATED_GATE1P
+            return (NOT_EVALUATED_GATE1P, self.gate1p.reason)
         if not self.volume_reconciled:
-            return NOT_EVALUATED_GATE1
+            return (NOT_EVALUATED_GATE1, self.gate1.reason)
         if not self.gate2.passed:
-            return NOT_EVALUATED_GATE2
+            return (NOT_EVALUATED_GATE2, "; ".join(self.gate2.reasons))
         if not self.gate1p.passed:
-            return NOT_EVALUATED_GATE1P
+            return (NOT_EVALUATED_GATE1P, self.gate1p.reason)
         return None
 
 
