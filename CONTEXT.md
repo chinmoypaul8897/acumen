@@ -1,6 +1,6 @@
 # CONTEXT.md — ACUMEN INTELLIGENCE · Master Specification
 
-**Version 1.5 · 2 August 2026 · THIS FILE IS LAW.**
+**Version 1.6 · 3 August 2026 · THIS FILE IS LAW.**
 Every build/review session reads this before touching code. Nothing here may be changed by any Claude Code session — spec changes flow only through the architect (the Cowork chat), arrive as a new version of this file, and are logged in §10. If reality and this file disagree, STOP and write it to QUESTIONS.md.
 
 ## Table of contents
@@ -193,7 +193,7 @@ Test oracle: NSE's official "Adjustment of F&O contracts Calculator" XLSX (`nsea
 ### 4.5 Quality gates (automated, every ingestion day)
 
 1. **Volume reconciliation** per symbol-day: `gap% = (bhavcopy_daily_vol − Σ 1-min vol) / bhavcopy_daily_vol`. **Acceptance band: −0.1% ≤ gap ≤ +5.0%** (observed reality in the PoC: +0.02%…+3.6%, median ~0.8% = pre-open auction — the band adds margin around it). Outside the band → flag day, exclude from backtest, log.
-2. **Candle integrity**: expected 375 minutes 09:15–15:29. **Missing > 15 minutes in the full day** → exclude the day (flag). Any duplicates, high<low, close outside [low,high] → exclude (flag). (Milder window-level damage is handled by E4, which can fire on days this gate passes.)
+2. **Candle integrity**: expected 375 minutes 09:15–15:29. **Missing > 15 minutes in the full day** → exclude the day (flag). Any duplicates, high<low, close outside [low,high] → exclude (flag). impossible OHLC includes an OPEN or CLOSE outside [low, high] (Q-21(a), v1.6 — the open test completed the enumeration after 47 vendor-corrupt bars passed the close-only list). (Milder window-level damage is handled by E4, which can fire on days this gate passes.)
 3. **Adjustment sanity**: on every split/bonus ex-date in history, adjusted series must show |day-over-day gap| < 20% (unadjusted 1:10 split = −90% fake gap must disappear); validated against §4.2 oracle. **Also settles OPEN: SmartAPI 1-min adjustment status is UNVERIFIED — treated as RAW; this gate checks known split dates during backfill; if candles turn out pre-adjusted, architect updates §7-E11 before chunk 5 completes.**
 4. Old-history spot-check rides along with the full backfill (first run over 2016–2018) — same gates.
 
@@ -239,6 +239,13 @@ the authoritative delta record: 422 divergences, ZERO unexplained.
   current figures, which every manifest carries verbatim. Chunk-9 duties
   (recompute gate 1P per day; read the register before any per-symbol
   statistic) unchanged.
+
+Q-21(a) COMPLETION (v1.6): gate 2 gains the open test. Measured cost: 47
+symbol-days flip usable→refused; passing days 409,205 = 93.9317% coverage;
+ZERO settled/quarantined flips. The 48-bar population (47 on 2023-03-03 09:15
+market-wide, 1 JIOFIN 2023-08-21) and the 11 moved-POC days are documented in
+docs/evidence/chunk9b_q21a_poc_impact.md. Corrupt days are refused, never
+repaired.
 
 ## 5. TradingView replication facts (why our POC = his POC)
 
@@ -319,6 +326,7 @@ Precedence if conflict is ever found: trader's R2 answers > R1 answers > PDF tex
 
 | Version | Date | Change |
 |---|---|---|
+| 1.6 | 03-Aug-2026 | Q-21(a): gate 2 enumeration completed with the open test; measured cost 47 days / coverage 93.9317%; Q-21(b) bias-evidence gating and Q-21 malformed-bar refusal recorded as law |
 | 1.5 | 02-Aug-2026 | Q-18 re-seal: era rebuilt and reconciled to ZERO unexplained (docs/recovery/q18_reconciliation.md is the delta record); §4.6 rewritten with the re-sealed numbers (435,641 / 409,252 = 93.9425%; APLAPOLLO in, NESTLEIND out of quarantine; BSE volume-only caveat); Q-17 candle-level drop and Q-19 7-day 404-sealing guard made law; E5 rebuild-universe clarification; daily store extended to 2026-07-30 |
 | 1.4 | 29-Jul-2026 | Q-15 ruling (option a): F1/F2's illustrative POC → 2032 (PDF's 2030 provably inconsistent with the trader's own gap rule — while ARMED no prior close exceeds the POC, so a gap-branch stop can never be 2032; precedence §10: later answers correct earlier text). §3.4 untouched; F4 remains the gap witness; low == POC → NORMAL branch is the taught boundary |
 | 1.3 | 29-Jul-2026 | Round-3 answers + data-era close, batched: §3.2 tie rule rewritten (color irrelevant — trader overturned green-mirror + doji-carry; bullish-precedence close-vs-body rule); §3.3 window confirmed 8-candle, tpr-tie → finer (Q-13 ruled), rounding half-even pinned, N=24 confirmed; §3.4 ==POC wait rule + side-only first distinct close (Q34b/Q41-A); §3.5 risk ₹1,000 + take-all confirmed (Q40-d) with capital-infeasibility flags; NEW §4.6 minute-lake final state (measured adjustment maps, floors per event per side, 3-gate battery incl. gate 1P, coverage 94.69% architect-accepted, residual register, chunk-9 duties, next-data-work list); §8 F5 extended to 3 sub-fixtures; §9 registry: everything resolved except OPEN-5 (v2); both trader gates recorded CLOSED |
