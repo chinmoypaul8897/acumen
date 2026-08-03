@@ -3126,3 +3126,83 @@ a reader of the ledger alone knows how many rows the ruling costs before opening
 bar exactly as stored, once with its low clamped to `min(low, open)` -- and the two are reported
 side by side per day with the row-count change. This session decides NOTHING from it: whether
 CONTEXT 4.5's gate-2 enumeration gains the OPEN test is the architect's call on those numbers.
+
+---
+
+### ARCHITECT'S RULING (03-Aug-2026) · Q-21(a) · recorded VERBATIM by the chunk-9B FIX-3 session
+
+The architect's text, exactly as supplied, quoted whole and unedited. It answers the question the
+session above measured and handed back. Nothing in this repo may narrow or widen it; everything
+after the quotation is what this session measured and executed under it.
+
+> "ARCHITECT'S RULING (03-Aug-2026), Q-21(a): gate 2's impossible-OHLC
+> enumeration is COMPLETED with the OPEN test -- a bar whose open lies outside
+> [low, high] fails integrity, exactly as a close outside does. Rationale: the
+> sealed enumeration was an incomplete list, proven by 47 corrupt bars passing
+> it; completing the battery keeps ONE source of truth about a day's usability
+> (the consumption-boundary alternative would fork it -- the Q-14 lesson) and
+> unifies with Q-21(b), whose battery precondition now catches corrupt-bar days
+> as evidence too. Corrupt days are refused, never repaired -- no clamped low is
+> invented. Spec change: CONTEXT v1.6. Architect."
+
+**MEASURED BEFORE IT WAS EXECUTED** (`docs/evidence/chunk9b_q21a_gate2_completion.{py,md}`,
+offline and READ-ONLY): the whole CONTEXT 4.6 battery was re-run over every stored symbol-day of
+all 210 processed symbols -- 435,641 symbol-days, 158,650,431 stored bars -- with gate 2 evaluated
+twice per day, once under the sealed close-only enumeration and once under the completed one, so
+the cost of the ruling is a measured delta and not an estimate. Under the SEALED enumeration the
+pass reproduces `<data_root>/universe_backfill/ledger.json` on every compared figure of all 210
+symbols with ZERO mismatches, which is what makes its COMPLETED-side numbers believable.
+
+**THE MEASURED COST.**
+
+| measure | sealed | completed | delta |
+|---|---|---|---|
+| stored symbol-days (210 symbols) | 435,641 | 435,641 | 0 |
+| gate-1 EFFECTIVE pass (204 settled) | 414,785 | 414,785 | **0** |
+| gate-1P pass (204 settled) | 412,234 | 412,234 | **0** |
+| gate-2 exclusions (204 settled) | 1,076 | 1,123 | +47 |
+| **USABLE symbol-days (all three gates, settled)** | **409,252** | **409,205** | **-47** |
+| **coverage** (usable of every stored symbol-day) | **93.9425%** | **93.9317%** | -0.0108 pp |
+
+- **47 settled symbol-days flip usable -> refused**, every one of them **2023-03-03**, one per
+  symbol across 47 symbols -- the market-wide vendor defect in that morning's 09:15 print. No
+  other date in the ten-year era loses a single day.
+- **ZERO status flips.** A symbol is quarantined on its EFFECTIVE GATE-1 rate alone (80%), and
+  gate 1's numerator and denominator are unchanged to the day, so the decision's own inputs did
+  not move. The margins are stated anyway: every flipped symbol sits +6.16 pp to +19.88 pp clear
+  of the line (JUBLFOOD, the narrowest, at 86.16% = 2,098/2,435, 150 failing days of headroom),
+  and the closest SETTLED symbol in the whole universe is GAIL at 81.89%, +1.89 pp clear.
+- **JIOFIN 2023-08-21 costs nothing**: its day already failed gate 1 (volume reconciliation), so
+  the completion refuses a day that was refused already.
+
+**A CORRECTION TO THE POPULATION, found by measuring what the earlier scan did not scan.** The
+Q-21 evidence's "48 malformed bars in the entire minute lake" was measured over the **204 settled**
+symbols. Over all **210 processed** symbols there are **50**: the same 48 plus **APLAPOLLO
+2023-03-03** and **UPL 2023-03-03**, both QUARANTINED symbols whose days were usable and now are
+not. They are outside the run's universe and outside the coverage numerator either way, so they
+cost the backtest nothing and no figure above moves -- but the population sentence CONTEXT v1.6
+§4.6 carries (and the evidence file it cites) describes the settled 204, not the lake. Recorded,
+not decided: whether the architect wants that sentence to read 50 is a CONTEXT edit and is theirs.
+
+**THE Q-21(b) RADIUS, REMEASURED under the completed battery** (`docs/evidence/chunk9b_q21b_blast_radius.md`,
+re-run by this session): of the 7,031 trade days whose CONTEXT 3.2 pair reaches the Rule-3 scan,
+**210 now have a battery-failing D-1** -- gate 1: 121, gate 1P: 88, **gate 2: 1** -- against 209
+before. The one that moved is **JUBLFOOD 2023-03-06**, and it was already a counted refusal under
+Q-21's malformed-bar case: the day is refused either way, the ledger's refused-row count is
+unchanged, and what moved is which of the two rare-shape counters totals it. Not one of the other
+46 flipped days is read by any Rule-3 scan in the whole span, so the bias engine never asked for
+them.
+
+**EXECUTED by the chunk-9B FIX-3 session (2026-08-03).** One battery edit, one spec version:
+
+- `quality_gates.integrity_gate` tests the OPEN against `[low, high]` beside the close, under the
+  SAME `ohlc_violations` counter and the same exclusion reason. No band, tolerance, order or other
+  gate moved; gate 1, gate 1P and gate 3 are untouched.
+- `backtest.SPEC_VERSION` -> `v1.6`, so every ledger and manifest written from here carries the
+  version whose law it ran under.
+- Nothing is repaired: a corrupt day is REFUSED. No clamped low is invented anywhere in `src/`,
+  and the Q-21(a) clamp measurement stays what it always was -- a measurement.
+- The day the run died on (JUBLFOOD 2023-03-03) now FAILS gate 2, so the Q-21 case-3 crash path
+  arrives instead as Q-21(b)'s case-4 `minutes-ungated`: the battery is checked before a candle is
+  built (B250), and the refusal is now named by gate 2 rather than by the bar. The trade day
+  2023-03-06 is refused either way, counted once, and never trades.
