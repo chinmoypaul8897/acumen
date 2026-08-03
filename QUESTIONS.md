@@ -3206,3 +3206,93 @@ them.
   arrives instead as Q-21(b)'s case-4 `minutes-ungated`: the battery is checked before a candle is
   built (B250), and the refusal is now named by gate 2 rather than by the bar. The trade day
   2023-03-06 is refused either way, counted once, and never trades.
+
+---
+
+## Q-22 · chunk 9B FIX-ARC REVIEW · class A · **OPEN -- STOP** · BLOCKS the full-history RELAUNCH
+
+Raised 2026-08-03 by the QC review of `20b45c9..a707615` (docs/reviews/REVIEW_9B_FIXES.md,
+finding R1). The fix arc itself PASSES; this is a PRE-EXISTING deviation the review found while
+verifying the arc's own claim that Q-21's third case stays reachable through an out-of-session
+bar. Nothing here is decided: the question is put, and the affected part is stopped.
+
+**THE QUESTION (a): does CONTEXT 4.6's Q-17 law bind the CONTEXT 3.2 Rule-3 first-break scan?**
+
+CONTEXT 4.6 makes Q-17 law: *"a stored 1-minute bar stamped outside 09:15..15:29 is dropped at
+the CANDLE level, flagged and counted, never silently -- uniform for pre-open and post-close
+strays; gates still see the whole stored day for volume."* CONTEXT 7-E2 says the same.
+
+The TRADING path obeys it: `signal_engine.stock_day` and the backtest's 15-minute feed both call
+`aggregate.in_session_bars`, and the day's row carries `FLAG_OUT_OF_SESSION_DROPPED`. **The BIAS
+path does not.** `minute_store.minutes` applies no session filter; `backtest.candles_for` builds a
+`bias.Candle` for every stored bar of D-1; `bias._first_break` walks them in stamp order with no
+filter. So a stray bar votes on which of P's extremes broke FIRST -- undropped, unflagged,
+uncounted -- and therefore on the day's bias and on a real trade. `aggregate.in_session_bars`'
+own docstring asserts the opposite of what happens here.
+
+**WHAT IT COSTS, measured read-only on the real store (not estimated).** Out-of-session bars fall
+on 13 dates in a 25-symbol sample. Eight are the CONTEXT 7-E2 Muhurat sessions the run already
+removes from its calendar, so they can be neither a trade day nor a D-1. Of the remainder:
+
+- **2020-12-08** (pre-open vendor garbage at 04:18/04:19/04:21, cumulative volumes) now FAILS
+  gate 1 (gap -40% to -70%), so the arc's own Q-21(b) gating already refuses those days. The
+  arc NARROWED this problem.
+- **2017-04-28** (one 09:14 print per symbol, market-wide) PASSES the battery. 139 symbols carry
+  it, 4 reach Rule 3, the stray decides the first break on 2 -- and **no bias changes**.
+- **2021-02-24** -- the NSE outage day, whose session ran past 15:29, and which is **NOT** one of
+  the eight removed non-standard sessions -- PASSES the battery on 152 of the 174 symbols
+  carrying strays. 8 reach Rule 3, and **2 biases FLIP**:
+
+| symbol | status | P.low (D-2 2021-02-23) | in-session low | the 15:44 bar's low | as shipped | if Q-17 were obeyed |
+|---|---|---|---|---|---|---|
+| GODREJCP | settled | 67795 | 68000 (no break) | **67600** | `rule-3-outside-bar` -> **bearish** | `rule-3-no-break-carry` -> BULLISH |
+| LAURUSLABS | settled | 35815 | 35915 (no break) | **35810** | `rule-3-outside-bar` -> **bearish** | `rule-3-no-break-carry` -> BULLISH |
+
+Both symbols are in the run's settled universe. A flipped bias flips the day's trade direction
+(CONTEXT 3.4). **Scope stated honestly:** two dates were measured over the settled universe and
+out-of-session dates were sampled over 25 symbols; the full population over all 204 symbols and
+the whole span is NOT measured. The affected count is **>= 2 and unknown**.
+
+**WHY IT IS BLOCKING.** The relaunch writes the definitive ten-year ledger that chunk 10's
+metrics, chunk 12's report and the trader's own decisions rest on. The review will not certify a
+run it has proven will record at least two biases CONTEXT says should not be there.
+
+**THE OPTIONS, for the architect to choose between -- this session decides NONE of them:**
+
+(a) **The scan drops strays** (Q-17 binds the bias path). `backtest.candles_for` calls
+    `aggregate.in_session_bars`, drops the stray candles, and the day's row carries the existing
+    `FLAG_OUT_OF_SESSION_DROPPED` so the drop is counted rather than silent, exactly as Q-17
+    requires elsewhere. One line plus its counter; the gates keep seeing the whole stored day for
+    volume, as Q-17 also requires. Q-21's third case stays reachable only for an IN-session
+    malformed bar, which gate 2 now always catches -- so the case becomes genuinely unreachable
+    on the run path and the arc's justification for keeping it (see the FIX-3 PROGRESS entry)
+    falls away with it.
+(b) **The scan reads the whole stored day** (Q-17 binds only the trading path). Then the bias
+    engine's behaviour is correct as it stands, CONTEXT 4.6 should say so in its own words, and
+    the two flipped biases above are the intended answer.
+(c) Something else the architect specifies.
+
+**WHAT IS STOPPED:** the full-history relaunch, and only that. The fix arc is reviewed PASS and
+its tag is cut; every other part of chunk 9B is unaffected. A tripwire test is kept at
+`tests/test_review9b_fixes_probes.py::test_the_rule3_scan_consumes_out_of_session_bars_and_it_flips_a_REAL_bias`
+-- it asserts the CURRENT behaviour, so it goes RED the day option (a) is executed, which is the
+point: it marks an open question rather than blessing an answer.
+
+---
+
+### Q-22(b) · same review, finding R6 -- does Q-21(b) reach chunk-8's `trade_evidence` sweep?
+
+Decision **B255** declines to gate `trade_evidence._minute_loader`, recording that *"the ruling
+scopes to the RUN"*. The Q-21(b) text recorded verbatim above contains no such limiter: *"a day's
+minutes may serve a Rule-3 first-break scan ONLY if that day passes the CONTEXT 4.5/4.6 gate
+battery."* `trade_evidence` wires a `BiasEngine` that performs Rule-3 first-break scans, so on the
+ruling's own words it is in scope.
+
+The DECISION itself is defensible and was disclosed rather than taken quietly -- re-pointing a
+reviewed chunk's committed artefact would move a published number with no ruling behind it, which
+is the conservative instinct. But whether a ruling reaches a reviewed chunk's committed artefact
+is a spec-scope question and therefore the architect's, not a session's (plan.md §5 class A). The
+review judges B255 APPROVED-WITH-CHALLENGE and puts the scope question here.
+
+**NON-BLOCKING**: nothing in the relaunch depends on it. `trade_evidence.py` is byte-identical
+across the whole fix arc.
