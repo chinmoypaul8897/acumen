@@ -1,6 +1,6 @@
 # CONTEXT.md — ACUMEN INTELLIGENCE · Master Specification
 
-**Version 1.6 · 3 August 2026 · THIS FILE IS LAW.**
+**Version 1.7 · 3 August 2026 · THIS FILE IS LAW.**
 Every build/review session reads this before touching code. Nothing here may be changed by any Claude Code session — spec changes flow only through the architect (the Cowork chat), arrive as a new version of this file, and are logged in §10. If reality and this file disagree, STOP and write it to QUESTIONS.md.
 
 ## Table of contents
@@ -203,11 +203,12 @@ The original era (sealed at chunk5B-pass: 434,769 stored / 411,690 passing =
 rebuilt through the same reviewed pipeline, then reconciled divergence by
 divergence against the sealed numbers. docs/recovery/q18_reconciliation.md is
 the authoritative delta record: 422 divergences, ZERO unexplained.
-- RE-SEALED NUMBERS: 435,641 stored symbol-days; 409,252 pass all three gates
-  = 93.9425%; 204 settled; 6 quarantined (APLAPOLLO, ASTRAL, IEX, NTPC, UPL,
-  VBL). Minute era 2016-10-03 → 2026-07-31; daily store 2000-01-01 →
-  2026-07-30 (6,610 file-present, error 0, never-attempted 0 — the v1.3
-  178-day store lag is CLEARED).
+- RE-SEALED NUMBERS **(SUPERSEDED for the passing/coverage pair — see the
+  Q-21(a) COMPLETION paragraph below, which is the current reading)**: 435,641
+  stored symbol-days; 409,252 pass all three gates = 93.9425%; 204 settled; 6
+  quarantined (APLAPOLLO, ASTRAL, IEX, NTPC, UPL, VBL). Minute era 2016-10-03 →
+  2026-07-31; daily store 2000-01-01 → 2026-07-30 (6,610 file-present, error 0,
+  never-attempted 0 — the v1.3 178-day store lag is CLEARED).
 - DIVERGENCE CLASSES vs the original seal, all explained: sealed-fetch-horizon
   414 (the original backfill's per-symbol fetch horizon ended 2026-07-24..28,
   earlier than its report label — an artifact, not drift); vendor-snapshot-
@@ -225,7 +226,9 @@ the authoritative delta record: 422 divergences, ZERO unexplained.
 - Q-17 IS LAW: a stored 1-minute bar stamped outside 09:15..15:29 is dropped
   at the CANDLE level, flagged and counted, never silently — uniform for
   pre-open and post-close strays; gates still see the whole stored day for
-  volume (NSE daily volume includes auctions).
+  volume (NSE daily volume includes auctions). This binds EVERY consumer of
+  stored minute bars, including the Rule-3 first-break scan (Q-22; a day whose
+  only break lies in stray bars is a no-break carry).
 - Q-19 IS LAW: a confirmed-404 bhavcopy may be SEALED as a non-trading day
   only when the date is more than 7 calendar days in the past; younger 404s
   record as PENDING and are retried. Measured residue at re-seal: 208 gate-1P
@@ -242,10 +245,13 @@ the authoritative delta record: 422 divergences, ZERO unexplained.
 
 Q-21(a) COMPLETION (v1.6): gate 2 gains the open test. Measured cost: 47
 symbol-days flip usable→refused; passing days 409,205 = 93.9317% coverage;
-ZERO settled/quarantined flips. The 48-bar population (47 on 2023-03-03 09:15
-market-wide, 1 JIOFIN 2023-08-21) and the 11 moved-POC days are documented in
-docs/evidence/chunk9b_q21a_poc_impact.md. Corrupt days are refused, never
-repaired.
+ZERO settled/quarantined flips. The malformed-bar population of the whole lake
+is 51 — 48 on the settled 204 (47 on 2023-03-03 09:15 market-wide, 1 JIOFIN
+2023-08-21) plus APLAPOLLO ×2 and UPL on the quarantined side, one of which
+(APLAPOLLO 2017-10-05 15:28) was already refused under the sealed close-only
+enumeration and is therefore invisible to a flip-derived count. The 11
+moved-POC days are documented in docs/evidence/chunk9b_q21a_poc_impact.md.
+Corrupt days are refused, never repaired.
 
 ## 5. TradingView replication facts (why our POC = his POC)
 
@@ -326,6 +332,7 @@ Precedence if conflict is ever found: trader's R2 answers > R1 answers > PDF tex
 
 | Version | Date | Change |
 |---|---|---|
+| 1.7 | 03-Aug-2026 | Q-22: Q-17 made universal (Rule-3 scan + trade_evidence bound); population corrected to 51; v1.5→v1.6 supersedes marker; 21 Rule-3 days re-answered, 0 biases changed (measured) |
 | 1.6 | 03-Aug-2026 | Q-21(a): gate 2 enumeration completed with the open test; measured cost 47 days / coverage 93.9317%; Q-21(b) bias-evidence gating and Q-21 malformed-bar refusal recorded as law |
 | 1.5 | 02-Aug-2026 | Q-18 re-seal: era rebuilt and reconciled to ZERO unexplained (docs/recovery/q18_reconciliation.md is the delta record); §4.6 rewritten with the re-sealed numbers (435,641 / 409,252 = 93.9425%; APLAPOLLO in, NESTLEIND out of quarantine; BSE volume-only caveat); Q-17 candle-level drop and Q-19 7-day 404-sealing guard made law; E5 rebuild-universe clarification; daily store extended to 2026-07-30 |
 | 1.4 | 29-Jul-2026 | Q-15 ruling (option a): F1/F2's illustrative POC → 2032 (PDF's 2030 provably inconsistent with the trader's own gap rule — while ARMED no prior close exceeds the POC, so a gap-branch stop can never be 2032; precedence §10: later answers correct earlier text). §3.4 untouched; F4 remains the gap witness; low == POC → NORMAL branch is the taught boundary |
