@@ -3209,7 +3209,7 @@ them.
 
 ---
 
-## Q-22 · chunk 9B FIX-ARC REVIEW · class A · **OPEN -- STOP** · BLOCKS the full-history RELAUNCH
+## Q-22 · chunk 9B FIX-ARC REVIEW · class A · **RULED 03-Aug-2026 — executed by the chunk-9B FIX-4 session** · was BLOCKING the full-history RELAUNCH
 
 Raised 2026-08-03 by the QC review of `20b45c9..a707615` (docs/reviews/REVIEW_9B_FIXES.md,
 finding R1). The fix arc itself PASSES; this is a PRE-EXISTING deviation the review found while
@@ -3296,3 +3296,89 @@ review judges B255 APPROVED-WITH-CHALLENGE and puts the scope question here.
 
 **NON-BLOCKING**: nothing in the relaunch depends on it. `trade_evidence.py` is byte-identical
 across the whole fix arc.
+
+---
+
+### ARCHITECT'S RULING (03-Aug-2026) · Q-22(a) and Q-22(b) · recorded VERBATIM by the chunk-9B FIX-4 session
+
+The architect's text, exactly as supplied, quoted whole and unedited. It answers BOTH halves of
+the question above. Nothing in this repo may narrow or widen it; everything after the quotation
+is what this session executed under it.
+
+> "ARCHITECT'S RULING (03-Aug-2026). Q-22(a): OPTION (a) — Q-17's candle-level
+> drop binds EVERY consumer of stored minute bars, the Rule-3 first-break scan
+> included. Rationale: the strategy's clock is the session (decisions at 15-min
+> closes, square-off 15:15) — an extended or stray print lies outside the world
+> the trader's rules inhabit; one engine consuming events every other engine
+> refuses recreates the Q-14 split; and where the only break lives in stray bars
+> the scan finds NO break and the day carries — the engine's existing honest
+> answer, no invention. The known 2021-02-24 flips (GODREJCP, LAURUSLABS →
+> carry) become correct. Q-22(b): the Q-21(b) battery precondition binds
+> trade_evidence too — B255's caution was procedurally right and this is the
+> ruling it waited for; FIX-2's measurement (zero refusals in the pilot window)
+> must be ASSERTED when gating it. Architect."
+
+**EXECUTED by the chunk-9B FIX-4 session (2026-08-03).** Q-22(a) at the one place on the run
+path that turns stored 1-minute bars into `bias.Candle` objects, and Q-22(b) by sharing the
+run's own gated loader rather than copying it:
+
+- **`backtest.candles_for` filters FIRST.** It calls `aggregate.in_session_bars` before it
+  builds a single candle and returns `(candles, dropped)`, so a stray stamp can no longer vote
+  on which of P's extremes broke first. Both loaders (`minute_loader`, `gated_minute_loader`)
+  go through it, which is what keeps the gated and ungated paths building identical candles
+  from identical bytes. The GATES still see the WHOLE stored day, exactly as Q-17 requires
+  ("gates still see the whole stored day for volume"): `gated_minute_loader` hands
+  `SignalPipeline.gate_day` the unfiltered bars and only then filters.
+- **The drop is COUNTED, never silent** -- the same way the trading path counts it. Each scan's
+  drop is recorded per `(symbol, D-1)` in a `Rule3SessionDrops` ledger that `build_runner`
+  shares between the loader and the runner, and the trade day's row carries the EXISTING
+  `FLAG_OUT_OF_SESSION_DROPPED`. That flag now also has a manifest rare-shape counter (it was
+  the most frequent rare shape in the lake and the only one with no counter -- REVIEW_9B_FIXES
+  R9).
+- **Q-21's third case becomes UNREACHABLE on the run path, and is kept.** A stray malformed bar
+  is now dropped before `bias.Candle` sees it, and an IN-SESSION malformed bar is caught by the
+  completed gate 2 (Q-21(a)) before a candle is built (B250), so nothing on the gated path can
+  raise `MalformedMinuteBar`. The machinery stays as defence in depth -- the bare loader still
+  names the bar, and the ledger emission is now pinned end-to-end through `walk_symbol`
+  (REVIEW_9B_FIXES R3) so a suppressed flag cannot pass the suite again.
+- **Q-22(b): `trade_evidence` uses the RUN's loader.** `trade_evidence.build_context` wires
+  `backtest.gated_minute_loader(minute_store, pipeline)` -- the same function, not a copy -- and
+  its private `_minute_loader` is deleted. The ruling's condition is asserted rather than
+  assumed: a store-backed test drives the chunk-8 sweep window through the gated path and
+  asserts ZERO `minutes-ungated` refusals in it, and a second asserts the committed pack's
+  290 / 146 / 88 / 56 and its four money totals unchanged.
+
+**THE FULL-SPAN IMPACT, MEASURED** (`docs/evidence/chunk9b_q22_session_filter.{py,md}`, offline
+and READ-ONLY over all 204 settled symbols and the run's whole span). The review measured two
+dates over the settled universe and sampled out-of-session dates over 25 symbols, and said so
+(*"the true number of affected biases is >= 2 and unknown"*); this session measured the
+population instead of sampling it.
+
+| measure | count |
+|---|---|
+| trade days whose pair reaches the Rule-3 1-minute scan | 7,031 |
+| ...D-1 has no stored minutes (CONTEXT 3.2 / R1-Q6 carry, untouched) | 30 |
+| ...D-1 fails the battery -> refused before the scan (Q-21(b)) | 210 |
+| **...D-1 reaches the scan AND carries out-of-session bar(s)** | **21**, across 16 symbols |
+| **...of those, the scan's RULE changes** | **2** |
+| **...of those, the BIAS changes** | **0** |
+| walked days whose two walks disagree at all (a flip PLUS its carry) | **0** |
+
+The two rule changes are **exactly the two days REVIEW_9B_FIXES named** -- GODREJCP and
+LAURUSLABS, trade day 2021-02-25, D-1 the 2021-02-24 outage day -- and both become
+`rule-3-no-break-carry`, which is the ruling's own sentence (*"GODREJCP, LAURUSLABS -> carry"*)
+and its own rationale.
+
+**ONE FIGURE OF THE REVIEW DOES NOT REPRODUCE, and it is recorded rather than quietly dropped.**
+The review's table reads the ruled answer on those two days as BULLISH. Its probe passed the
+literal string `"BULLISH"` to `evaluate_pair` as the carried bias instead of walking the carry to
+that date. Walked from the span's start with each symbol's own factor table -- and independently
+re-derived through the shipped `BiasEngine` itself -- the bias carried into 2021-02-25 is already
+**bearish** on both symbols (GODREJCP 2021-02-24 `rule-1-breakout` bearish; LAURUSLABS 2021-02-24
+`inside-bar-carry` bearish), so the carry lands on the same answer the stray produced. **The days
+are re-answered; no bias in the whole ten-year span changes.** Nothing in the ruling turns on it
+-- Q-22(a) decides which events a scan may consume, not how many answers move -- but the review's
+">= 2 biases change" is the one number of finding R1 the measurement does not support, and a
+later session must not re-derive it from the review.
+
+**WHAT IS UNSTOPPED:** the full-history relaunch. Nothing else in chunk 9B was stopped by Q-22.
