@@ -39,6 +39,7 @@ from fractions import Fraction
 from pathlib import Path
 from typing import Sequence
 
+from . import backtest as bt
 from . import signals
 from . import simulate as sim
 from .bias_engine import BiasEngine, DailyBias
@@ -192,49 +193,39 @@ def build_context(
     calendar = TradingCalendar.from_daily_store_range(
         daily_store, start - timedelta(days=CALENDAR_LEAD_DAYS), end
     )
+    pipeline = SignalPipeline(
+        minute_store=minute_store,
+        daily_store=daily_store,
+        master=master,
+        row_size=config.row_size,
+    )
     return SweepContext(
-        pipeline=SignalPipeline(
-            minute_store=minute_store,
-            daily_store=daily_store,
-            master=master,
-            row_size=config.row_size,
-        ),
+        pipeline=pipeline,
         # factors=() and suppressions=(): the EMPTY factor table, disclosed in the pack and
         # verified correct for this window by REVIEW_7 section 6 (five ordinary dividends,
         # all under CONTEXT 4.2's 2% threshold, so every k = 1).
         bias_engine=BiasEngine(
             store=daily_store,
             calendar=calendar,
-            minute_loader=_minute_loader(minute_store),
+            # QUESTIONS.md **Q-22(b)** (architect, 03-Aug-2026): *"the Q-21(b) battery
+            # precondition binds trade_evidence too"*. This module wires a `BiasEngine` that
+            # performs Rule-3 first-break scans, and the ruling's own words scope to the SCAN,
+            # not to the runner -- so it reads D-1's minutes through the RUN's own loader, and
+            # through the SAME function rather than a copy of it. A private near-duplicate is
+            # how two consumers of one law drift apart (the Q-14 lesson), and the copy this
+            # replaced had already fallen behind twice: it neither gated the day (Q-21(b)) nor
+            # dropped an out-of-session stamp (Q-22(a)).
+            #
+            # The ruling's condition is ASSERTED, not assumed: `tests/test_trade_evidence.py`
+            # drives the whole committed sweep window through this path and asserts ZERO
+            # `minutes-ungated` refusals in it, and that the committed pack's counts and money
+            # totals do not move.
+            minute_loader=bt.gated_minute_loader(minute_store, pipeline),
         ),
         risk_per_trade_paise=config.require_risk_per_trade_paise(),
         cost_paise=config.cost_per_trade_paise(),
         master_path=master_path,
     )
-
-
-def _minute_loader(minute_store: MinuteStore):
-    """The (symbol, date) -> 1-minute candles interface CONTEXT 3.2's Rule 3 needs."""
-
-    def load(symbol: str, day: date):
-        bars = minute_store.minutes(symbol, day)
-        if not bars:
-            return None
-        from .bias import Candle
-
-        return tuple(
-            Candle(
-                open=int(bar.open_paise),
-                high=int(bar.high_paise),
-                low=int(bar.low_paise),
-                close=int(bar.close_paise),
-                stamp=bar.stamp,
-                day=bar.stamp.date(),
-            )
-            for bar in bars
-        )
-
-    return load
 
 
 # --- pricing ------------------------------------------------------------------------------
