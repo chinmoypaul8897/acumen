@@ -257,7 +257,9 @@ flight, and the same command picks up where it stopped. The daily-store verifica
 start can be skipped with `--skip-verify` once it has passed. Useful staging flags if you want
 to break the run up: `--symbols A,B,C` and `--max-symbols N`. Offline re-runs that touch no
 network: `--report-only` (regenerate the report from the ledger and the stores) and `--regate`
-(re-run the gates over stored candles).
+(re-run the gates over stored candles). **Both need `--universe-snapshot` and `--report-path`
+as well** -- see step 7, which spells the re-gate command out in full and says what the bare
+form does.
 
 **Duration.** **UNKNOWN end-to-end -- never measured on this machine, and this session did not
 measure it.** The honest basis: the sealed report records **23,138 windows** across the 210
@@ -446,3 +448,52 @@ The last line reads `RUN COMPLETE:` with the walked / usable / executed counts a
 and both `ledger.jsonl` and `manifest.json` exist under `<data_root>/backtests/chunk9b_full/`.
 Then **snapshot both stores again** -- the run's output is not reproducible in six hours if it
 is lost -- and the chunk-9B REPORT session takes it from there.
+
+---
+
+## Step 7 -- the OWED offline re-gate (a data session; safe either side of step 6)
+
+The architect's Q-21(a) ruling (CONTEXT v1.6) completed gate 2's impossible-OHLC enumeration, so
+`GATE_DEFINITION` moved and **all 210 ledger rows are stale by definition**. Clearing that is a
+STORE WRITE and therefore operator work, never a session's (CLAUDE.md Q-18 layer 2). It fetches
+nothing -- it re-runs the gates over candles already on disk.
+
+**It does NOT block the relaunch, and the relaunch does not block it.** Traced in
+`docs/reviews/REVIEW_9B_FIXES.md` (finding R4, check 6): `load_residual_register` is the run's
+only reader of that ledger and takes exactly five fields -- `status`, `gate1p_pass`,
+`gate1p_total`, `gate1p_no_oracle`, `residual_reason` -- and the completion moves gate 2 alone.
+Gate 1P does not move by a day, and `status` keys off the gate-1 effective rate, which does not
+move either. Run it in whichever order suits you.
+
+### The command -- both flags are mandatory
+
+```
+acumen-universe-backfill --regate \
+    --universe-snapshot docs/recovery/sealed_universe_210.json \
+    --report-path <a scratch path, NOT the committed report>
+```
+
+**Why each flag, measured rather than asserted (REVIEW_9B_FIXES R4):**
+
+* **`--universe-snapshot`** -- without it `run()` resolves the universe from the cached F&O
+  endpoint (`<data_root>/nse/underlying_information.json`), which holds **208** symbols. The
+  register holds **210** and *is* the sealed universe. The two missing are **EXIDEIND** and
+  **NUVAMA** -- exactly the pair the Q-18 T4 pass added -- and they would keep the stale marker
+  forever while the regenerated aggregates printed `406,154 / 93.9058%`: neither the pre- nor
+  the post-completion truth. CONTEXT 4.6's E5 clarification is explicit that a rebuild uses the
+  sealed snapshot.
+* **`--report-path`** -- without it the run overwrites `docs/backfill_minute_report.md`, the
+  committed sealed baseline. That is the same flag step 4's box calls *"the one flag you must
+  not omit ... including `--regate` re-runs"*. Recoverable with `git checkout`, but do not rely
+  on that.
+
+### What to expect
+
+The 47 settled symbol-days the completion refuses are all **2023-03-03**, one per symbol across
+47 symbols, and they are already measured day by day in
+`docs/evidence/chunk9b_q21a_gate2_completion.md`: usable **409,252 -> 409,205**, coverage
+**93.9425% -> 93.9317%**, gate 1 and gate 1P unchanged to the day, **zero** settled/quarantined
+status flips. If the re-gate prints anything else, STOP and hand the numbers to the architect.
+
+**Snapshot both stores first** (CLAUDE.md Q-18 layer 3: two generations, the new one verified
+before the old is replaced) -- this step writes the ledger.

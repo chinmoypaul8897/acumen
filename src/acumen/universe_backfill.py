@@ -109,6 +109,14 @@ MIN_PROBE_DAYS_PER_ERA: int = 1
 
 DEFAULT_REPORT_PATH: Path = Path("docs") / "backfill_minute_report.md"
 
+#: The frozen 210-symbol universe CONTEXT 4.6's E5 clarification makes a rebuild use ("a REBUILD
+#: uses the sealed universe list ... today's F&O list applies only to a deliberate,
+#: architect-signed universe refresh"). Named here because the staleness banner has to hand the
+#: operator a command that is RIGHT: without it the universe resolves from the cached F&O
+#: endpoint, which holds 208, and EXIDEIND and NUVAMA -- exactly the pair the Q-18 T4 pass added
+#: on the sealed 210 -- would never be re-gated (REVIEW_9B_FIXES R4).
+SEALED_UNIVERSE_SNAPSHOT: str = "docs/recovery/sealed_universe_210.json"
+
 #: Identity of the gate DEFINITION a ledger row's numbers were produced under. The architect's
 #: completeness ruling (2026-07-26) redefined CONTEXT 4.5 gate 2, so every row written before it
 #: carries a different marker and is RE-GATED from the stored candles -- no window refetched. Bump
@@ -2922,11 +2930,35 @@ def build_report(
     add("")
     stale = [r for r in records if r.depth_days and r.gate_definition != GATE_DEFINITION]
     if stale:
+        # The DIRECTION is stated for the bump that is actually in force, and it is not a
+        # constant: this banner was written for the Q-14 gate-1P bump, where a stale row was
+        # missing a gate entirely and the coverage really was UNDERSTATED, and it went on
+        # claiming that after the Q-21(a) bump, where the opposite is true (REVIEW_9B_FIXES R4).
+        # Whoever next moves GATE_DEFINITION re-reads this sentence with it.
         add(f"> **{len(stale)} ledger row(s) have NOT been re-gated under `{GATE_DEFINITION}`** "
             f"({', '.join(sorted(r.symbol for r in stale)[:12])}"
-            f"{' ...' if len(stale) > 12 else ''}), so their gate-1P numbers are absent and the "
-            "coverage above is understated for them. Re-run `acumen-universe-backfill --regate` "
-            "(offline, refetches nothing) before reading the verdict as final.")
+            f"{' ...' if len(stale) > 12 else ''}), so their numbers were produced under a "
+            "SUPERSEDED gate definition. The bump now in force COMPLETED gate 2's "
+            "impossible-OHLC enumeration with the open test (Q-21(a), CONTEXT v1.6), which can "
+            "only turn passing days into failures and moves no gate-1P number at all -- so for "
+            "these rows the coverage above is **OVERSTATED**, not understated. Clear it with "
+            "the re-gate below (offline, refetches nothing) before reading the verdict as "
+            "final:")
+        add("")
+        add("```")
+        add(f"acumen-universe-backfill --regate --universe-snapshot {SEALED_UNIVERSE_SNAPSHOT} \\")
+        add("    --report-path <a scratch path, NOT the committed report>")
+        add("```")
+        add("")
+        add("> Both flags are mandatory, and the bare command is a trap this repo has already "
+            "measured (REVIEW_9B_FIXES R4). Without `--universe-snapshot` the universe resolves "
+            "from the cached F&O endpoint, which holds **208** symbols against the register's "
+            "sealed **210** -- EXIDEIND and NUVAMA would keep the stale marker forever and the "
+            "regenerated aggregates would be neither the pre- nor the post-completion truth "
+            "(CONTEXT 4.6's E5 clarification: a rebuild uses the sealed snapshot). Without "
+            "`--report-path` it overwrites `docs/backfill_minute_report.md`, the committed "
+            "sealed baseline -- the one flag `docs/recovery/q18_runbook.md` says you must not "
+            "omit, *including on `--regate` re-runs*.")
         add("")
     met = stored_all > 0 and Decimal(usable) / Decimal(stored_all) >= Decimal("0.95")
     shortfall = max(0, -(-(stored_all * 95) // 100) - usable)
