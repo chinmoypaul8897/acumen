@@ -155,9 +155,17 @@ class UngatedMinuteDay(UnusableMinuteEvidence):
         super().__init__(self.detail())
 
     def detail(self) -> str:
-        """The refusal detail Q-21(b) requires: which gate failed, and its own reason."""
+        """The refusal detail Q-21(b) requires: which gate failed, and its own reason.
+
+        The gate's NAME is printed as the battery gives it and nothing is prefixed to it: every
+        name in :mod:`acumen.signal_engine` already begins with the word ("gate 1 (volume
+        reconciliation)", "gate 2 (candle integrity)", "gate-1P (per-day price containment)"),
+        so an added ``gate `` produced *"gate gate 2 (candle integrity)"* -- cosmetic, but it
+        was about to be frozen into ~210 ledger rows of the full-history run
+        (REVIEW_9B_FIXES R9).
+        """
         return (
-            f"minutes-ungated {self.symbol} {self.day.isoformat()} gate {self.gate} "
+            f"minutes-ungated {self.symbol} {self.day.isoformat()} refused by {self.gate} "
             f"reason {self.gate_reason}"
         )
 

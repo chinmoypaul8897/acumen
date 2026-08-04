@@ -266,7 +266,9 @@ def test_the_q21b_disclosure_names_the_ruling_its_evidence_and_its_own_limits() 
     # ...and it was REMEASURED under the law the run actually implements. The Q-21(a) completion
     # (CONTEXT v1.6) moved the radius from 209 to 210 and gave gate 2 its first row, so a
     # disclosure still naming only gates 1 and 1P would be a v1.5 figure stamped on a v1.6 ledger.
-    assert "v1.6" in rb.Q21B_BLAST_RADIUS and bt.SPEC_VERSION == "v1.6"
+    # The Q-22 rulings (CONTEXT v1.7) move the SPEC_VERSION again but not this radius: the
+    # session filter changes which BARS a scan reads, never whether its D-1 passes the battery.
+    assert "v1.6" in rb.Q21B_BLAST_RADIUS and bt.SPEC_VERSION == "v1.7"
     assert "1 by gate 2" in rb.Q21B_BLAST_RADIUS
 
 

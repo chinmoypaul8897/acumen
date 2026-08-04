@@ -275,25 +275,28 @@ def test_the_quarantined_side_carries_THREE_malformed_bars_not_two() -> None:
 
 
 @store_backed
-def test_the_rule3_scan_consumes_out_of_session_bars_and_it_flips_a_REAL_bias() -> None:
-    """FINDING R1, the one this review withholds relaunch authorisation on.
+def test_the_rule3_scan_DROPS_out_of_session_bars_on_the_real_outage_day() -> None:
+    """FINDING R1 -- **FLIPPED by the chunk-9B FIX-4 session, exactly as this probe promised.**
 
-    CONTEXT 4.6 makes Q-17 LAW: "a stored 1-minute bar stamped outside 09:15..15:29 is dropped
-    at the CANDLE level, flagged and counted, never silently -- uniform for pre-open and
-    post-close strays". The TRADING path obeys it (`signal_engine.stock_day` and
-    `backtest`'s 15-minute feed both call `aggregate.in_session_bars`). The BIAS path does not:
-    `backtest.candles_for` builds a `bias.Candle` for every stored bar of D-1, and
-    `bias._first_break` walks them in stamp order with no session filter.
+    As written by the review this test asserted the DEFECT and said so: *"it will go RED the day
+    the architect rules and the scan starts dropping stray candles -- which is the point: it is
+    a tripwire on an open question (QUESTIONS.md Q-22), not a blessing of the behaviour."* The
+    architect ruled option (a) on 03-Aug-2026: *"Q-17's candle-level drop binds EVERY consumer of
+    stored minute bars, the Rule-3 first-break scan included."* So the probe now asserts the RULE
+    on the same two real symbols, on the same real day, through the RUN's own loader.
 
     On 2021-02-24 -- the NSE outage day, whose session ran past 15:29, and which is NOT one of
     the eight CONTEXT 7-E2 non-standard sessions the run removes from its calendar -- a bar
-    stamped 15:44 breaks P's low on GODREJCP and LAURUSLABS, both SETTLED. Their bias flips
-    from a carried BULLISH (`rule-3-no-break-carry`: no in-session minute breaks either extreme)
-    to `bearish` (`rule-3-outside-bar`). A flipped bias flips the day's trade direction.
+    stamped 15:44 breaks P's low on GODREJCP and LAURUSLABS, both SETTLED, and it was the ONLY
+    thing that broke either extreme. Fed every stored bar the scan answered `rule-3-outside-bar`
+    -> bearish off that print; fed the session it finds no break and CARRIES, which is CONTEXT
+    3.2's own answer for a Rule-3 day whose minutes break nothing.
 
-    This test asserts the DEFECT, so it will go RED the day the architect rules and the scan
-    starts dropping stray candles -- which is the point: it is a tripwire on an open question
-    (QUESTIONS.md Q-22), not a blessing of the behaviour.
+    **What this probe does NOT assert, because it is not true:** that the resulting BIAS moves.
+    The review's table read the carry as BULLISH because its probe passed the literal string to
+    `evaluate_pair` instead of walking the carry; walked from the span's start the bias carried
+    into 2021-02-25 is already bearish on both symbols, so the two answers coincide. Measured in
+    full over all 204 settled symbols in `docs/evidence/chunk9b_q22_session_filter.md`.
     """
     pytest.importorskip("pandas")
     from acumen.bias import Candle, evaluate_pair
@@ -306,19 +309,6 @@ def test_the_rule3_scan_consumes_out_of_session_bars_and_it_flips_a_REAL_bias() 
     pipeline = SignalPipeline(minute_store, daily_store, None, 24)
     d1, d2 = dt.date(2021, 2, 24), dt.date(2021, 2, 23)
 
-    def candles(bars):
-        return tuple(
-            Candle(
-                open=int(b.open_paise),
-                high=int(b.high_paise),
-                low=int(b.low_paise),
-                close=int(b.close_paise),
-                stamp=b.stamp,
-                day=d1,
-            )
-            for b in bars
-        )
-
     for symbol in ("GODREJCP", "LAURUSLABS"):
         bars = minute_store.minutes(symbol, d1)
         assert bars, symbol
@@ -327,8 +317,15 @@ def test_the_rule3_scan_consumes_out_of_session_bars_and_it_flips_a_REAL_bias() 
         ]
         assert stray, f"{symbol} 2021-02-24 should carry post-close bars"
 
-        # the battery PASSES, so Q-21(b) does not refuse the day: the strays really are read
+        # the battery PASSES, so Q-21(b) does not refuse the day: the strays really would be read
         assert pipeline.gate_day(symbol, d1, bars).refusal_detail is None
+
+        # THE RULING, at the boundary: the run's own loader drops them and counts them.
+        candles, dropped = bt.candles_for(symbol, d1, bars)
+        assert dropped == len(stray) > 0
+        assert len(candles) == len(bars) - dropped
+        assert all(dt.time(9, 15) <= c.stamp.time() <= dt.time(15, 29) for c in candles)
+        assert bt.gated_minute_loader(minute_store, pipeline)(symbol, d1) == candles
 
         previous = daily_store.daily(symbol, d2, d2).iloc[0]
         current = daily_store.daily(symbol, d1, d1).iloc[0]
@@ -342,17 +339,19 @@ def test_the_rule3_scan_consumes_out_of_session_bars_and_it_flips_a_REAL_bias() 
             )
             for row, day in ((previous, d2), (current, d1))
         ]
-        in_session = [
-            b for b in bars if dt.time(9, 15) <= b.stamp.time() <= dt.time(15, 29)
-        ]
-
-        as_shipped = evaluate_pair(*pair, lambda: candles(bars), "BULLISH")
-        e2_obeyed = evaluate_pair(*pair, lambda: candles(in_session), "BULLISH")
-
-        assert as_shipped.rule == "rule-3-outside-bar"
-        assert as_shipped.bias == "bearish"
-        assert e2_obeyed.rule == "rule-3-no-break-carry"
-        assert e2_obeyed.bias == "BULLISH"
-        assert as_shipped.bias != e2_obeyed.bias, (
-            f"{symbol}: an out-of-session bar decided this bias (CONTEXT 4.6 Q-17)"
+        every_bar = tuple(
+            Candle(
+                open=int(b.open_paise), high=int(b.high_paise), low=int(b.low_paise),
+                close=int(b.close_paise), stamp=b.stamp, day=d1,
+            )
+            for b in bars
         )
+
+        as_shipped = evaluate_pair(*pair, lambda: every_bar, "bearish")
+        as_ruled = evaluate_pair(*pair, lambda: candles, "bearish")
+
+        assert as_shipped.rule == "rule-3-outside-bar" and as_shipped.bias == "bearish"
+        assert as_ruled.rule == "rule-3-no-break-carry", (
+            f"{symbol}: with the strays dropped nothing may break either extreme (Q-22(a))"
+        )
+        assert as_ruled.bias == "bearish"  # the CARRY, which on this day is the same answer

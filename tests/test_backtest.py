@@ -237,6 +237,7 @@ def make_runner(
     non_standard=frozenset(),
     capital_reference_paise=None,
     margin_basis=None,
+    minute_loader=None,
 ) -> bt.BacktestRunner:
     minute_store, daily_store, master, calendar = stores or standard_world(
         tmp_path, symbols=symbols
@@ -267,6 +268,7 @@ def make_runner(
         master=master,
         row_size=ROW_SIZE,
     )
+    drops = bt.Rule3SessionDrops()
     return bt.BacktestRunner(
         spec=spec,
         pipeline=pipeline,
@@ -281,10 +283,17 @@ def make_runner(
             symbol: bt.ResidualEntry(symbol, "settled", 100, 100, 0, "") for symbol in symbols
         },
         non_standard_sessions=frozenset(non_standard),
-        # Exactly what ``build_runner`` wires (QUESTIONS.md Q-21(b)): the GATED loader, sharing
-        # the pipeline that gates the day being traded. A test runner on the bare loader would
-        # be testing a machine the operator never runs.
-        minute_loader=bt.gated_minute_loader(minute_store, pipeline),
+        # Exactly what ``build_runner`` wires (QUESTIONS.md Q-21(b) + Q-22(a)): the GATED
+        # loader, sharing the pipeline that gates the day being traded AND the drop ledger the
+        # runner reads. A test runner on the bare loader would be testing a machine the operator
+        # never runs -- so ``minute_loader`` is an override for the two cases that must attack
+        # the bare loader on purpose, and every other test gets production's own wiring.
+        minute_loader=(
+            bt.gated_minute_loader(minute_store, pipeline, drops=drops)
+            if minute_loader is None
+            else minute_loader
+        ),
+        session_drops=drops,
     )
 
 
@@ -696,7 +705,7 @@ def test_the_manifest_carries_the_spec_version_code_sha_and_config_digest(
     tmp_path: Path,
 ) -> None:
     manifest = make_runner(tmp_path).run(tmp_path / "run").manifest
-    assert manifest["spec_version"] == "v1.6"
+    assert manifest["spec_version"] == "v1.7"
     assert manifest["code_sha"] == "0" * 40
     assert manifest["config_digest"] == make_runner(tmp_path).spec.digest()
     assert manifest["universe"] == [SYMBOL]
@@ -1064,9 +1073,13 @@ def test_q21a_the_crash_day_now_refuses_under_GATE_2s_own_name(tmp_path: Path) -
 
     It is flipped rather than weakened: one counted refusal either way, the day never trades, and
     what moved is WHICH case counts it. The third case keeps its own coverage at the bare loader
-    (`test_q21_the_loader_names_the_offending_bar_instead_of_dying_anonymously`) and stays
-    reachable on the run path through a malformed OUT-OF-SESSION bar, which gate 2 drops at the
-    candle level (CONTEXT 7-E2 / Q-17) and therefore never inspects.
+    (`test_q21_the_loader_names_the_offending_bar_instead_of_dying_anonymously`) and end to end
+    through `walk_symbol` (`test_q21_the_third_case_still_reaches_the_ledger_flagged_and_counted`).
+
+    **Since QUESTIONS.md Q-22(a) it is unreachable on the RUN path**, which is the ruling's own
+    prediction: an out-of-session malformed bar is now DROPPED before a candle is built, and an
+    in-session one fails the completed gate 2 before the loader gets that far. That is pinned by
+    `test_q22_the_third_case_is_now_unreachable_through_the_gated_loader`.
     """
     stores = q21_world(tmp_path)
     runner = make_runner(tmp_path, stores=stores)
@@ -1079,9 +1092,10 @@ def test_q21a_the_crash_day_now_refuses_under_GATE_2s_own_name(tmp_path: Path) -
     assert "OHLC-sanity" in battery.refusal_detail[1]
     assert len(rows) == 3  # every other day of the span still walked
     assert row.status == bt.STATUS_REFUSED
-    assert row.reason == (
-        f"{bt.REASON_BIAS_UNRESOLVED}: minutes-ungated {SYMBOL} {SEED_B.isoformat()} "
-        f"gate {se.NOT_EVALUATED_GATE2} reason {battery.refusal_detail[1]}"
+    assert row.reason == f"{bt.REASON_BIAS_UNRESOLVED}: {RULE_MINUTES_UNGATED}"
+    assert row.detail == (
+        f"minutes-ungated {SYMBOL} {SEED_B.isoformat()} "
+        f"refused by {se.NOT_EVALUATED_GATE2} reason {battery.refusal_detail[1]}"
     )
     assert row.bias_rule == RULE_MINUTES_UNGATED
     assert row.flags == (bt.FLAG_UNGATED_MINUTE_DAY,)
@@ -1162,6 +1176,43 @@ def test_q21_skipping_the_corrupt_bar_would_have_reversed_the_bias(tmp_path: Pat
     assert evaluate_pair(P, C, lambda: skipped, None).bias == BEARISH
 
 
+def test_q21_the_third_case_still_reaches_the_ledger_flagged_and_counted(
+    tmp_path: Path,
+) -> None:
+    """**REVIEW_9B_FIXES R3, restored.** The Q-21 ruling requires the malformed-bar refusal to be
+    *"counted ... rare-shape counter in the manifest"*, and after FIX-3 legitimately retargeted
+    the old assertion at the Q-21(b) case, NOTHING asserted the third case end to end: suppressing
+    the flag at the emission site left the day refused, the reason correct and the manifest
+    reporting ZERO -- a silent under-report of refused symbol-days that passed all 2,083 tests.
+
+    This walks it through `walk_symbol` and asserts the row AND the counter. It wires the BARE
+    loader deliberately, because after Q-22(a) the gated loader can no longer reach this case at
+    all (`test_q22_the_third_case_is_now_unreachable_through_the_gated_loader` pins that): an
+    in-session malformed bar fails the completed gate 2 first, and an out-of-session one is
+    dropped. The machinery is kept as defence in depth -- `BiasEngine` catches
+    `UnusableMinuteEvidence`, not one subclass -- so what is tested here is that IF a malformed
+    bar ever reaches the scan again, the ledger says so and the manifest counts it."""
+    stores = q21_world(tmp_path)
+    minute_store = stores[0]
+    runner = make_runner(
+        tmp_path, stores=stores, minute_loader=bt.minute_loader(minute_store)
+    )
+    malformed = "rule-3 day refused on a malformed 1-minute bar (QUESTIONS.md Q-21)"
+
+    rows = runner.walk_symbol(SYMBOL).rows  # it does not raise
+    row = next(r for r in rows if r.day == TRADE_DAY)
+    manifest = runner.build_manifest(rows, {SYMBOL: {}})
+
+    assert row.status == bt.STATUS_REFUSED
+    assert row.bias_rule == RULE_MINUTES_MALFORMED
+    assert row.reason == f"{bt.REASON_BIAS_UNRESOLVED}: {RULE_MINUTES_MALFORMED}"
+    assert row.detail == Q21_DETAIL  # the offending bar's stamp and OHLCV, the ruling's words
+    assert row.flags == (bt.FLAG_MALFORMED_MINUTE_BAR,)
+    assert row.executed is False and row.qty == 0
+    assert manifest["rare_shapes"][malformed] == 1  # <- the mutant this test exists to kill
+    assert manifest["refused_by_reason"][row.reason] == 1
+
+
 def test_q21_the_manifest_counts_the_rare_shape(tmp_path: Path) -> None:
     """The ruling requires a rare-shape counter, DERIVED from the row flags so a resumed run
     replaying the shard counts it identically.
@@ -1187,6 +1238,355 @@ def test_q21_the_manifest_counts_the_rare_shape(tmp_path: Path) -> None:
     # ...and a window without one still says so out loud, rather than omitting the row.
     spotless = clean.build_manifest(clean.walk_symbol(SYMBOL).rows, {SYMBOL: {}})
     assert spotless["rare_shapes"][malformed] == 0 and spotless["rare_shapes"][ungated] == 0
+
+
+# ==============================================================================================
+# QUESTIONS.md Q-22(a): the Rule-3 scan drops out-of-session bars, and the drop is COUNTED
+#
+# The architect, 03-Aug-2026: "Q-17's candle-level drop binds EVERY consumer of stored minute
+# bars, the Rule-3 first-break scan included ... where the only break lives in stray bars the
+# scan finds NO break and the day carries -- the engine's existing honest answer, no invention."
+#
+# The world below is the 2021-02-24 NSE-OUTAGE SHAPE, which is what REVIEW_9B_FIXES found on the
+# real store: a session that ran past 15:29, whose post-close prints are the ONLY thing that
+# breaks either of P's extremes. It reuses the Q-21 pair geometry exactly --
+#
+#   D-2 = SEED_A  O 199000 H 200000 L 198000 C 199500  -> body [199000, 199500]
+#   D-1 = SEED_B  O 199200 H 200500 L 197500 C 199300  -> outside bar, close inside the body
+#
+# -- and replaces D-1's stored minutes with five bars:
+#
+#   09:15  H 200000  L 198000   <- TOUCHES both extremes; touching is not breaking (CONTEXT 3.2)
+#   09:16  H 199800  L 199000   <- inside
+#   09:17  H 199600  L 199100   <- inside
+#   15:44  H 199400  L 197500   <- OUT OF SESSION: breaks P.low 198000, and breaks it FIRST
+#   15:45  H 200500  L 197600   <- OUT OF SESSION: breaks P.high 200000
+#
+# The two strays are what give the DAILY row its high and low, so the pair is a genuine outside
+# bar either way -- what the ruling changes is only whether the SCAN may see them. The bias
+# carried into the trade day is BULLISH (both lead pairs are Rule-1 breakouts), so as shipped the
+# day answered BEARISH off a 15:44 print and as ruled it carries BULLISH: the fixture is
+# discriminating, not decorative.
+# ==============================================================================================
+
+
+def q22_prior_minutes(
+    *, in_session_break: bool = False, malformed_stray: bool = False
+) -> list[Minute]:
+    """D-1's five stored bars for the outage shape (see the block comment above)."""
+    first_low = R(1975.00) if in_session_break else R(1990.00)
+    stray_low = (
+        Minute(at(time(15, 44), SEED_B), R(1970.00), R(1994.00), R(1975.00), R(1976.00), 100)
+        if malformed_stray  # the JUBLFOOD shape: the OPEN sits below the low. Impossible.
+        else Minute(at(time(15, 44), SEED_B), R(1993.00), R(1994.00), R(1975.00), R(1976.00), 100)
+    )
+    return [
+        Minute(at(time(9, 15), SEED_B), R(1992.00), R(2000.00), R(1980.00), R(1995.00), 12909),
+        Minute(at(time(9, 16), SEED_B), R(1995.00), R(1998.00), first_low, R(1993.00), 300),
+        Minute(at(time(9, 17), SEED_B), R(1993.00), R(1996.00), R(1991.00), R(1993.00), 200),
+        stray_low,
+        Minute(at(time(15, 45), SEED_B), R(1976.00), R(2005.00), R(1976.00), R(1993.00), 100),
+    ]
+
+
+def q22_world(tmp_path: Path, **minute_kwargs):
+    """The Q-21 pair geometry with D-1's minutes replaced by the outage shape."""
+    minutes = synthetic_minutes(TRADE_DAY)
+    prior = q22_prior_minutes(**minute_kwargs)
+    rows = dict(lead_rows())
+    rows.update(
+        {
+            SEED_A: daily_row(SEED_A, R(1990), R(2000), R(1980), R(1995), 1000),
+            # The daily close is the CONTINUOUS session's close, not the last post-close print:
+            # a close of 197600 would land outside the body and Rule 1 would decide the day.
+            SEED_B: row_for_minutes(SEED_B, prior, c=R(1993)),
+            TRADE_DAY: row_for_minutes(TRADE_DAY, minutes),
+        }
+    )
+    return build_stores(
+        tmp_path, minute_days={SEED_B: prior, TRADE_DAY: minutes}, daily_rows=rows
+    )
+
+
+def test_q22_a_stray_only_break_carries_instead_of_deciding_the_day(tmp_path: Path) -> None:
+    """**The outage-day shape, end to end.** The only bar that breaks either of P's extremes is
+    stamped 15:44, outside the session. Under Q-22(a) the scan never sees it, finds no break and
+    CARRIES -- the answer CONTEXT 3.2 already had for a Rule-3 day whose minutes break nothing --
+    so the day trades the carried BULLISH bias instead of a BEARISH one decided by a post-close
+    print. The drop is flagged and counted, never silent (CONTEXT 4.6's Q-17 law)."""
+    stores = q22_world(tmp_path)
+    runner = make_runner(tmp_path, stores=stores)
+
+    # the fixture really is an admissible Rule-3 day: the battery passes, so Q-21(b) is not
+    # what is refusing anything here
+    assert q21b_battery(stores).refusal_detail is None
+
+    rows = runner.walk_symbol(SYMBOL).rows
+    row = next(r for r in rows if r.day == TRADE_DAY)
+
+    assert row.status == bt.STATUS_EVALUATED
+    assert row.bias_rule == "rule-3-no-break-carry"
+    assert row.bias == BULLISH
+    assert bt.FLAG_OUT_OF_SESSION_DROPPED in row.flags  # ...and the drop is NOT silent
+    assert row.executed is True and row.net_pnl_paise == 290_000  # the golden LONG trade
+
+    # and the drop was recorded against the day it happened on -- D-1, not the trade day
+    assert runner.session_drops.dropped(SYMBOL, SEED_B) == 2
+    assert runner.session_drops.dropped(SYMBOL, TRADE_DAY) == 0
+
+
+def test_q22_the_stray_really_was_decisive_before_the_filter(tmp_path: Path) -> None:
+    """The CONTROL for the test above, proved on the pure engine rather than asserted: fed every
+    stored bar the same pair answers `rule-3-outside-bar` -> BEARISH, because the 15:44 print
+    breaks P.low first. Two opposite trade directions from one stored day -- which is why
+    REVIEW_9B_FIXES R1 blocked the relaunch until this was ruled."""
+    P = Candle(open=R(1990), high=R(2000), low=R(1980), close=R(1995))
+    C = Candle(open=R(1992), high=R(2005), low=R(1975), close=R(1993))
+    bars = q22_prior_minutes()
+
+    def candles(subset) -> tuple[Candle, ...]:
+        return tuple(
+            Candle(open=m.open_paise, high=m.high_paise, low=m.low_paise, close=m.close_paise,
+                   stamp=m.stamp)
+            for m in subset
+        )
+
+    session = [m for m in bars if time(9, 15) <= m.stamp.time() <= time(15, 29)]
+    assert len(session) == 3 and len(bars) == 5
+
+    unfiltered = evaluate_pair(P, C, lambda: candles(bars), BULLISH)
+    filtered = evaluate_pair(P, C, lambda: candles(session), BULLISH)
+
+    assert unfiltered.rule == "rule-3-outside-bar" and unfiltered.bias == BEARISH
+    assert filtered.rule == "rule-3-no-break-carry" and filtered.bias == BULLISH
+
+
+def test_q22_a_stray_on_a_day_whose_session_bars_DO_break_changes_no_verdict(
+    tmp_path: Path,
+) -> None:
+    """The other half of the ruling, and the one that keeps it narrow: where the SESSION bars
+    already break an extreme, dropping the strays must change nothing at all -- same rule, same
+    bias, same money -- while the drop is still counted. A filter that moved a verdict here
+    would be deciding days it has no business deciding."""
+    dirty = make_runner(tmp_path / "d", stores=q22_world(tmp_path / "d", in_session_break=True))
+    clean = make_runner(tmp_path / "c", stores=q21_world(tmp_path / "c", malformed=False))
+
+    dirty_row = next(r for r in dirty.walk_symbol(SYMBOL).rows if r.day == TRADE_DAY)
+    clean_row = next(r for r in clean.walk_symbol(SYMBOL).rows if r.day == TRADE_DAY)
+
+    # the 09:16 bar breaks P.low inside the session, so BOTH feeds answer bearish...
+    assert dirty_row.bias_rule == "rule-3-outside-bar" and dirty_row.bias == BEARISH
+    # ...and the identical verdict is reached against the stray-free control day
+    assert clean_row.bias_rule == "rule-3-outside-bar" and clean_row.bias == BULLISH
+    assert dirty.session_drops.dropped(SYMBOL, SEED_B) == 2  # the drop is STILL counted
+    assert bt.FLAG_OUT_OF_SESSION_DROPPED in dirty_row.flags
+    assert clean_row.flags == ()  # ...and a day with no strays carries no flag
+
+
+def test_q22_candles_for_drops_the_strays_and_returns_the_count(tmp_path: Path) -> None:
+    """The one-line change itself, at the boundary. `candles_for` is the only place on the run
+    path that turns stored bars into candles, so it is the only place the drop can be applied
+    once for every consumer -- and it RETURNS the count rather than swallowing it, because Q-17
+    requires the drop to be counted."""
+    minute_store, _, _, _ = q22_world(tmp_path)
+    bars = minute_store.minutes(SYMBOL, SEED_B)
+
+    candles, dropped = bt.candles_for(SYMBOL, SEED_B, bars)
+
+    assert len(bars) == 5 and dropped == 2 and len(candles) == 3
+    assert all(time(9, 15) <= c.stamp.time() <= time(15, 29) for c in candles)
+    assert bt.candles_for(SYMBOL, SEED_B, ())[0] == ()
+
+
+def test_q22_the_gates_still_see_the_whole_stored_day(tmp_path: Path) -> None:
+    """The other half of CONTEXT 4.6's Q-17 sentence -- *"gates still see the whole stored day
+    for volume"* -- which the filter must not quietly undo. `gated_minute_loader` hands
+    `gate_day` the UNFILTERED bars and only then filters, so the battery's inputs are the whole
+    stored day: its volume sum includes the strays' 200 shares and its gate-1P fold is the
+    stored day's own [197500, 200500], not the session's narrower [198000, 200000].
+
+    Both readings happen to PASS on this fixture, which is why the assertions are on the INPUTS
+    rather than on a verdict flip: the point is which evidence the gates were given, and a
+    fixture engineered to flip a verdict would prove less than measuring the divergence."""
+    minute_store, daily_store, master, _ = q22_world(tmp_path)
+    pipeline = SignalPipeline(
+        minute_store=minute_store, daily_store=daily_store, master=master, row_size=ROW_SIZE
+    )
+    bars = minute_store.minutes(SYMBOL, SEED_B)
+    session, dropped = bt.in_session_bars(bars)
+
+    whole = pipeline.gate_day(SYMBOL, SEED_B, bars)
+    filtered = pipeline.gate_day(SYMBOL, SEED_B, session)
+
+    assert dropped == 2
+    assert whole.refusal_detail is None  # the day the run actually gates: it PASSES
+    assert whole.gate1.minute_volume_sum == 13_609  # every stored share, strays included
+    assert filtered.gate1.minute_volume_sum == 13_409  # what a filtered battery would have seen
+    assert "[197500, 200500]" in whole.gate1p.reason  # the STORED day's fold...
+    assert "[198000, 200000]" in filtered.gate1p.reason  # ...against the session's
+    assert whole.gate2.out_of_session == 2  # gate 2 counts them and does not exclude on them
+
+
+def test_q22_the_third_case_is_now_unreachable_through_the_gated_loader(tmp_path: Path) -> None:
+    """QUESTIONS.md Q-21's THIRD case (`minutes-malformed`) can no longer fire on the run path,
+    which is exactly what the Q-22 options predicted -- and it is asserted rather than assumed.
+
+    A malformed bar is either IN session, where the completed gate 2 (Q-21(a)) refuses the day
+    before a candle is built (B250), or OUT of session, where Q-22(a) drops it before a candle
+    is built. There is no third place. The machinery stays as defence in depth and keeps its own
+    coverage (`test_q21_the_third_case_still_reaches_the_ledger_flagged_and_counted`)."""
+    stores = q22_world(tmp_path, malformed_stray=True)
+    minute_store, daily_store, master, _ = stores
+    pipeline = SignalPipeline(
+        minute_store=minute_store, daily_store=daily_store, master=master, row_size=ROW_SIZE
+    )
+
+    # the bar really is impossible, and gate 2 really does NOT see it: it is out of session,
+    # and CONTEXT 7-E2 makes gate 2 skip a stray rather than exclude the day for it
+    stray = q22_prior_minutes(malformed_stray=True)[3]
+    assert not (stray.low_paise <= stray.open_paise <= stray.high_paise)
+    assert q21b_battery(stores).refusal_detail is None
+
+    # pre-Q-22(a) this raised out of `candles_for` and became the third case. Now: dropped.
+    candles, dropped = bt.candles_for(SYMBOL, SEED_B, minute_store.minutes(SYMBOL, SEED_B))
+    assert dropped == 2 and len(candles) == 3
+    assert bt.gated_minute_loader(minute_store, pipeline)(SYMBOL, SEED_B) == candles
+    assert bt.minute_loader(minute_store)(SYMBOL, SEED_B) == candles  # the bare one too
+
+    row = next(
+        r for r in make_runner(tmp_path, stores=stores).walk_symbol(SYMBOL).rows
+        if r.day == TRADE_DAY
+    )
+    assert row.status == bt.STATUS_EVALUATED and row.bias_rule == "rule-3-no-break-carry"
+    assert RULE_MINUTES_MALFORMED not in (row.bias_rule or "")
+
+
+def test_q22_the_manifest_counts_the_out_of_session_drop(tmp_path: Path) -> None:
+    """REVIEW_9B_FIXES R9: `FLAG_OUT_OF_SESSION_DROPPED` was the most frequent rare shape in the
+    lake (3,100 symbol-days) and the ONLY flag with no manifest counter, while eight rarer shapes
+    carried zero-valued ones. It counts DAYS -- a day where both consumers dropped a stray is one
+    row and one count, not two."""
+    runner = make_runner(tmp_path, stores=q22_world(tmp_path))
+    rows = runner.walk_symbol(SYMBOL).rows
+    label = "day with out-of-session 1-minute bar(s) dropped (CONTEXT 7-E2 / Q-17)"
+
+    manifest = runner.build_manifest(rows, {SYMBOL: {}})
+
+    assert label in bt.RARE_SHAPE_LABELS
+    # D-1 itself (its own 15-min feed dropped them) and the trade day (its Rule-3 scan did)
+    flagged = [r for r in rows if bt.FLAG_OUT_OF_SESSION_DROPPED in r.flags]
+    assert {r.day for r in flagged} == {SEED_B, TRADE_DAY}
+    assert all(r.flags.count(bt.FLAG_OUT_OF_SESSION_DROPPED) == 1 for r in flagged)
+    assert manifest["rare_shapes"][label] == 2
+    # ...and a window without one still prints the row rather than omitting it
+    clean = make_runner(tmp_path / "clean")
+    spotless = clean.build_manifest(clean.walk_symbol(SYMBOL).rows, {SYMBOL: {}})
+    assert spotless["rare_shapes"][label] == 0
+
+
+def test_r9_the_refusal_reason_is_a_STABLE_KEY_and_the_specifics_ride_in_detail(
+    tmp_path: Path,
+) -> None:
+    """**REVIEW_9B_FIXES R9.** `refused_by_reason` and `SymbolRun.counts` GROUP on `reason`, and
+    both Q-21 reasons embedded the symbol, the date and the bar or gate detail -- so the
+    full-history manifest would have gained ~210 singleton keys where the pre-arc shape
+    aggregated (the smoke manifest has 6 keys over 62 refused rows).
+
+    Two different symbols refused on two different days now land in ONE key, and nothing is lost:
+    each row still carries its own specifics in `detail`."""
+    stores = q21b_world(tmp_path, gate="1P")
+    runner = make_runner(tmp_path, stores=stores, symbols=(SYMBOL,))
+    rows = list(runner.walk_symbol(SYMBOL).rows)
+    ungated = next(r for r in rows if r.bias_rule == RULE_MINUTES_UNGATED)
+    # a second refused row, same case, different symbol and day -- what a full run has 210 of
+    rows.append(replace(ungated, symbol="OTHER", day=SEED_A, detail="minutes-ungated OTHER ..."))
+    refused = [r for r in rows if r.bias_rule == RULE_MINUTES_UNGATED]
+
+    manifest = runner.build_manifest(rows, {SYMBOL: {}})
+
+    assert len(refused) == 2 and {r.symbol for r in refused} == {SYMBOL, "OTHER"}
+    assert len({r.reason for r in refused}) == 1  # ONE key...
+    assert len({r.detail for r in refused}) == 2  # ...two details
+    assert manifest["refused_by_reason"][refused[0].reason] == 2
+    assert SYMBOL not in refused[0].reason  # no symbol, no date, no bar in the KEY
+    assert SEED_B.isoformat() not in refused[0].reason
+
+
+def test_r9_a_row_without_a_detail_writes_exactly_the_bytes_it_always_did(
+    tmp_path: Path,
+) -> None:
+    """The `detail` column is written ONLY when there is one. An always-present `"detail":null`
+    would move every ordinary row's bytes -- and with them the chunk-9A pilot ledger's published
+    sha256 `c3363f6f...`, which three reviews quote and which no ruling here permits to move."""
+    row = make_runner(tmp_path).walk_symbol(SYMBOL).rows[-1]
+
+    assert row.detail is None
+    assert "detail" not in json.loads(row.to_json())
+    # ...and it round-trips both ways
+    assert bt.LedgerRow.from_dict(json.loads(row.to_json())).detail is None
+    with_detail = replace(row, detail="something specific")
+    assert json.loads(with_detail.to_json())["detail"] == "something specific"
+    assert bt.LedgerRow.from_dict(json.loads(with_detail.to_json())) == with_detail
+
+
+def test_r9_every_unusable_evidence_case_is_flagged_and_the_gap_fails_LOUDLY() -> None:
+    """**REVIEW_9B_FIXES R9.** `walk_symbol` indexed `UNRESOLVED_FLAG_BY_RULE` directly, so a
+    fifth case reaching the ledger without an entry would raise `KeyError` mid-run and kill the
+    walk -- worse than the crash the Q-21 ruling was written to remove.
+
+    The defence is now at IMPORT: `acumen.backtest` refuses to import at all if any
+    `UnusableMinuteEvidence` subclass has no flag, so the gap fails at collection time for the
+    whole suite rather than on the one day in a ten-year span that hits it. `unresolved_flag`
+    is the belt behind that, and it NAMES what is missing instead of raising `KeyError`."""
+    rules = bt.unusable_evidence_rules()
+
+    assert set(rules) == {RULE_MINUTES_MALFORMED, RULE_MINUTES_UNGATED}
+    assert set(rules) <= set(bt.UNRESOLVED_FLAG_BY_RULE)
+    assert bt._unflagged_unusable_rules() == ()  # the import-time guard's own predicate
+    # every flag is also a rare shape, or the refusal would be counted nowhere
+    for flag in bt.UNRESOLVED_FLAG_BY_RULE.values():
+        assert any(flag in label or label for label in bt.RARE_SHAPE_LABELS)
+    assert bt.unresolved_flag(RULE_MINUTES_UNGATED) == bt.FLAG_UNGATED_MINUTE_DAY
+    with pytest.raises(bt.BacktestError, match="No ledger flag"):
+        bt.unresolved_flag("a-fifth-case-nobody-flagged")
+
+
+def test_r9_the_import_guard_would_catch_a_fifth_case(tmp_path: Path) -> None:
+    """The guard proved on a real fifth subclass rather than asserted. Defining one with an
+    unflagged rule makes `_unflagged_unusable_rules` name it -- which is what the module-level
+    check reads, so importing `acumen.backtest` in that state would raise."""
+    import gc
+
+    from acumen.bias_engine import UnusableMinuteEvidence
+
+    def define_a_fifth_case():
+        class _FifthCase(UnusableMinuteEvidence):
+            rule = "minutes-something-new"
+
+            def detail(self) -> str:
+                return "a fifth case"
+
+        assert "minutes-something-new" in bt.unusable_evidence_rules()
+        assert bt._unflagged_unusable_rules() == ("minutes-something-new",)
+
+    define_a_fifth_case()
+    # `__subclasses__()` holds only weak references, so the throwaway leaves once it is collected
+    gc.collect()
+    assert bt._unflagged_unusable_rules() == ()
+
+
+def test_q22_build_runner_shares_ONE_drop_ledger_between_loader_and_runner() -> None:
+    """The wiring the flag depends on, pinned by reading production's own source: two instances
+    would mean the loader counted a drop the runner never printed. `build_runner` opens real
+    stores, so this asserts the CALL rather than running it -- the same shape as the kept probe
+    that pins the gated loader itself."""
+    import inspect
+
+    source = inspect.getsource(bt.build_runner)
+
+    assert "session_drops = Rule3SessionDrops()" in source
+    assert "gated_minute_loader(minute_store, pipeline, drops=session_drops)" in source
+    assert "session_drops=session_drops," in source
 
 
 # ==============================================================================================
@@ -1300,9 +1700,13 @@ def test_q21b_the_gated_loader_refuses_a_battery_failing_day_and_names_the_gate(
     assert excinfo.value.gate == expected
     assert excinfo.value.gate_reason == battery.refusal_detail[1]
     assert excinfo.value.detail() == (
-        f"minutes-ungated {SYMBOL} {SEED_B.isoformat()} gate {expected} "
+        f"minutes-ungated {SYMBOL} {SEED_B.isoformat()} refused by {expected} "
         f"reason {battery.refusal_detail[1]}"
     )
+    # The gate's own name is printed once, not twice: every battery name already starts with
+    # the word "gate", so the old `gate {expected}` read "gate gate 2 (candle integrity)" and
+    # was about to be frozen into ~210 ledger rows (REVIEW_9B_FIXES R9).
+    assert "gate gate" not in excinfo.value.detail()
     # ...and the day the battery passes still loads, through the same loader.
     assert load(SYMBOL, TRADE_DAY) is not None
 
@@ -1322,11 +1726,15 @@ def test_q21b_a_battery_failing_D1_refuses_the_trade_day_and_counts_it(tmp_path:
     assert battery.gate2.passed  # ...and each bar is internally consistent...
     assert battery.gate1p.passed is False  # ...only the PRICE DOMAIN is wrong (Q-14's shape)
     assert row.status == bt.STATUS_REFUSED
-    assert row.reason == (
-        f"{bt.REASON_BIAS_UNRESOLVED}: minutes-ungated {SYMBOL} {SEED_B.isoformat()} "
-        f"gate {se.NOT_EVALUATED_GATE1P} reason {battery.gate1p.reason}"
+    # The REASON is the case and nothing more, so ~210 such rows aggregate into ONE manifest key
+    # instead of 210 singletons; the specifics ride in DETAIL (REVIEW_9B_FIXES R9).
+    assert row.reason == f"{bt.REASON_BIAS_UNRESOLVED}: {RULE_MINUTES_UNGATED}"
+    assert row.detail == (
+        f"minutes-ungated {SYMBOL} {SEED_B.isoformat()} "
+        f"refused by {se.NOT_EVALUATED_GATE1P} reason {battery.gate1p.reason}"
     )
-    assert se.NOT_EVALUATED_GATE1P in row.reason and "fold HIGH" in row.reason
+    assert se.NOT_EVALUATED_GATE1P in row.detail and "fold HIGH" in row.detail
+    assert SYMBOL not in row.reason and SEED_B.isoformat() not in row.reason
     assert row.bias_rule == RULE_MINUTES_UNGATED
     assert row.flags == (bt.FLAG_UNGATED_MINUTE_DAY,)
     assert row.executed is False and row.signalled is False and row.qty == 0

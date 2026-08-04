@@ -398,10 +398,13 @@ def test_q21b_a_battery_failing_D1_makes_the_day_unresolvable_and_never_raises(t
     assert thu.rule == RULE_MINUTES_UNGATED
     assert thu.tradeable is False
     assert thu.unresolved_detail == (
-        f"minutes-ungated ACME 2024-07-03 gate {Q21B_GATE} reason {Q21B_REASON}"
+        f"minutes-ungated ACME 2024-07-03 refused by {Q21B_GATE} reason {Q21B_REASON}"
     )
     # the detail NAMES WHICH GATE failed -- the ruling's own requirement
     assert Q21B_GATE in thu.unresolved_detail
+    # ...and names it ONCE: every battery name already begins with the word "gate", so the
+    # earlier `gate {gate}` printed "gate gate-1P (...)" (REVIEW_9B_FIXES R9).
+    assert "gate gate" not in thu.unresolved_detail
 
 
 def test_q21b_a_battery_failing_day_leaves_the_carry_untouched(tmp_path) -> None:

@@ -44,7 +44,7 @@ from . import quality_gates as gates
 from . import smartapi_client as sac
 from . import vendor_adjustment as va
 from .adjustment_route import classify_route, map_covers_route
-from .aggregate import aggregate_15min
+from .aggregate import aggregate_15min, in_session_bars
 from .bias import Candle
 from .bias_engine import MinuteLoader
 from .daily_store import DailyStore, DailyStoreError
@@ -495,12 +495,21 @@ def minute_loader(store: MinuteStore) -> MinuteLoader:
     the store has no candles for that day -- which is exactly the "no 1-minute data (old dates)"
     case CONTEXT 3.2 / R1-Q6 says the bias engine must carry the last bias through. This finally
     gives Rule 3 real data (chunk-4 shipped the interface with a CSV-fixture stand-in).
+
+    **Out-of-session stamps are dropped** (QUESTIONS.md **Q-22(a)**, architect 03-Aug-2026:
+    *"Q-17's candle-level drop binds EVERY consumer of stored minute bars, the Rule-3
+    first-break scan included"*). This loader is not on the backtest's run path -- that is
+    :func:`acumen.backtest.gated_minute_loader`, which also gates the day (Q-21(b)) and COUNTS
+    the drop onto the trade day's ledger row -- so there is no row here to carry a flag, and the
+    count is deliberately not invented. What must not differ between the two is which candles a
+    first-break scan sees, and now it does not.
     """
 
     def load(symbol: str, day: date) -> Sequence[Candle] | None:
         bars = store.minutes(symbol, day)
         if not bars:
             return None
+        session, _dropped = in_session_bars(bars)
         return tuple(
             Candle(
                 open=b.open_paise,
@@ -510,7 +519,7 @@ def minute_loader(store: MinuteStore) -> MinuteLoader:
                 stamp=b.stamp,
                 day=b.trade_date,
             )
-            for b in bars
+            for b in session
         )
 
     return load

@@ -41,6 +41,14 @@ puts the same battery in front of the Rule-3 load, so a D-1 in a wrong price dom
 longer hand the scan minutes measured on one scale to compare against daily thresholds on
 another.
 
+**And the CONTEXT 7-E2 / Q-17 drop binds that scan too** (QUESTIONS.md Q-22(a), architect
+03-Aug-2026): *"Q-17's candle-level drop binds EVERY consumer of stored minute bars, the Rule-3
+first-break scan included."* :func:`candles_for` filters through
+:func:`acumen.aggregate.in_session_bars` before it builds a candle, so a stray stamp cannot vote
+on which of P's extremes broke FIRST; the drop is counted through :class:`Rule3SessionDrops`
+onto the trade day's row under the same :data:`FLAG_OUT_OF_SESSION_DROPPED` the trading path
+uses. The GATES still see the whole stored day, which is the other half of the same law.
+
 The first TWO are decided by :meth:`BacktestRunner.walk_symbol` -- it emits
 :data:`REASON_E2_NON_STANDARD` and :data:`REASON_BIAS_UNRESOLVED` and nothing else. Every
 reason from "no minutes" onward, that one included, is :mod:`acumen.signal_engine`'s own order
@@ -91,6 +99,7 @@ from .bias_engine import (
     DailyBias,
     MalformedMinuteBar,
     UngatedMinuteDay,
+    UnusableMinuteEvidence,
 )
 from .calendar import CalendarError, TradingCalendar
 from .config import load_config
@@ -110,8 +119,13 @@ from .signal_engine import SignalPipeline
 #: the Q-18 re-seal (CONTEXT 4.6 rewritten; Q-17 and Q-19 made law), and to v1.6 on
 #: 03-Aug-2026 with the Q-21(a) completion of gate 2's impossible-OHLC enumeration (the
 #: OPEN test), which changes which stored days are usable and therefore which rows a run
-#: may walk -- so a ledger written under it must not be readable as a v1.5 ledger.
-SPEC_VERSION: str = "v1.6"
+#: may walk -- so a ledger written under it must not be readable as a v1.5 ledger. Moved
+#: again to v1.7 the same day with the Q-22 rulings: CONTEXT 4.6's Q-17 drop now binds the
+#: Rule-3 first-break scan, which changes which BARS decide a bias and therefore what a
+#: ledger row can say -- measured at 21 re-answered Rule-3 days across the span. The bump is
+#: compelled by this constant's own contract ("a ledger always names the law it was produced
+#: under"), exactly as the v1.6 bump was.
+SPEC_VERSION: str = "v1.7"
 
 #: What the manifest's ``instrument_master`` block says about itself, so a reader who has never
 #: seen QUESTIONS.md Q-20 still knows why a filename is pinned rather than resolved. Verbatim on
@@ -202,6 +216,10 @@ RARE_SHAPE_LABELS: tuple[str, ...] = (
     "E10 fallback reference (no 11:00-stamped candle)",
     "rule-3 day refused on a malformed 1-minute bar (QUESTIONS.md Q-21)",
     "rule-3 day refused on a battery-failing D-1 (QUESTIONS.md Q-21(b))",
+    # Q-17 is the most frequent rare shape in the lake (3,100 symbol-days) and was the only
+    # flag with no counter beside it, while eight rarer shapes carried zero-valued ones
+    # (REVIEW_9B_FIXES R9). It counts DAYS whose row carries the flag, from either consumer.
+    "day with out-of-session 1-minute bar(s) dropped (CONTEXT 7-E2 / Q-17)",
 )
 
 #: Ledger / manifest / progress file names inside a run directory.
@@ -275,6 +293,15 @@ class LedgerRow:
     day: date
     status: str
     reason: str
+    #: The SPECIFICS behind ``reason``, when a reason has any: the offending bar and its OHLCV,
+    #: or the refusing gate and that gate's own words. It exists so ``reason`` can stay a STABLE
+    #: KEY -- the manifest's ``refused_by_reason`` and :meth:`SymbolRun.counts` group on it, and
+    #: a reason string that embedded a symbol, a date and a bar made every such row its own
+    #: singleton key (REVIEW_9B_FIXES R9: ~210 of them on a full-history run, against a
+    #: pre-arc shape that aggregated). ``None`` on every other row, and SERIALIZED ONLY WHEN
+    #: SET, so a row that has no detail writes exactly the bytes it always did and no committed
+    #: ledger digest moves.
+    detail: str | None = None
     bias: str | None = None
     bias_rule: str | None = None
     side: str | None = None
@@ -355,6 +382,11 @@ class LedgerRow:
             "mae_paise": self.mae_paise,
             "flags": list(self.flags),
         }
+        if self.detail is not None:
+            # Present only when there IS a detail: an always-written `"detail":null` would move
+            # every ordinary row's bytes, and with them the chunk-9A pilot ledger's published
+            # sha256, for rows that have nothing to say.
+            payload["detail"] = self.detail
         return payload
 
     @classmethod
@@ -364,6 +396,7 @@ class LedgerRow:
             day=date.fromisoformat(str(payload["day"])),
             status=str(payload["status"]),
             reason=str(payload["reason"]),
+            detail=payload.get("detail"),
             bias=payload.get("bias"),
             bias_rule=payload.get("bias_rule"),
             side=payload.get("side"),
@@ -695,6 +728,41 @@ def load_residual_register(path: Path) -> dict[str, ResidualEntry]:
     return register
 
 
+# --- the Rule-3 scan's out-of-session drops (QUESTIONS.md Q-22(a)) --------------------------
+
+
+@dataclass
+class Rule3SessionDrops:
+    """How many out-of-session 1-minute bars each Rule-3 first-break scan dropped.
+
+    CONTEXT 4.6 makes Q-17 law: a stray stamp is dropped at the CANDLE level, *"flagged and
+    counted, never silently"*. The trading path counts its own drop on the day's own row
+    (:attr:`acumen.signal_engine.StockDay.out_of_session_dropped`). The Rule-3 scan reads
+    **D-1's** minutes, so the only ledger row that exists for ITS drop is the TRADE DAY's -- and
+    the count has to travel from the loader, which is where the dropping happens and the only
+    place that still holds the raw bars, to the runner, which writes the row. This class is that
+    channel and nothing more: one integer per ``(symbol, D-1)``, recorded only when a stray was
+    actually dropped.
+
+    It is per-RUN and in memory. Nothing is persisted -- CONTEXT 4.6 says outright that there is
+    no per-day exclusion file -- and it is not an input to any decision: the drop itself is a
+    pure function of the stored bars, so a resumed run that re-walks a symbol records exactly
+    what the first walk recorded, and a shard replayed from disk keeps the flag it was written
+    with. :func:`build_runner` creates ONE and hands it to both the loader and the runner.
+    """
+
+    counts: dict[tuple[str, date], int] = field(default_factory=dict)
+
+    def record(self, symbol: str, day: date, dropped: int) -> None:
+        """Remember that ``dropped`` stray bars were dropped from ``(symbol, day)``'s scan."""
+        if dropped:
+            self.counts[(symbol.upper(), day)] = dropped
+
+    def dropped(self, symbol: str, day: date) -> int:
+        """How many were dropped from that day's scan; ``0`` if none were, or none was asked."""
+        return self.counts.get((symbol.upper(), day), 0)
+
+
 # --- the runner -------------------------------------------------------------------------------
 
 
@@ -745,6 +813,12 @@ class BacktestRunner:
     residual: Mapping[str, ResidualEntry]
     non_standard_sessions: frozenset[date] = frozenset()
     minute_loader: Callable[[str, date], Sequence | None] | None = None
+    #: Where :func:`gated_minute_loader` records the CONTEXT 7-E2 / Q-17 strays it dropped from
+    #: a Rule-3 scan, so the trade day's row can carry the drop under the flag the trading path
+    #: already uses (QUESTIONS.md Q-22(a)). :func:`build_runner` shares ONE instance between the
+    #: loader and this runner; a runner wired with a loader that records nowhere simply sees no
+    #: scan drops, which is the honest answer for a loader that does not report them.
+    session_drops: Rule3SessionDrops = field(default_factory=Rule3SessionDrops)
     #: Sentences the RUN wants stamped on its own manifest, verbatim and in order. Empty for
     #: every chunk-9A artefact, so no committed manifest or manifest digest moves; chunk 9B's
     #: run CLI fills it with the architect's GO-ruling disclosures (31-Jul-2026).
@@ -835,20 +909,25 @@ class BacktestRunner:
             if bias is not None and bias.unresolved_detail is not None:
                 # QUESTIONS.md Q-21's THIRD REASON_BIAS_UNRESOLVED case (the Rule-3 scan met a
                 # vendor-corrupt 1-minute bar on D-1) and Q-21(b)'s FOURTH (D-1 does not pass
-                # the CONTEXT 4.5/4.6 gate battery). Both refuse the DAY the same way: the
-                # offending bar -- or the refusing gate and its own reason -- rides in the
-                # reason, and the row carries the flag the manifest's rare-shape counter is
-                # derived from. The carried bias is printed unchanged (the day did not move it)
-                # but the day is REFUSED, so nothing trades on evidence that cannot be used.
+                # the CONTEXT 4.5/4.6 gate battery). Both refuse the DAY the same way, and the
+                # row carries the flag the manifest's rare-shape counter is derived from. The
+                # carried bias is printed unchanged (the day did not move it) but the day is
+                # REFUSED, so nothing trades on evidence that cannot be used.
+                #
+                # The REASON is the case, and the case alone: it is a grouping key, and both of
+                # these details name a symbol, a date and a bar or a gate, which would make
+                # every such row its own singleton in `refused_by_reason` (REVIEW_9B_FIXES R9).
+                # The specifics go to `detail`, which is written only on rows that have one.
                 rows.append(
                     LedgerRow(
                         symbol=symbol,
                         day=day,
                         status=STATUS_REFUSED,
-                        reason=f"{REASON_BIAS_UNRESOLVED}: {bias.unresolved_detail}",
+                        reason=f"{REASON_BIAS_UNRESOLVED}: {bias.rule}",
+                        detail=bias.unresolved_detail,
                         bias=bias.bias,
                         bias_rule=bias.rule,
-                        flags=(UNRESOLVED_FLAG_BY_RULE[bias.rule],),
+                        flags=(unresolved_flag(bias.rule),),
                     )
                 )
                 continue
@@ -912,9 +991,7 @@ class BacktestRunner:
             gate2_passed=None if gates is None else gates.gate2.passed,
             gate1p_passed=None if gates is None else gates.gate1p.passed,
             poc_half_paise=None if poc is None else int(poc * 2),
-            flags=(
-                (FLAG_OUT_OF_SESSION_DROPPED,) if stock_day.out_of_session_dropped else ()
-            ),
+            flags=self._session_drop_flags(symbol, bias, stock_day),
         )
         if record is None:
             return base
@@ -957,6 +1034,26 @@ class BacktestRunner:
             mae_paise=mae,
             flags=base.flags + record.flags,
         )
+
+    def _session_drop_flags(
+        self, symbol: str, bias: DailyBias, stock_day: se.StockDay
+    ) -> tuple[str, ...]:
+        """CONTEXT 7-E2 / Q-17's flag, set once whichever consumer dropped the stray.
+
+        Two consumers of stored 1-minute bars can drop an out-of-session stamp for one walked
+        day, and after QUESTIONS.md Q-22(a) the ledger records BOTH under the flag Q-17 already
+        had: the day's OWN 15-minute feed and POC window (``stock_day.out_of_session_dropped``),
+        and the Rule-3 first-break scan of its **D-1** (:class:`Rule3SessionDrops`). A day where
+        both fired carries the flag ONCE, so the manifest's counter counts DAYS, not events --
+        and a reader can still recompute it from the committed ledger alone.
+        """
+        scan_dropped = (
+            bias.current_date is not None
+            and self.session_drops.dropped(symbol, bias.current_date) > 0
+        )
+        if stock_day.out_of_session_dropped or scan_dropped:
+            return (FLAG_OUT_OF_SESSION_DROPPED,)
+        return ()
 
     def _span_days(self) -> tuple[date, ...]:
         days: list[date] = []
@@ -1175,6 +1272,12 @@ class BacktestRunner:
 #: before the engines ran (CONTEXT 7-E2 at the candle level -- gate 2's own reading, chunk 5B).
 #: Carried as a FLAG rather than as a new column so a day without one writes the same bytes it
 #: always did: the chunk-9A pilot ledger's published sha256 does not move (REVIEW_9A section 7).
+#:
+#: Since QUESTIONS.md **Q-22(a)** (architect, 03-Aug-2026) it covers BOTH consumers of a walked
+#: day's stored minutes -- the day's own 15-minute feed and POC window, and the Rule-3
+#: first-break scan of its D-1 -- because the ruling makes the drop bind every consumer and this
+#: is the row on which a Rule-3 drop can be recorded at all. It is set at most once per row
+#: (:meth:`BacktestRunner._session_drop_flags`), so its manifest counter counts DAYS.
 FLAG_OUT_OF_SESSION_DROPPED: str = "out-of-session 1-minute bar(s) dropped (CONTEXT 7-E2)"
 
 #: Set on the refused ledger row of a trade day whose Rule-3 scan met a vendor-corrupt bar on
@@ -1201,6 +1304,62 @@ UNRESOLVED_FLAG_BY_RULE: Mapping[str, str] = {
     RULE_MINUTES_MALFORMED: FLAG_MALFORMED_MINUTE_BAR,
     RULE_MINUTES_UNGATED: FLAG_UNGATED_MINUTE_DAY,
 }
+
+
+def unusable_evidence_rules() -> tuple[str, ...]:
+    """Every rule tag an :class:`~acumen.bias_engine.UnusableMinuteEvidence` can put on a day.
+
+    Discovered from the class tree rather than listed, so the answer cannot go stale: a fifth
+    case is a new subclass, and a new subclass is what this walks. Sorted, so the guard below
+    and the tests that read it are deterministic.
+    """
+    found: set[str] = set()
+    stack = list(UnusableMinuteEvidence.__subclasses__())
+    while stack:
+        cls = stack.pop()
+        stack.extend(cls.__subclasses__())
+        if cls.rule:
+            found.add(cls.rule)
+    return tuple(sorted(found))
+
+
+def unresolved_flag(rule: str) -> str:
+    """The ledger flag for an unresolvable-bias ``rule`` -- or a NAMED refusal, never a KeyError.
+
+    ``walk_symbol`` used to index :data:`UNRESOLVED_FLAG_BY_RULE` directly, so a fifth
+    unusable-evidence case reaching the ledger without an entry would have raised ``KeyError``
+    mid-run and killed the walk -- worse than the crash the Q-21 ruling was written to remove
+    (REVIEW_9B_FIXES R9). The real defence is the import-time guard below, which makes that gap
+    impossible to ship; this is the belt behind it, and it says what is missing.
+    """
+    flag = UNRESOLVED_FLAG_BY_RULE.get(rule)
+    if flag is None:
+        raise BacktestError(
+            f"No ledger flag for the unresolvable-bias rule {rule!r}. Every "
+            "UnusableMinuteEvidence case must carry one, because the manifest's rare-shape "
+            "counters are DERIVED from the row flags -- an unflagged refusal would be counted "
+            "nowhere. Add it to UNRESOLVED_FLAG_BY_RULE and give it a RARE_SHAPE_LABELS entry."
+        )
+    return flag
+
+
+def _unflagged_unusable_rules() -> tuple[str, ...]:
+    """Unusable-evidence rules with no entry in :data:`UNRESOLVED_FLAG_BY_RULE`. Empty = sound."""
+    return tuple(
+        rule for rule in unusable_evidence_rules() if rule not in UNRESOLVED_FLAG_BY_RULE
+    )
+
+
+# The guard fires at IMPORT, which means at collection time for the whole test suite and before
+# the first symbol of a ten-hour run -- not on the one day in the span that happens to hit the
+# new case (REVIEW_9B_FIXES R9). A missing flag is a build-time error, deliberately loud.
+_UNFLAGGED_RULES = _unflagged_unusable_rules()
+if _UNFLAGGED_RULES:  # pragma: no cover -- the tripwire's failure mode, asserted by test
+    raise BacktestError(
+        "acumen.bias_engine defines unusable-evidence rule(s) with no ledger flag: "
+        f"{', '.join(_UNFLAGGED_RULES)}. Every case must be flagged AND counted (QUESTIONS.md "
+        "Q-21 / Q-21(b)); add each to UNRESOLVED_FLAG_BY_RULE and to RARE_SHAPE_LABELS."
+    )
 
 
 #: What every output says while the trader's Q43 answer is outstanding. Verbatim, everywhere.
@@ -1240,6 +1399,10 @@ def rare_shape_counts(rows: Sequence[LedgerRow]) -> dict[str, int]:
             (sim.FLAG_SIGNAL_UNSIZABLE, "signal-unsizable (degenerate) days"),
             (sim.FLAG_BOTH_TOUCHED_STOP_WINS, "both-touched candles (stop won)"),
             (sim.FLAG_SQUARE_OFF_AT_ENTRY_CANDLE, "square-offs priced at the entry candle"),
+            (
+                FLAG_OUT_OF_SESSION_DROPPED,
+                "day with out-of-session 1-minute bar(s) dropped (CONTEXT 7-E2 / Q-17)",
+            ),
         ):
             if flag in row.flags:
                 counts[label] += 1
@@ -1503,6 +1666,9 @@ def build_runner(
         master=master,
         row_size=config.row_size,
     )
+    # QUESTIONS.md Q-22(a): ONE drop ledger, shared between the loader that does the dropping
+    # and the runner that writes the row. Two instances would mean a counted drop nobody printed.
+    session_drops = Rule3SessionDrops()
     runner = BacktestRunner(
         spec=spec,
         pipeline=pipeline,
@@ -1516,13 +1682,16 @@ def build_runner(
         # QUESTIONS.md Q-21(b): the RUN reads D-1's minutes through the GATED loader -- the
         # same pipeline that gates the day being traded also gates the day being used as
         # evidence, so one battery answers both questions and they can never disagree.
-        minute_loader=gated_minute_loader(minute_store, pipeline),
+        minute_loader=gated_minute_loader(minute_store, pipeline, drops=session_drops),
+        session_drops=session_drops,
         disclosures=tuple(disclosures),
     )
     return runner, master_path, ca_summary
 
 
-def gated_minute_loader(store: MinuteStore, pipeline: SignalPipeline):
+def gated_minute_loader(
+    store: MinuteStore, pipeline: SignalPipeline, *, drops: Rule3SessionDrops | None = None
+):
     """The RUN's Rule-3 minute loader, with the CONTEXT 4.5/4.6 battery IN FRONT of it.
 
     **QUESTIONS.md Q-21(b)** (architect, 03-Aug-2026): *"a day's minutes may serve a Rule-3
@@ -1547,6 +1716,14 @@ def gated_minute_loader(store: MinuteStore, pipeline: SignalPipeline):
     A day with NO stored minutes is NOT gated and NOT refused: it is CONTEXT 3.2's documented
     missing-1-minute carry (R1-Q6), which is a spec branch and not a data verdict, and the
     battery cannot be run on a day with no bars at all.
+
+    **The battery sees the WHOLE stored day; the SCAN sees only the session** (QUESTIONS.md
+    Q-22(a)). ``gate_day`` is handed the unfiltered bars because CONTEXT 4.6's Q-17 law says
+    outright that *"gates still see the whole stored day for volume"* -- NSE's daily volume
+    includes the pre-open auction, which is what gate 1 reconciles against -- and only then does
+    :func:`candles_for` drop the strays. ``drops`` is where that drop is recorded so the trade
+    day's ledger row can carry it; ``None`` records nowhere, which is what an evidence script
+    asking a one-off question wants.
     """
     refusals: dict[tuple[str, date], tuple[str, str] | None] = {}
 
@@ -1562,12 +1739,15 @@ def gated_minute_loader(store: MinuteStore, pipeline: SignalPipeline):
             raise UngatedMinuteDay(
                 symbol=symbol, day=day, gate=refusal[0], gate_reason=refusal[1]
             )
-        return candles_for(symbol, day, bars)
+        candles, dropped = candles_for(symbol, day, bars)
+        if drops is not None:
+            drops.record(symbol, day, dropped)
+        return candles
 
     return gated
 
 
-def minute_loader(store: MinuteStore):
+def minute_loader(store: MinuteStore, *, drops: Rule3SessionDrops | None = None):
     """The ``(symbol, date) -> candles`` interface CONTEXT 3.2's Rule 3 needs, over the store.
 
     **A vendor-corrupt bar is refused HERE** (QUESTIONS.md Q-21, architect 03-Aug-2026). A raw
@@ -1584,25 +1764,52 @@ def minute_loader(store: MinuteStore):
     **This loader does NOT gate the day.** The RUN path uses :func:`gated_minute_loader`, which
     puts the CONTEXT 4.5/4.6 battery in front of this one (QUESTIONS.md Q-21(b)); the bare
     loader is what the evidence scripts and the unit tests exercise when the question is the
-    BAR rather than the day.
+    BAR rather than the day. It DOES drop out-of-session stamps, because that is
+    :func:`candles_for`'s job and Q-22(a) binds every consumer, not every gated consumer.
     """
 
     def load(symbol: str, day: date):
         bars = store.minutes(symbol, day)
-        return candles_for(symbol, day, bars) if bars else None
+        if not bars:
+            return None
+        candles, dropped = candles_for(symbol, day, bars)
+        if drops is not None:
+            drops.record(symbol, day, dropped)
+        return candles
 
     return load
 
 
-def candles_for(symbol: str, day: date, bars: Sequence) -> tuple[Candle, ...]:
-    """Stored 1-minute bars -> :class:`acumen.bias.Candle` objects, in stored order.
+def candles_for(symbol: str, day: date, bars: Sequence) -> tuple[tuple[Candle, ...], int]:
+    """Stored 1-minute bars -> ``(bias.Candle objects, how many strays were dropped)``.
 
     The one place on the run path that turns stored bars into candles, so it is the one place
     a vendor-corrupt bar can be NAMED (QUESTIONS.md Q-21). Both loaders above call it, which is
     what keeps the gated and ungated paths building identical candles from identical bytes.
+
+    **The CONTEXT 7-E2 / Q-17 drop happens HERE, before a single candle is built**
+    (QUESTIONS.md **Q-22(a)**, architect 03-Aug-2026): *"Q-17's candle-level drop binds EVERY
+    consumer of stored minute bars, the Rule-3 first-break scan included ... where the only
+    break lives in stray bars the scan finds NO break and the day carries -- the engine's
+    existing honest answer, no invention."* Until that ruling this function built a candle for
+    every stored bar, so a stamp outside 09:15..15:29 could decide which of P's extremes broke
+    FIRST and therefore the day's bias and the day's trade direction (CONTEXT 3.4) -- measured
+    on the real store, a 15:44 print on the 2021-02-24 outage day flipped GODREJCP and
+    LAURUSLABS (REVIEW_9B_FIXES R1).
+
+    The count is RETURNED rather than swallowed for the reason
+    :func:`acumen.aggregate.in_session_bars` gives: a caller that dropped candles silently would
+    hide vendor damage, and Q-17 requires the drop to be flagged and counted. The callers pass
+    it to a :class:`Rule3SessionDrops`, which is what puts it on the trade day's ledger row.
+
+    Dropping first also means a malformed bar OUTSIDE the session is never built and therefore
+    never named: it is a stray, and a stray is dropped. Q-21's third case survives for
+    in-session bars only -- where the completed gate 2 (Q-21(a)) already refuses the day on the
+    gated path -- which is exactly what the ruling's option (a) predicted.
     """
+    session, dropped = in_session_bars(bars)
     candles: list[Candle] = []
-    for bar in bars:
+    for bar in session:
         try:
             candles.append(
                 Candle(
@@ -1625,7 +1832,7 @@ def candles_for(symbol: str, day: date, bars: Sequence) -> tuple[Candle, ...]:
                 close_paise=int(bar.close_paise),
                 volume=int(bar.volume),
             ) from exc
-    return tuple(candles)
+    return tuple(candles), dropped
 
 
 def iter_trading_days(calendar: TradingCalendar, start: date, end: date) -> Iterable[date]:
