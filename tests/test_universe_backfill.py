@@ -552,6 +552,40 @@ def test_the_report_is_regenerable_from_the_ledger_alone(tmp_path: Path) -> None
     assert "AAA" in first
 
 
+def test_the_staleness_banner_hands_over_a_regate_command_that_actually_works(
+    tmp_path: Path,
+) -> None:
+    """**REVIEW_9B_FIXES R4.** The banner is the only place the report tells an operator how to
+    clear a stale marker, and it handed over the BARE `--regate`. Measured by the review: that
+    command resolves the universe from the cached F&O endpoint (208 symbols against the
+    register's sealed 210, missing EXIDEIND and NUVAMA) and overwrites the committed sealed
+    report. It also told the reader the coverage was "understated", which was written for the
+    Q-14 gate-1P bump and is the WRONG DIRECTION for the Q-21(a) completion now in force -- that
+    one can only turn passing days into failures, so a stale row's printed coverage is
+    OVERSTATED."""
+    store = _make_daily_store(tmp_path, {"AAA": 100000})
+    cache = ub.build_daily_cache(store, ["AAA"], DAYS[0], DAYS[-1])
+    config = _config(tmp_path, store)
+    ub.run_universe(SyntheticVendor(cache, {"AAA": "1"}), FakeMaster({"AAA": "1"}), ["AAA"], (),
+                    cache, config, log=lambda m: None)
+    ledger = ub.RunLedger.load(config.ledger_path)
+
+    current = ub.build_report(ledger, ["AAA"], None, generated_at=NOW, config=config)
+    ledger.records["AAA"].gate_definition = "some-older-definition"
+    stale = ub.build_report(ledger, ["AAA"], None, generated_at=NOW, config=config)
+
+    assert "have NOT been re-gated" not in current  # a current row raises no banner at all
+    assert "have NOT been re-gated" in stale
+    # BOTH mandatory flags, and the snapshot named from the constant rather than typed in prose
+    assert f"--universe-snapshot {ub.SEALED_UNIVERSE_SNAPSHOT}" in stale
+    assert ub.SEALED_UNIVERSE_SNAPSHOT == "docs/recovery/sealed_universe_210.json"
+    assert "--report-path" in stale and "NOT the committed report" in stale
+    assert "EXIDEIND and NUVAMA" in stale  # what the bare command would silently leave behind
+    # the DIRECTION, for the bump actually in force -- the old claim is gone, not merely hedged
+    assert "OVERSTATED" in stale
+    assert "coverage above is understated" not in stale
+
+
 def test_the_ledger_round_trips_through_json(tmp_path: Path) -> None:
     path = tmp_path / "ledger.json"
     ledger = ub.RunLedger(path=path, started="2026-07-26T08:00:00")
