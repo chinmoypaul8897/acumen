@@ -407,6 +407,18 @@ what the resume law requires; the retained directory is evidence, not an input.
 | Universe | 204 settled symbols | the disclosed-residual register, read (CONTEXT 4.6) |
 | Span | 2016-10-03 -> 2026-07-30, 2,425 trading days | measured from the stores, clamped to the daily oracle |
 | Symbol-days | ~495,312 | 204 x 2,428 rows |
+
+**Why 2,428 and not 2,425** (REVIEW_9B_PRESEAL finding Q2, closed 05-Aug-2026 by the chunk-9B
+REPORT session). The two numbers above are both right and they are not the same measure. The span
+holds **2,425 trading days**; `walk_symbol` additionally writes ONE refused row per symbol for
+every CONTEXT 7-E2 non-standard session **before** it asks whether the calendar calls that date a
+trading day, and three of the eight Muhurat sessions in the span fall at a weekend --
+**2019-10-27, 2020-11-14 and 2023-11-12** -- so they are not trading days and are walked anyway.
+2,425 + 3 = **2,428**, which is what a reader who multiplies gets. The exclusion is counted rather
+than silent, which is the point of it; the row is a refusal, never a trade. Confirmed on the
+completed run: every one of the 204 symbols carries exactly 2,428 rows and exactly 8 E2 refusals
+(8 x 204 = 1,632, the manifest's own count), and the three weekend-dated walked days are exactly
+those three.
 | **Projected duration** | **~6h 04m** | MEASURED 25.56 symbol-days/s + two measured wiring terms -- `docs/evidence/chunk9b_throughput.md` has the arithmetic |
 | Tick pin | `OpenAPIScripMaster_2026-07-31.json` | `config.yaml`, QUESTIONS.md Q-20 |
 
@@ -468,10 +480,18 @@ move either. Run it in whichever order suits you.
 ### The command -- both flags are mandatory
 
 ```
-acumen-universe-backfill --regate \
+python scripts/universe_backfill.py --regate \
     --universe-snapshot docs/recovery/sealed_universe_210.json \
     --report-path <a scratch path, NOT the committed report>
 ```
+
+**The launcher, corrected 05-Aug-2026 by the chunk-9B REPORT session.** This box used to open
+`acumen-universe-backfill`, the console entry point `pyproject.toml` declares. That name does not
+exist on this machine: the repo is deliberately not pip-installed (chunk-0 decision B2 resolves
+the src layout through pytest's `pythonpath`), so the command as handed over could not be run at
+all -- and the operator ran `python scripts/universe_backfill.py`, which is what steps 1-5 above
+already use. The report's own staleness banner emits the same corrected form from
+`universe_backfill.REGATE_LAUNCHER` and a test pins it.
 
 **Why each flag, measured rather than asserted (REVIEW_9B_FIXES R4):**
 

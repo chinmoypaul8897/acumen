@@ -562,7 +562,15 @@ def test_the_staleness_banner_hands_over_a_regate_command_that_actually_works(
     report. It also told the reader the coverage was "understated", which was written for the
     Q-14 gate-1P bump and is the WRONG DIRECTION for the Q-21(a) completion now in force -- that
     one can only turn passing days into failures, so a stale row's printed coverage is
-    OVERSTATED."""
+    OVERSTATED.
+
+    **The chunk-9B REPORT session adds the LAUNCHER.** Both flags were right and the direction was
+    right, and the command still could not be run: it opened with `acumen-universe-backfill`, the
+    console entry point `pyproject.toml` declares, and this clone is deliberately not installed
+    (chunk-0 decision B2), so nothing by that name exists on the operator's machine. The operator
+    ran `python scripts/universe_backfill.py` -- the bare-clone launcher, and the form every other
+    command in `docs/recovery/q18_runbook.md` already used. Pinned here from the constant, with
+    the dead name asserted GONE, so a banner nobody can execute cannot come back."""
     store = _make_daily_store(tmp_path, {"AAA": 100000})
     cache = ub.build_daily_cache(store, ["AAA"], DAYS[0], DAYS[-1])
     config = _config(tmp_path, store)
@@ -584,6 +592,12 @@ def test_the_staleness_banner_hands_over_a_regate_command_that_actually_works(
     # the DIRECTION, for the bump actually in force -- the old claim is gone, not merely hedged
     assert "OVERSTATED" in stale
     assert "coverage above is understated" not in stale
+    # the LAUNCHER: a runnable invocation, named from the constant, and the dead console name GONE
+    assert ub.REGATE_LAUNCHER == "python scripts/universe_backfill.py"
+    assert f"{ub.REGATE_LAUNCHER} --regate --universe-snapshot" in stale
+    assert "acumen-universe-backfill" not in stale
+    # and the launcher is a file a bare clone really has, not a name that resolves to nothing
+    assert (Path(__file__).resolve().parents[1] / "scripts" / "universe_backfill.py").is_file()
 
 
 def test_the_ledger_round_trips_through_json(tmp_path: Path) -> None:

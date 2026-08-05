@@ -117,6 +117,16 @@ DEFAULT_REPORT_PATH: Path = Path("docs") / "backfill_minute_report.md"
 #: on the sealed 210 -- would never be re-gated (REVIEW_9B_FIXES R4).
 SEALED_UNIVERSE_SNAPSHOT: str = "docs/recovery/sealed_universe_210.json"
 
+#: HOW that command is actually invoked. The banner named `acumen-universe-backfill` -- the
+#: console entry point `pyproject.toml` declares -- but this clone is NOT installed (chunk-0
+#: decision B2 resolves the src layout through pytest's `pythonpath`, deliberately without an
+#: editable install), so the name resolves to nothing and the command handed to the operator
+#: could not be run at all. `python scripts/universe_backfill.py` is the launcher the bare-clone
+#: bootstrap exists for, it is the form every other command in `docs/recovery/q18_runbook.md`
+#: uses, and it is the form the operator actually ran for the owed re-gate. Named as a constant
+#: so the banner, the runbook and the test that pins them cannot drift apart again.
+REGATE_LAUNCHER: str = "python scripts/universe_backfill.py"
+
 #: Identity of the gate DEFINITION a ledger row's numbers were produced under. The architect's
 #: completeness ruling (2026-07-26) redefined CONTEXT 4.5 gate 2, so every row written before it
 #: carries a different marker and is RE-GATED from the stored candles -- no window refetched. Bump
@@ -2946,7 +2956,7 @@ def build_report(
             "final:")
         add("")
         add("```")
-        add(f"acumen-universe-backfill --regate --universe-snapshot {SEALED_UNIVERSE_SNAPSHOT} \\")
+        add(f"{REGATE_LAUNCHER} --regate --universe-snapshot {SEALED_UNIVERSE_SNAPSHOT} \\")
         add("    --report-path <a scratch path, NOT the committed report>")
         add("```")
         add("")
@@ -2959,6 +2969,12 @@ def build_report(
             "`--report-path` it overwrites `docs/backfill_minute_report.md`, the committed "
             "sealed baseline -- the one flag `docs/recovery/q18_runbook.md` says you must not "
             "omit, *including on `--regate` re-runs*.")
+        add("")
+        add("> The LAUNCHER above is the bare-clone one, and that is not cosmetic: this repo is "
+            "deliberately not pip-installed (chunk-0 decision B2), so the console entry point "
+            "`pyproject.toml` declares resolves to nothing here and the command this banner used "
+            "to print could not be run at all. It is the same form every other command in "
+            "`docs/recovery/q18_runbook.md` uses.")
         add("")
     met = stored_all > 0 and Decimal(usable) / Decimal(stored_all) >= Decimal("0.95")
     shortfall = max(0, -(-(stored_all * 95) // 100) - usable)
