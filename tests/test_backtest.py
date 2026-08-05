@@ -1220,8 +1220,14 @@ def test_q21_the_manifest_counts_the_rare_shape(tmp_path: Path) -> None:
     Under CONTEXT v1.6 this fixture's row is counted by the Q-21(b) label rather than the Q-21
     one, because the completed gate 2 refuses the day before its bar is ever built (B250). BOTH
     labels are still asserted, at 1 and at 0: a counter that quietly stopped being printed is
-    exactly the failure a derived counter exists to prevent, and the Q-21 case remains reachable
-    for a malformed bar gate 2 never inspects (an out-of-session stamp -- CONTEXT 7-E2 / Q-17).
+    exactly the failure a derived counter exists to prevent.
+
+    **Since QUESTIONS.md Q-22(a) the Q-21 case is no longer reachable on the RUN path**: an
+    out-of-session malformed bar is DROPPED before a candle is built (CONTEXT 7-E2 / Q-17) and an
+    in-session one fails the completed gate 2 first, which is pinned by
+    `test_q22_the_third_case_is_now_unreachable_through_the_gated_loader`. The machinery is kept
+    as defence in depth, and its counter is still printed at 0 -- which is what the assertions
+    below say. (This sentence used to claim the opposite; REVIEW_9B_FIX4 finding F3.)
     """
     runner = make_runner(tmp_path, stores=q21_world(tmp_path))
     rows = runner.walk_symbol(SYMBOL).rows

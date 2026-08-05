@@ -216,7 +216,7 @@ def build_context(
             # replaced had already fallen behind twice: it neither gated the day (Q-21(b)) nor
             # dropped an out-of-session stamp (Q-22(a)).
             #
-            # The ruling's condition is ASSERTED, not assumed: `tests/test_trade_evidence.py`
+            # The ruling's condition is ASSERTED, not assumed: `tests/test_q22_trade_evidence_gating.py`
             # drives the whole committed sweep window through this path and asserts ZERO
             # `minutes-ungated` refusals in it, and that the committed pack's counts and money
             # totals do not move.

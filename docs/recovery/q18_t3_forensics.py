@@ -23,6 +23,22 @@ It writes two files:
   class, so a symbol is reclassified by evidence on disk or not at all.
 
 Run:  python docs/recovery/q18_t3_forensics.py
+
+ERRATUM (05-Aug-2026, chunk-9B REPORT session, closing REVIEW_9B_PRESEAL finding Q3)
+------------------------------------------------------------------------------------
+The triage session's own summary of this pack said each regression's 1-minute fold "sits at an
+EXACT corporate-action factor from the raw bhavcopy". **"EXACT" overstates two of the six
+hand-verified days and is withdrawn.** POWERGRID 2021-07-29 really is 4/3 on the high; 2021-08-16
+measures 1.333424 and 2021-09-06 measures 1.333428. That is not drift and not a defect: a day's
+fold extremes are the max/min of per-minute prices ALREADY rounded to the paisa, so exact equality
+with a rational factor cannot be expected of them and was never what the verdict rested on. What
+the verdict rests on is the RECIPROCAL price x volume signature, which this pack prints per day
+and which holds tightly (0.999794 .. 0.999979 across the three POWERGRID days, 0.984 .. 0.999 on
+APLAPOLLO's larger factors). **No verdict, class or number in this pack or in
+`q18_reconciliation.md` moves**; the correction is to the WORD. The claim never appeared in the
+generated `.md` or `.json` -- it was made in the session narrative (STATUS.md's superseded
+2026-08-02 triage entry), which now carries the same erratum. This docstring is not emitted into
+either output file, so the pack still regenerates byte-identically.
 """
 
 from __future__ import annotations
