@@ -30,7 +30,7 @@ This is the chunk-9A **machine** -- the runner, the run ledger, the manifest and
 | capital_reference / margin_basis | null / null | trader Q43 PENDING |
 | Instrument master | `OpenAPIScripMaster_2026-07-31.json` | the PINNED dump, `config.yaml` (CONTEXT 4.3 ticks; QUESTIONS.md Q-20) |
 | Instrument-master sha256 | `ce198be44b44fc33...` | the pin's own digest, on every manifest |
-| Spec version | v1.5 | CONTEXT.md |
+| Spec version | v1.7 | CONTEXT.md |
 | Factor-table digest | `3bfa71373c8e0da4...` | sha256 |
 | Pilot symbols | TCS, RELIANCE, HDFCBANK, ICICIBANK, BHARTIARTL | chunk-7/8 window, unchanged |
 | Pilot window | 2026-05-01 .. 2026-07-24 | chunk-7/8 window, unchanged |
@@ -93,6 +93,9 @@ All of them are ORDINARY dividends under CONTEXT 4.2's 2% special-dividend thres
 | rule-3 tie bias days | 0 |
 | rule-3 day with no 1-minute data (carried, CONTEXT 3.2) | 0 |
 | E10 fallback reference (no 11:00-stamped candle) | 0 |
+| rule-3 day refused on a malformed 1-minute bar (QUESTIONS.md Q-21) | 0 |
+| rule-3 day refused on a battery-failing D-1 (QUESTIONS.md Q-21(b)) | 0 |
+| day with out-of-session 1-minute bar(s) dropped (CONTEXT 7-E2 / Q-17) | 0 |
 
 A zero is a statement about this window, not about the code: it says the window carries no real-data witness for that branch.
 
@@ -241,11 +244,11 @@ CONTEXT 3.2: a demerger has NO valid factor, so any pair spanning the ex-date is
 | Shards on disk at the kill | RELIANCE.jsonl, TCS.jsonl (only COMPLETE symbols) |
 | Resumed run, ledger sha256 | `c3363f6f17757ebcbb2f08e8159e943cbbd692836d165687cbb2d91e22c1e318` |
 | **Byte-identical** | **YES** |
-| Manifest digest (commit-independent) | `f2327e6fc53bd62a073fd376e3c399dbe6c38b95074706d85c43f38554726077` vs `f2327e6fc53bd62a073fd376e3c399dbe6c38b95074706d85c43f38554726077` |
+| Manifest digest (commit-independent) | `f62326cbd6754150939bbf21ca1c0d648870c0f42f69ba9f1d8ca49fc3877a79` vs `f62326cbd6754150939bbf21ca1c0d648870c0f42f69ba9f1d8ca49fc3877a79` |
 | Rows: whole / resumed | 290 / 290 |
 | Duplicated (symbol, day) keys | 0 |
 | Pilot (a) ledger sha256 | `c3363f6f17757ebcbb2f08e8159e943cbbd692836d165687cbb2d91e22c1e318` |
-| Pilot (a) manifest digest | `3a746c7e8c75210be72ae912b9eb1be1cf02028bed952d5305226dda3d1a1951` |
+| Pilot (a) manifest digest | `4fc7f0b4741094e7bdbeaf6ab9a7b26e58dfd10721660262689fe5b710d245c3` |
 
 The ledger holds no clock read of any kind -- the only timestamps in a row are CANDLE stamps -- which is what lets the same code over the same stores produce the same bytes.
 
