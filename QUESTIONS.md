@@ -3459,3 +3459,63 @@ gate, no number and no store row moves**: the defect was in an instruction, and 
 already been carried out correctly by hand.
 
 **WHAT IS UNSTOPPED:** nothing was stopped. This receipt raises no question.
+
+---
+
+## Q-23 · chunk 9B REPORT · class A · **OPEN -- STOP** · blocks ONE figure: CONTEXT 7-E13's buy&hold benchmark
+
+**Question.** CONTEXT 7-E13 defines the benchmark as *"equal-weight portfolio of the traded
+universe, bought at first trade date's close, held to period end (engineering default, disclosed
+on report)"*. It fixes the CONSTRUCTION and says nothing about the PRICE DOMAIN of those closes.
+Which domain does it mean?
+
+**Why it is a hole rather than a detail.** Over a ten-year hold it decides the number. CONTEXT
+7-E11 fixes the domain for every OTHER engine -- the intraday engines run on raw same-day prices,
+the bias engine on pairwise-adjusted daily prices -- and the benchmark is named in neither
+sentence. A holder's SHARE COUNT follows every split and bonus: RELIANCE's 1:1 bonus (ex
+2024-10-28, k = 1/2) halves the quoted price and doubles the shares held, so a raw close-to-close
+ratio reads that symbol as down 50% on a day the holder lost nothing. **107 share-count events sit
+inside this run's span**, which is the same population the chunk-9A pilot measured when it found
+47 of them change a bias.
+
+**Why it matters beyond arithmetic.** The benchmark is the only figure on the report a reader will
+use to judge whether the strategy was worth running. A benchmark that is wrong by the product of a
+decade of splits is worse than no benchmark, because it looks like one.
+
+**What this session did meanwhile -- measured, decided nothing.** Both readings are computed by
+`acumen.report_9b.benchmark_pair` and BOTH are printed in section 10 of
+`docs/reports/chunk9b_backtest_report.md`, side by side with the strategy's own return over the
+same window, and NEITHER is labelled "the benchmark":
+
+* **RAW** -- the daily store's closes exactly as stored, no adjustment.
+* **SHARE-COUNT ADJUSTED** -- the first close brought into the last close's scale through THIS
+  RUN's own factor table, i.e. `P x pending factors`, the identical construction CONTEXT 3.2's
+  bias engine applies and the identical table the run wired. No second source of factors exists
+  and none was created.
+
+Both readings are PRICE returns on both sides: CONTEXT 4.2 gives an ordinary dividend `k = 1`, so
+neither adds dividends back -- which matches the strategy's own PnL, since it never receives one
+either. A special dividend above 4.2's 2% threshold DOES carry a factor and is therefore applied
+on the adjusted side only, and that asymmetry is the architect's to accept or reject with the rest.
+
+**Options for the architect:**
+
+(a) **Share-count adjusted.** The spec's own words say *portfolio ... bought ... held*, and a held
+    portfolio's share count follows corporate actions; the factor table exists precisely for this
+    and is already wired and reviewed. Cost: the benchmark silently includes special-dividend
+    factors, so it is not a pure price return.
+
+(b) **Raw closes.** Simplest, uses no machinery, and matches the domain the intraday engines run
+    in (CONTEXT 7-E11's first clause). Cost: it is wrong by the product of every split and bonus
+    in the span, and wrong in a direction that FLATTERS the strategy.
+
+(c) **Total return** -- adjusted for share-count events AND ordinary dividends added back. The
+    most defensible benchmark in finance, and the least comparable to a strategy that collects no
+    dividends. It also needs data this repo does not hold: the CA cache carries ex-dates and
+    amounts but the run has never built a dividend-reinvestment series.
+
+(d) **Some other construction the architect specifies**, with a CONTEXT 7-E13 amendment.
+
+**WHAT IS STOPPED:** exactly one figure. The report is complete and publishable in every other
+respect; section 10 prints the measurement and the question instead of an answer. Nothing in the
+run, the ledger, the metrics or any other section depends on this.
