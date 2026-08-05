@@ -800,7 +800,13 @@ def build_everything(
     reconciling_paths = sum(1 for path in paths if pf.path_reconciles(path))
 
     progress("computing the E13 metric set")
-    columns = pf.side_split(run.executed, initial_capital_paise=capital, paths=paths)
+    columns = _side_split_over_walked_days(run, paths, capital_paise=capital)
+    crosses_zero = {
+        label: _curve_crosses_zero(rows, run.days, capital)
+        for label, rows in (("All", run.executed),
+                            ("Long", pf.for_side(run.executed, sig.LONG)),
+                            ("Short", pf.for_side(run.executed, sig.SHORT)))
+    }
     series = pf.daily_pnl(run.executed, days=run.days)
     curve = pf.equity_curve(series, capital)
     disclosures = pf.disclosures(run.executed)
@@ -846,12 +852,53 @@ def build_everything(
         symbols=symbols,
         register=register,
         benchmark=benchmark,
+        crosses_zero=crosses_zero,
         paths_built=len(paths),
         path_marks=sum(len(path.marks) for path in paths),
         paths_reconciling=reconciling_paths,
         refusals=price_refusals(run, crashed),
         daily_counts=_daily_count_distribution(series),
     )
+
+
+def _curve_crosses_zero(rows, days, capital_paise: int) -> bool:
+    """Does this column's own equity curve ever touch or pass zero? PURE.
+
+    Asked because a daily RETURN divides by the prior equity, so a series that crosses zero
+    produces returns whose sign is an artifact of the denominator (:data:`RATIO_CROSSES_ZERO`).
+    Built from the same functions the metrics use, over the same index.
+    """
+    curve = pf.equity_curve(pf.daily_pnl(rows, days=days), capital_paise)
+    return any(point.equity_paise <= 0 for point in curve)
+
+
+def _side_split_over_walked_days(
+    run: RunData, paths: Sequence[bt.TradePath], *, capital_paise: int
+) -> dict[str, pf.Metrics]:
+    """E13's All / Long / Short columns, indexed on EVERY WALKED DAY.
+
+    :func:`acumen.portfolio.side_split` derives its own index with ``walked_days(rows)`` over the
+    rows it is handed. That is right when it is handed every walked row, which is what its
+    docstring asks for; this report streams the refusals past instead of holding 306,967 of them,
+    so handing it the executed rows alone would index the series on the 2,415 days that TRADED and
+    quietly drop the 13 that did not.
+
+    That is not cosmetic. :func:`acumen.portfolio.walked_days` says it out loud -- *"a flat day is
+    a real observation for a daily Sharpe, and dropping it would silently annualize a different
+    sample"* -- and it would also shorten every drawdown duration. So the split is rebuilt here
+    with exactly ``side_split``'s own structure and the run's true day index passed explicitly.
+    Same function, same paths, one more argument.
+    """
+    return {
+        "All": pf.metrics(run.executed, label="All", initial_capital_paise=capital_paise,
+                          days=run.days, paths=paths),
+        "Long": pf.metrics(pf.for_side(run.executed, sig.LONG), label="Long",
+                           initial_capital_paise=capital_paise, days=run.days,
+                           paths=pf.paths_for_side(paths, sig.LONG)),
+        "Short": pf.metrics(pf.for_side(run.executed, sig.SHORT), label="Short",
+                            initial_capital_paise=capital_paise, days=run.days,
+                            paths=pf.paths_for_side(paths, sig.SHORT)),
+    }
 
 
 def _assemble_paths(
@@ -951,25 +998,59 @@ def _day(value: date | None, fallback: str = "the run's opening capital") -> str
     return fallback if value is None else value.isoformat()
 
 
-def _excursion(exc: pf.Excursion, *, recovery_word: str) -> str:
+#: What a percentage says when its own denominator is not a positive equity. A drawdown from a
+#: peak of Rs 115,989.60 has a meaningful percentage; a fall measured from an equity ALREADY below
+#: zero does not -- the arithmetic still divides, and its sign flips, but the answer is not a
+#: percentage of anything. This run goes below zero in its first year (section 7a), so the case is
+#: the rule here rather than the exception, and printing "-2.92%" for a run-up would be worse than
+#: printing nothing.
+NO_PERCENT_BASE: str = "% n/a -- the base equity is at or below zero"
+
+#: The same disease in a more dangerous place. A daily RETURN is `(change / prior equity)`, and
+#: once the equity series crosses zero the denominator changes sign: a LOSS on a negative base
+#: divides to a POSITIVE return. Sharpe and Sortino are built from those returns, so on a curve
+#: that goes below zero they can come out positive for a strategy that lost many times its
+#: capital -- which is exactly what this run produces. The ratio is refused, with its reason,
+#: rather than printed as if it meant something. CONTEXT 7-E13 fixes the convention (daily
+#: series, risk-free 0, x sqrt 252); it does not license reporting it where it is undefined.
+RATIO_CROSSES_ZERO: str = (
+    "n/a -- this column's equity series crosses zero, and a daily return (change / prior equity) "
+    "is not defined across a sign change in its own denominator: a LOSS on a negative base "
+    "divides to a POSITIVE return, so the ratio would read as a strength it is not"
+)
+
+
+def _excursion_pct(pct: Fraction | None) -> str:
+    """The percentage, or the reason there is not one. An excursion size is always positive."""
+    if pct is None or pct <= 0:
+        return NO_PERCENT_BASE
+    return _pct(pct)
+
+
+def _excursion(exc: pf.Excursion, *, recovery_word: str, rising: bool = False) -> str:
+    """One close-to-close excursion. ``rising`` prints a run-up trough-first, as it happened."""
     if exc.is_empty:
-        return "none -- the curve never fell below the level it started from"
+        word = "rose above" if rising else "fell below"
+        return f"none -- the curve never {word} the level it started from"
+    start, end = (exc.trough_day, exc.peak_day) if rising else (exc.peak_day, exc.trough_day)
     return (
-        f"{_money(exc.amount_paise)} ({_pct(exc.pct)}), {_day(exc.peak_day)} -> "
-        f"{_day(exc.trough_day)}, {_num(exc.duration_days)} daily observation(s), "
+        f"{_money(exc.amount_paise)} ({_excursion_pct(exc.pct)}), {_day(start)} -> "
+        f"{_day(end)}, {_num(exc.duration_days)} daily observation(s), "
         f"{recovery_word} {_day(exc.recovered_on, 'never inside the span')}"
     )
 
 
-def _path_excursion(exc: pf.PathExcursion | None, *, observations: int,
-                    recovery_word: str) -> str:
+def _path_excursion(exc: pf.PathExcursion | None, *, observations: int, recovery_word: str,
+                    rising: bool = False) -> str:
     if exc is None:
         return pf.INTRADAY_PATH_NOT_SUPPLIED
     if exc.is_empty:
-        return "none -- the path never fell below the level it started from"
+        word = "rose above" if rising else "fell below"
+        return f"none -- the path never {word} the level it started from"
+    start, end = (exc.trough, exc.peak) if rising else (exc.peak, exc.trough)
     return (
-        f"{_money(exc.amount_paise)} ({_pct(exc.pct)}), {_path_stamp(exc.peak)} -> "
-        f"{_path_stamp(exc.trough)}, {_num(exc.observations)} observation(s) of "
+        f"{_money(exc.amount_paise)} ({_excursion_pct(exc.pct)}), {_path_stamp(start)} -> "
+        f"{_path_stamp(end)}, {_num(exc.observations)} observation(s) of "
         f"{_num(observations)}, {recovery_word} {_path_stamp(exc.recovered, 'never inside the span')}"
     )
 
@@ -999,6 +1080,7 @@ def render_markdown(
     symbols: Mapping[str, pf.Metrics],
     register: Mapping[str, bt.ResidualEntry],
     benchmark: BenchmarkPair,
+    crosses_zero: Mapping[str, bool],
     paths_built: int,
     path_marks: int,
     paths_reconciling: int,
@@ -1012,7 +1094,8 @@ def render_markdown(
         run=run, capital_paise=capital_paise, checks=checks, pilot=pilot, crashed=crashed,
         columns=columns, curve=curve, series=series, disclosures=disclosures,
         capital_flag_report=capital_flag_report, years=years, symbols=symbols,
-        register=register, benchmark=benchmark, paths_built=paths_built,
+        register=register, benchmark=benchmark, crosses_zero=crosses_zero,
+        paths_built=paths_built,
         path_marks=path_marks, paths_reconciling=paths_reconciling, refusals=refusals,
         daily_counts=daily_counts, config=config,
     )
@@ -1364,7 +1447,7 @@ def _cagr(metrics: pf.Metrics) -> str:
     return _pct(metrics.cagr)
 
 
-def _section_e13(add, *, columns: Mapping[str, pf.Metrics], **_) -> None:
+def _section_e13(add, *, columns: Mapping[str, pf.Metrics], crosses_zero, **_) -> None:
     order = ("All", "Long", "Short")
     add("## 6. CONTEXT 7-E13, in full -- All / Long / Short")
     add("")
@@ -1391,15 +1474,19 @@ def _section_e13(add, *, columns: Mapping[str, pf.Metrics], **_) -> None:
         ("Avg profit / avg loss", lambda m: _ratio(m.avg_profit_over_avg_loss)),
         ("Largest win", lambda m: _money(m.largest_win_paise)),
         ("Largest win, % of its own notional", lambda m: _pct(m.largest_win_pct_of_notional)),
-        ("Largest win, % of gross profit", lambda m: _pct(m.largest_win_pct_of_gross_profit)),
+        ("Largest win, % of gross profit",
+         lambda m: _pct(m.largest_win_pct_of_gross_profit, 5)),
         ("Largest loss", lambda m: _money(m.largest_loss_paise)),
         ("Largest loss, % of its own notional", lambda m: _pct(m.largest_loss_pct_of_notional)),
-        ("Largest loss, % of gross loss", lambda m: _pct(m.largest_loss_pct_of_gross_loss)),
+        ("Largest loss, % of gross loss",
+         lambda m: _pct(m.largest_loss_pct_of_gross_loss, 5)),
         ("Return on initial capital", lambda m: _pct(m.return_on_initial_capital)),
         ("Final equity", lambda m: _money(m.final_equity_paise)),
         ("CAGR", _cagr),
-        ("Sharpe (daily, rf 0, x sqrt 252)", lambda m: _decimal(m.sharpe)),
-        ("Sortino (daily, rf 0, x sqrt 252)", lambda m: _decimal(m.sortino)),
+        ("Sharpe (daily, rf 0, x sqrt 252)",
+         lambda m: RATIO_CROSSES_ZERO if crosses_zero.get(m.label) else _decimal(m.sharpe)),
+        ("Sortino (daily, rf 0, x sqrt 252)",
+         lambda m: RATIO_CROSSES_ZERO if crosses_zero.get(m.label) else _decimal(m.sortino)),
         ("Avg MFE per trade (BEFORE costs)", lambda m: _money(m.avg_mfe_paise)),
         ("Avg MAE per trade (BEFORE costs)", lambda m: _money(m.avg_mae_paise)),
         ("Largest MFE (BEFORE costs)", lambda m: _money(m.largest_mfe_paise)),
@@ -1449,11 +1536,12 @@ def _section_equity(add, *, columns, curve, years, run: RunData, **_) -> None:
     add(f"| Opening capital | {_money(m.initial_capital_paise)} |")
     add(f"| Final equity | {_money(m.final_equity_paise)} |")
     add(f"| Max drawdown (close-to-close) | {_excursion(m.max_drawdown, recovery_word='recovered')} |")
-    add(f"| Max run-up (close-to-close) | {_excursion(m.max_run_up, recovery_word='given back')} |")
+    add(f"| Max run-up (close-to-close) | "
+        f"{_excursion(m.max_run_up, recovery_word='given back', rising=True)} |")
     add(f"| Max drawdown (intra-trade, 15-min path) | "
         f"{_path_excursion(m.intraday_max_drawdown, observations=m.intraday_observations, recovery_word='recovered')} |")
     add(f"| Max run-up (intra-trade, 15-min path) | "
-        f"{_path_excursion(m.intraday_max_run_up, observations=m.intraday_observations, recovery_word='given back')} |")
+        f"{_path_excursion(m.intraday_max_run_up, observations=m.intraday_observations, recovery_word='given back', rising=True)} |")
     add(f"| Observations on the 15-minute path | {_num(m.intraday_observations)} |")
     add("")
     add("**Why the two forms differ, and which to believe.** The close-to-close form can only "
@@ -1513,7 +1601,8 @@ def _section_years(add, *, years: Sequence[YearRow], **_) -> None:
     for year in years:
         m = year.metrics
         dd = ("none" if m.max_drawdown.is_empty
-              else f"{_money(m.max_drawdown.amount_paise)} ({_pct(m.max_drawdown.pct)})")
+              else f"{_money(m.max_drawdown.amount_paise)} "
+                   f"({_excursion_pct(m.max_drawdown.pct)})")
         add(f"| {year.year} | {_num(m.total_trades)} | {_pct(m.percent_profitable)} | "
             f"{_money(m.net_pnl_paise)} | {_ratio(m.profit_factor)} | "
             f"{_money(m.avg_pnl_paise)} | {_money(m.largest_win_paise)} | "
@@ -1759,8 +1848,10 @@ def _section_rare_shapes(add, *, run: RunData, **_) -> None:
     if w.gap_days:
         add(f"Together they are worth **{_money(w.gap_net_paise)}** net, on "
             f"**{_num(w.gap_winners)}** winners of {_num(len(w.gap_days))} "
-            f"({_pct(Fraction(w.gap_winners, len(w.gap_days)))}). The first and last of them: "
-            f"**{_name_day(w.gap_days[0])}** and **{_name_day(w.gap_days[-1])}**.")
+            f"({_pct(Fraction(w.gap_winners, len(w.gap_days)))}). The earliest and the latest, "
+            "by DATE rather than by the ledger's symbol-major order: "
+            f"**{_name_day(min(w.gap_days, key=lambda pair: (pair[1], pair[0])))}** and "
+            f"**{_name_day(max(w.gap_days, key=lambda pair: (pair[1], pair[0])))}**.")
     else:
         add("The branch never fired in this run, which is a statement about the window rather "
             "than about the code.")
@@ -1793,14 +1884,25 @@ def _section_rare_shapes(add, *, run: RunData, **_) -> None:
     add("")
     add(f"**{Q17_OUTAGE_DATE}.** {Q17_OUTAGE_NOTE}.")
     add("")
+    walked_here = {day: w.out_of_session_by_date.get(day, 0) for day, _, _ in Q17_MARKET_WIDE}
+    zeros = [day for day, count in walked_here.items() if count == 0]
+    thin = [day for day, count in walked_here.items()
+            if 0 < count < 10]
+    tail = ""
+    if zeros:
+        tail += (f" {_num(len(zeros))} of the five ({', '.join(zeros)}) therefore appear at ZERO "
+                 "here")
+    if thin:
+        tail += (f"{' and' if zeros else ' '} {_num(len(thin))} at a handful "
+                 f"({', '.join(f'{d} at {walked_here[d]}' for d in thin)})")
     add("**Why this run's flagged count is smaller than the lake's population, stated rather "
         f"than glossed.** The lake carries ~3,100 affected symbol-days; this run flags "
         f"**{_num(sum(w.out_of_session_by_date.values()))}** walked days. The difference is not a "
         "disagreement: the flag is set on a row that REACHED the loader, so a day already "
         "refused by the battery -- and pre-open garbage is exactly what gate 1 refuses -- never "
-        "gets one, and the six quarantined symbols are outside this universe altogether. Two of "
-        "the five market-wide dates therefore appear at zero here, which is the honest reading of "
-        "both numbers rather than a contradiction between them.")
+        "gets one, and the six quarantined symbols are outside this universe altogether."
+        + (f"{tail}, which is the honest reading of both numbers rather than a contradiction "
+           "between them." if tail else ""))
     add("")
     add("The flag lands across bias rules like this, which is what makes the Q-22(a) ruling "
         "load-bearing rather than cosmetic:")
@@ -1857,15 +1959,22 @@ def _section_rare_shapes(add, *, run: RunData, **_) -> None:
     add("")
     add("### 12f. The shapes that never happened")
     add("")
-    add(f"Three of the eleven counters are ZERO over ten years, and a zero recounted from "
-        "495,312 rows is worth stating: no day was refused on a malformed 1-minute bar "
-        f"({_num(w.malformed_bar_days)}), no Rule-3 day carried for want of any 1-minute data "
-        f"({_num(w.rule3_no_minute_days)}), and no signal was degenerate-unsizable "
-        f"({_num(w.signal_unsizable)}). The first of those three is the interesting one: the "
-        "machinery that stopped the first run from dying is now unreachable on the run path, "
-        "because Q-22(a) drops an out-of-session stray before a candle is built and Q-21(a)'s "
-        "completed gate 2 refuses an in-session impossible bar first. It is kept as defence in "
-        "depth and it printed a zero, which is what defence in depth looks like when it works.")
+    zero_labels = sorted(label for label, count in run.rare_shapes.items() if count == 0)
+    add(f"**{_num(len(zero_labels))} of the eleven counters are ZERO** over ten years, and a "
+        f"zero recounted from {_num(run.walked)} rows is worth stating rather than omitting:")
+    add("")
+    for label in zero_labels:
+        add(f"* {label}")
+    add("")
+    add("The malformed-bar counter is the interesting one: the machinery that stopped the first "
+        "run from dying is now unreachable on the run path, because Q-22(a) drops an "
+        "out-of-session stray before a candle is built and Q-21(a)'s completed gate 2 refuses an "
+        "in-session impossible bar first. It is kept as defence in depth and it printed a zero, "
+        "which is what defence in depth looks like when it works.")
+    add("")
+    add(f"**A near-miss worth naming beside them:** {_num(w.rule3_no_minute_days)} Rule-3 days "
+        "carried because D-1 had no stored 1-minute data at all -- not a refusal and not a "
+        "guess, the same honest carry CONTEXT 3.2 gives a scan that finds no break.")
     add("")
     add("Two further shapes are worth naming because they are nearly-never rather than never: "
         f"**{_num(len(w.side_never_set))}** days ended with the side never set "

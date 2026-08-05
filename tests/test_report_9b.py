@@ -431,6 +431,10 @@ def render(tmp_path: Path, rows=None):
                                initial_capital_paise=CAPITAL, days=run.days)
                  for s in run.symbols},
         register={},
+        crosses_zero={label: r9._curve_crosses_zero(rows, run.days, CAPITAL)
+                      for label, rows in (("All", run.executed),
+                                          ("Long", pf.for_side(run.executed, LONG)),
+                                          ("Short", pf.for_side(run.executed, SHORT)))},
         benchmark=r9.benchmark_pair(store, run.manifest, symbols=run.symbols, first_day=first,
                                     last_day=run.days[-1], initial_capital_paise=CAPITAL),
         paths_built=0,
@@ -499,6 +503,68 @@ def test_a_reconciliation_failure_is_PRINTED_not_swallowed(tmp_path: Path) -> No
     assert "DID NOT RECONCILE" in text
     assert "**XX**" in text
     assert "The partition is exact" not in text
+
+
+def test_a_percentage_is_REFUSED_when_its_base_equity_is_not_positive() -> None:
+    """This run's equity goes below zero in its first year, so the case is the rule, not an edge.
+
+    `Fraction(rise, trough)` still divides when the trough is negative -- and flips sign, so a
+    run-up of Rs 407,255.90 printed as "-2.92%". That is not a percentage of anything. It is
+    suppressed with its reason, and a genuine positive-base percentage still prints.
+    """
+    assert r9._excursion_pct(Fraction(1, 4)) == "25.00%"
+    assert r9._excursion_pct(Fraction(-292, 10000)) == r9.NO_PERCENT_BASE
+    assert r9._excursion_pct(None) == r9.NO_PERCENT_BASE
+    assert r9._excursion_pct(Fraction(0)) == r9.NO_PERCENT_BASE
+
+
+def test_a_run_up_is_printed_TROUGH_first_because_that_is_the_order_it_happened(
+    tmp_path: Path,
+) -> None:
+    """A drawdown runs peak -> trough; a run-up runs trough -> peak. Printing both the same way
+    put the later date first on every run-up row."""
+    rise = pf.Excursion(amount_paise=5_000, pct=Fraction(1, 2), peak_day=date(2021, 3, 1),
+                        trough_day=date(2020, 11, 8), duration_days=43,
+                        recovered_on=date(2021, 5, 1))
+    text = r9._excursion(rise, recovery_word="given back", rising=True)
+    assert text.index("2020-11-08") < text.index("2021-03-01"), "trough first on a run-up"
+    fall = pf.Excursion(amount_paise=5_000, pct=Fraction(1, 2), peak_day=date(2020, 11, 8),
+                        trough_day=date(2021, 3, 1), duration_days=43, recovered_on=None)
+    text = r9._excursion(fall, recovery_word="recovered")
+    assert text.index("2020-11-08") < text.index("2021-03-01"), "peak first on a drawdown"
+    assert "never inside the span" in text
+
+
+def test_the_E13_columns_are_indexed_on_EVERY_WALKED_DAY_not_only_trading_days(
+    tmp_path: Path,
+) -> None:
+    """A flat day is an observation. Dropping it annualizes a different sample -- silently.
+
+    `pf.side_split` builds its own index from the rows it is given, and this report streams the
+    refusals past instead of holding them, so handing it the executed rows alone would index on
+    the days that TRADED. This asserts the report does not: the series must span every walked day,
+    including the one this fixture's ledger walked without trading.
+    """
+    run = r9.read_run(write_run(tmp_path, sample_rows()))
+    paths: tuple = ()
+    columns = r9._side_split_over_walked_days(run, paths, capital_paise=CAPITAL)
+
+    assert len(run.days) == 4, "the fixture walks four days"
+    traded = {row.day for row in run.executed}
+    assert len(traded) == 3, "and one of them traded nothing"
+
+    for label, metrics in columns.items():
+        assert metrics.trading_days == len(run.days), (
+            f"{label} is indexed on {metrics.trading_days} days, not the {len(run.days)} walked"
+        )
+        assert metrics.first_day == run.days[0] and metrics.last_day == run.days[-1]
+
+    # ...and the defect this replaces is demonstrated rather than described: the shipped
+    # convenience wrapper, handed the same executed rows, really does lose the flat day.
+    naive = pf.side_split(run.executed, initial_capital_paise=CAPITAL)
+    assert naive["All"].trading_days == len(traded) < len(run.days)
+    # the money is identical either way -- it is the SAMPLE that moves, which is the point
+    assert naive["All"].net_pnl_paise == columns["All"].net_pnl_paise
 
 
 def test_the_per_symbol_table_carries_each_symbol_s_own_coverage_from_the_REGISTER(
