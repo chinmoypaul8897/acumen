@@ -3382,3 +3382,80 @@ are re-answered; no bias in the whole ten-year span changes.** Nothing in the ru
 later session must not re-derive it from the review.
 
 **WHAT IS UNSTOPPED:** the full-history relaunch. Nothing else in chunk 9B was stopped by Q-22.
+
+---
+
+## RUN RECEIPT · chunk 9B · the full-history run COMPLETED 05-Aug-2026 · recorded by the chunk-9B REPORT session
+
+Not a question. This is the receipt CLAUDE.md's data-store rule owes the record after an
+operator-executed procedure -- *"the next session's FIRST duty is an independent verification
+sweep of every step's completion evidence read from the machine itself"*. Everything below was
+read from the machine by this session, never from a transcript.
+
+**THE COMPLETION FIGURES, verbatim from the run's own manifest and independently recounted from
+the ledger's 495,312 rows (they agree on every figure).**
+
+| Measure | Value |
+|---|---|
+| Walked symbol-days | **495,312** = 204 symbols x 2,428 days |
+| Usable (evaluated) | **406,488** |
+| Refused | **88,824** across 9 reasons |
+| Signalled / EXECUTED | 188,347 / **188,345** (2 signalled days were unsizable at qty 0) |
+| Shares | 256,816,544 |
+| Gross PnL before the Rs 100/trade round trip | Rs 1,998,481.80 |
+| Costs | Rs 18,834,500.00 |
+| **Net PnL** | **-Rs 16,836,018.20** |
+| Exits | 113,721 stop-loss / 30,249 target / 44,375 square-off at the 15:15 close |
+| Span | 2016-10-03 -> 2026-07-30 (2,425 trading days + the 3 weekend-dated Muhurat sessions = 2,428 walked) |
+
+**THE ARTEFACTS, with the digests this session computed.**
+
+| Artefact | Path | sha256 |
+|---|---|---|
+| Run ledger | `<data_root>/backtests/chunk9b_full/ledger.jsonl` (400,451,219 bytes) | `c70a72b097879914a3026331c1e651b70c7e6052327d0f34121fd30909a4d134` |
+| Manifest | `<data_root>/backtests/chunk9b_full/manifest.json` (487,848 bytes) | `2594c6e81d404029c655645a6eb3d8b5fe58d02a0be1891ec9040aebcd25b764` |
+| Manifest, commit-independent digest | `stable_manifest_digest` | `a6a677e7b90ae3723c093f35f032850bc01c24255f8e3486a988124bf1144304` |
+| Crashed run, retained never deleted | `<data_root>/backtests/chunk9b_full_crashed_0803/` | 103 whole shards |
+
+**SPEC v1.7**, and the run says so itself: `spec_version` `v1.7`, `code_sha`
+`c34c0880a96c52599863b1a52ddcee54a27a58c3` (the FIX-4 review-PASS commit -- the run was launched
+under the authorised HEAD), `config_digest`
+`eab558c969ad6179232b7159f7746cdf72fcd0cb12756156a0dc20afd6ec7b1a`, instrument-master pin
+`OpenAPIScripMaster_2026-07-31.json` at `ce198be44b44fc333540a19c3d6a7b4e5fa86ae81ef2c6798fd5bece7b29f5ab`.
+Both GO-ruling stamps are on the manifest verbatim: *"capital-infeasibility flags NOT computed --
+the trader's Q43 answer is pending"* and *"PENDING TRADER CONFIRMATION OF Q44 (gap-rule example,
+POC 2032)"*, with the escalation-and-retention sentence beside them.
+
+**THE OWED RE-GATE WAS EXECUTED, and this session verified it from the register rather than
+believing it.** Reading `<data_root>/universe_backfill/ledger.json` directly: all 210 rows carry
+`gate_definition`
+`gate1p-price-containment+gate2-completeness+auction-relief-2026-07-28+gate2-open-test-2026-08-03`,
+which is `universe_backfill.GATE_DEFINITION` at HEAD -- **0 stale rows**, so the staleness banner
+no longer fires. The aggregates now read the v1.6-completed figures the runbook predicted:
+**usable 409,205 of 435,641 stored symbol-days = 93.9317%**, 204 settled / 6 quarantined,
+recomputed here from the register's own per-symbol fields (`usable_pass` over the settled 204,
+`gate1p_total` over all 210). The pre-completion pair was 409,252 / 93.9425%; the delta is exactly
+the 47 symbol-days the completed gate 2 refuses, all on 2023-03-03. `updated_at` on the register's
+rows spans 2026-08-05T20:41:38 .. 21:26:38.
+
+**THE RUNBOOK-BANNER DEFECT, found by this session and fixed.** The re-gate command the operator
+was handed -- in `docs/recovery/q18_runbook.md` step 7 and in the report's own staleness banner --
+opened with `acumen-universe-backfill`, the console entry point `pyproject.toml` declares. **That
+name does not exist on this machine.** The package is deliberately not installed (chunk-0 decision
+B2 resolves the src layout through pytest's `pythonpath`, not an editable install), and
+`importlib.metadata.distribution("acumen")` raises `PackageNotFoundError` here, so
+`shutil.which("acumen-universe-backfill")` is `None`: the command as documented could not have been
+run at all. The operator ran `python scripts/universe_backfill.py`, which is the bare-clone launcher
+`scripts/` exists for and the form every other command in that runbook already used -- step 7 was
+the only console-script invocation in its own document. REVIEW_9B_FIXES R4 corrected that command's
+two FLAGS and REVIEW_9B_FIX4 dry-ran its parsing; neither looked at the program name, because a
+dry-run parse never resolves it. Fixed here in all three places the repo hands it out: the banner
+now emits it from a new constant `universe_backfill.REGATE_LAUNCHER`
+(`"python scripts/universe_backfill.py"`), the runbook's step-7 box carries the same form with a
+note recording the correction, and the shipped test that pins the banner now asserts the launcher,
+asserts the dead name is GONE, and asserts `scripts/universe_backfill.py` is a file a bare clone
+really has. Both mandatory flags and the OVERSTATED direction are untouched and still pinned. **No
+gate, no number and no store row moves**: the defect was in an instruction, and the instruction had
+already been carried out correctly by hand.
+
+**WHAT IS UNSTOPPED:** nothing was stopped. This receipt raises no question.
