@@ -22,6 +22,7 @@ You review code you did not write. Your job is what breaks at 11:47 on a Tuesday
 7. **Performance sanity.** Backfill and backtest loops won't take days (vectorized or reasonably batched pandas; no per-row API calls); live sweep respects the deadline + skip-and-return design (§4.4).
 8. **Git & docs.** Commits: logical units, what+why messages, correct `chunk<N>` prefixes, NO AI attribution anywhere; PROGRESS entry complete per template (all fields, honest `state-for-next-session`); STATUS.md updated; QUESTIONS.md entries for anything the builder flagged.
 9. **Dependency hygiene.** Only pinned deps from `pyproject.toml`; no new package without a Class-B decision recorded.
+10. **Rendered output.** A rendering fix is pinned at the RENDERED OUTPUT, not only at the helper that computes it — a test that reads the dataclass/helper and never the cell, line or page it produces leaves the fix revertible with the suite green (architect's ruling 06-Aug-2026 (2); the M1/M6 pattern, three occurrences: REVIEW_9B_REPORT M1, REVIEW_9B_FINAL M6 and C4).
 
 ## Verdict discipline
 

@@ -3613,3 +3613,57 @@ reviews; it does not fix. What the ruling means for the artefact, verified rathe
   and near-threshold dividends all carry `k = 1`, so they are already invisible to every reading,
   and the 308 special dividends are the whole of what THE benchmark's by-kind exclusion removes.
 
+---
+
+## ARCHITECT'S RULINGS (06-Aug-2026) — quotation fidelity, the persona checklist, and a
+scoped REVIEW WAIVER · recorded VERBATIM by the chunk-9B PROSE-FIX session
+
+Recorded here before any edit was made, under the same discipline every architect ruling in
+this file travels by. The architect's own line breaks are preserved, so the record is
+byte-reconstructable by stripping the `> ` prefix and re-joining with newlines — which is what
+ruling (1) below now requires of anything that quotes it.
+
+> ARCHITECT'S RULINGS (06-Aug-2026):
+> (1) A quoted architect ruling is BYTE-VERBATIM or it is a paraphrase outside
+> quotation marks with a citation — abridged quotations are forbidden
+> (REVIEW_9B_FINAL Q1). (2) The code-reviewer persona checklist gains: 'a
+> rendering fix is pinned at the RENDERED OUTPUT, not only at the helper that
+> computes it' (the M1/M6 pattern, three occurrences). (3) REVIEW WAIVER, scoped
+> to this session only: the three prose edits are closed by the numeric freeze,
+> the flipped reviewer probes, and the architect's direct reading of the three
+> new lines — no fresh review session. Architect.
+
+**What each clause governs.**
+
+* **(1) Quotation fidelity.** This is REVIEW_9B_FINAL finding Q1 turned into a standing rule:
+  a quotation is the source's bytes or it is not a quotation. Section 10 of the chunk-9B
+  report had deleted the ruling's own `(491.90% as generated)` parenthetical and inserted a
+  `QUESTIONS.md` pointer the architect never wrote, while its own comment claimed the text was
+  *"quoted VERBATIM"*. The rule admits exactly one alternative — a paraphrase, OUTSIDE quotation
+  marks, carrying a citation. It does not license an abridged quotation for any reason,
+  including length. The one difference this repo still licenses is mechanical and total: files
+  under `docs/reports/` are ASCII-only (`src/acumen/config.py`), so an em dash in the record
+  becomes `--` in the quote and nothing else changes.
+* **(2) The code-reviewer persona checklist.** Appended to `personas/code_reviewer.md` as
+  checklist item 10, citing this ruling. The pattern it closes is three occurrences deep:
+  REVIEW_9B_REPORT's M1 (`_side_split_over_walked_days`' call site), and REVIEW_9B_FINAL's M6
+  / finding C4 (the priced refusal rows' measured base, revertible in the cell with all 2,168
+  tests green). A fix pinned only at the helper leaves the page free to move.
+* **(3) The REVIEW WAIVER, and its scope.** It covers THIS session only and no other. What
+  discharges the review duty for these edits is named in the ruling itself: the numeric freeze
+  (every numeric token of sections 1..9 unchanged, re-extracted from a byte-reproduced
+  report), the two REVIEW_9B_FINAL probes FLIPPED — each proven RED against the old text before
+  the fix and green after it — and the architect's own reading of the three new lines, which the
+  session's final report prints verbatim old-to-new for exactly that purpose. CLAUDE.md's
+  standing rule ("Reviews run in a FRESH session") is UNCHANGED for every other chunk and
+  every other span; this is a scoped waiver, not an amendment.
+
+**EXECUTED by the chunk-9B PROSE-FIX session (06-Aug-2026).** Clause (1) is discharged in
+`src/acumen/report_9b.py`'s `BENCHMARK_RULING`: the parenthetical and the trailing `Architect.`
+attribution are restored, the inserted pointer is gone from inside the quotation and lives in
+the sentence above the blockquote and in a new attribution line beneath it, and the flipped
+probe `test_the_reports_Q23_quote_is_VERBATIM_against_the_QUESTIONS_md_record` now asserts
+equality in both directions rather than divergence. Clause (2) is `personas/code_reviewer.md`
+checklist item 10. Clause (3) is the reason no `docs/reviews/REVIEW_*` document follows this
+session; the evidence it names is in the session's PROGRESS entry and its final report.
+
