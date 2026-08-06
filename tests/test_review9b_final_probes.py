@@ -5,11 +5,20 @@ fixture, a `src/` file or a store. Three of them turn a finding of this review i
 future session inherits rather than prose it can skim; two of them close a hole the shipped suite
 does not cover:
 
-* :func:`test_the_reports_Q23_quote_is_NOT_verbatim_against_the_QUESTIONS_md_record` -- finding
-  **Q1**: section 10 presents a quote as the architect's words and the words differ.
-* :func:`test_the_benchmark_factor_TALLY_counts_symbols_the_benchmark_itself_EXCLUDES` -- finding
-  **Q2**: "what THE BENCHMARK applies: 125 factors across 86 symbols" is counted over every
-  symbol with a daily series, not over the 134 the benchmark is built from.
+* :func:`test_the_reports_Q23_quote_is_VERBATIM_against_the_QUESTIONS_md_record` -- finding
+  **Q1**: section 10 presented a quote as the architect's words and the words differed.
+  **FLIPPED** by the PROSE-FIX session of 06-Aug-2026: it asserted the divergence, it now
+  asserts the byte-verbatim equality the fix establishes.
+* :func:`test_the_benchmark_factor_TALLY_counts_ONLY_the_symbols_the_benchmark_HOLDS` -- finding
+  **Q2**: "what THE BENCHMARK applies: 125 factors across 86 symbols" was counted over every
+  symbol with a daily series, not over the 134 the benchmark is built from. **FLIPPED** by the
+  same session: the printed tally is now the benchmark's own and is read back off the page.
+
+Two of the six were written to go RED the moment their finding was fixed, which is what makes
+fixing one a deliberate act. Both were fixed on 06-Aug-2026 under the architect's rulings of that
+date (`QUESTIONS.md`), and both were flipped in the same commit rather than deleted -- a finding
+that has been closed is worth more as a standing assertion of the corrected property than as a
+gap. The other four are unchanged.
 * :func:`test_a_ZERO_LENGTH_holding_is_where_the_two_concurrency_conventions_diverge` -- finding
   **C1**: the running count dips below zero on a same-stamp trade; the maximum is provably
   unaffected, and that is asserted rather than assumed.
@@ -110,19 +119,19 @@ def _ascii_fold(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-def test_the_reports_Q23_quote_is_NOT_verbatim_against_the_QUESTIONS_md_record() -> None:
-    """REVIEW_9B_FINAL finding Q1, as a diff rather than as an opinion.
+def test_the_reports_Q23_quote_is_VERBATIM_against_the_QUESTIONS_md_record() -> None:
+    """REVIEW_9B_FINAL finding Q1, FLIPPED by the PROSE-FIX session (06-Aug-2026).
 
-    `BENCHMARK_RULING`'s own comment says the ruling and its refinement are "quoted VERBATIM",
-    and section 10 renders it as a blockquote attributed to the architect. Two things in it are
-    not the architect's words: the pointer `QUESTIONS.md` is inserted into the ruling's opening,
-    and the ruling's own parenthetical **(491.90% as generated)** -- the figure the refinement
-    later supersedes, and the figure the bullet below the table calls "the figure the ruling
-    first named" -- is DELETED.
+    This probe was written RED-on-purpose: it asserted that section 10's blockquote was NOT the
+    architect's words, and named the two divergences -- the deleted parenthetical
+    **(491.90% as generated)** and the inserted `QUESTIONS.md` pointer. The architect ruled on
+    06-Aug-2026 that *"a quoted architect ruling is BYTE-VERBATIM or it is a paraphrase outside
+    quotation marks with a citation -- abridged quotations are forbidden"*, and the fix restored
+    both the parenthetical and the trailing `Architect.` attribution and moved the pointer out of
+    the quotation. The probe is flipped to assert the property the fix establishes.
 
-    This probe pins the divergence in both directions. It goes red if the report's quote changes
-    (including if it is corrected, which is the point: correcting it is a deliberate act) and red
-    if QUESTIONS.md's verbatim record is ever edited.
+    It stays a two-directional pin. It goes red if the report's quote drifts from the record by
+    so much as one character, and red if `QUESTIONS.md`'s verbatim record is ever edited.
     """
     questions = QUESTIONS.read_text(encoding="utf-8")
     blocks = re.findall(r'^> "(ARCHITECT.*?)"\s*$', questions, flags=re.M | re.S)
@@ -131,45 +140,53 @@ def test_the_reports_Q23_quote_is_NOT_verbatim_against_the_QUESTIONS_md_record()
         b for b in blocks if b.startswith("ARCHITECT'S REFINEMENT (06-Aug-2026), Q-23 'and stated':")
     )
 
-    # what QUESTIONS.md records, ASCII-folded and with the ruling's trailing signature dropped
-    recorded = _ascii_fold(ruling.replace("Architect.", "").strip()) + " " + _ascii_fold(refinement)
+    # what QUESTIONS.md records, ASCII-folded and NOTHING else done to it -- the signature the
+    # old quote dropped is part of the record and is part of what must be reproduced.
+    recorded = _ascii_fold(ruling) + " " + _ascii_fold(refinement)
 
     published = _ascii_fold(r9.BENCHMARK_RULING)
-    assert published in _ascii_fold(REPORT.read_text(encoding="utf-8")), (
+    report = _ascii_fold(REPORT.read_text(encoding="utf-8"))
+    assert published in report, (
         "the constant and the shipped report must at least agree with each other"
     )
 
-    assert published != recorded.rstrip("."), (
-        "if this ever becomes equal the finding is FIXED -- delete the rest of this probe"
+    assert published == recorded.rstrip("."), (
+        "the quote is BYTE-VERBATIM against the record, modulo the ASCII fold docs/reports/ "
+        "carries and the sentence-final period the renderer adds; if this goes red, either the "
+        "quote was abridged again or QUESTIONS.md's record was edited"
     )
-    # the two differences, named exactly
-    assert "(491.90% as generated)" in recorded and "(491.90% as generated)" not in published, (
-        "the ruling's own figure is dropped from the quote that carries the ruling"
+    # the two things the finding named, now present rather than absent
+    assert "(491.90% as generated)" in published, "the ruling's own figure is back inside the quote"
+    assert published.endswith("Q-23 CLOSED") and "benchmark. Architect. ARCHITECT'S" in published, (
+        "the ruling's trailing attribution is part of the record and is quoted with it"
     )
-    assert "QUESTIONS.md Q-23:" in published and "QUESTIONS.md Q-23:" not in recorded, (
-        "a pointer the architect did not write is inserted into the quote"
+    assert "QUESTIONS.md Q-23:" not in published and "QUESTIONS.md" not in published, (
+        "the pointer the architect did not write is OUT of the quotation"
     )
-    # and nothing ELSE differs: restoring those two turns the quote back into the record
-    restored = published.replace("QUESTIONS.md Q-23:", "Q-23:").replace(
-        "SHARE-COUNT-ADJUSTED construction --",
-        "SHARE-COUNT-ADJUSTED construction (491.90% as generated) --",
+    # ...and it is outside it rather than simply gone: RENDERED-OUTPUT pin, not a constant pin
+    # (the architect's ruling (2) of 06-Aug-2026 -- a rendering fix is pinned at the page).
+    assert "The architect has ruled it (QUESTIONS.md Q-23, 06-Aug-2026, CLOSED)." in report, (
+        "the citation lives in the sentence above the blockquote"
     )
-    assert restored == recorded.rstrip("."), (
-        "those two edits are the WHOLE of the divergence; a third one has appeared"
+    assert "Quoted BYTE-VERBATIM from the architect's own record in `QUESTIONS.md` Q-23" in report, (
+        "and in the attribution line beneath it"
     )
 
 
-def test_the_benchmark_factor_TALLY_counts_symbols_the_benchmark_itself_EXCLUDES() -> None:
-    """REVIEW_9B_FINAL finding Q2, as arithmetic.
+def test_the_benchmark_factor_TALLY_counts_ONLY_the_symbols_the_benchmark_HOLDS() -> None:
+    """REVIEW_9B_FINAL finding Q2, FLIPPED by the PROSE-FIX session (06-Aug-2026).
 
     CONTEXT 7-E13's portfolio is bought at the FIRST TRADE DATE's close, so a symbol with no
-    close on that date is not in it -- section 10 names all 70 of them. `benchmark_pair` counts
-    `share_count_events` / `share_count_symbols` over every symbol that has ANY daily row in the
-    window, the excluded ones included, and section 10 prints that tally under the words
-    "What THE BENCHMARK applies".
+    close on that date is not in it -- section 10 names all 70 of them. The tally printed under
+    the words "What THE BENCHMARK applies" used `share_count_events` / `share_count_symbols`,
+    which `benchmark_pair` counts over every symbol with ANY daily row in the window. This probe
+    asserted that; the architect ruled the line be scoped to the benchmark's own members, so it
+    now asserts the scoped tally instead -- and reads it back off the RENDERED page, because a
+    tally pinned only at the dataclass is a tally the renderer can still get wrong (the architect's
+    ruling (2) of 06-Aug-2026, the M1/M6 pattern).
 
-    Here BBB has no close on the first day. Its bonus is counted by the tally and applied to
-    nothing: the benchmark's own value is AAA's alone.
+    Here BBB has no close on the first day. Its bonus is counted by the UNIVERSE tally, which is
+    kept and labelled, and applied to nothing: the benchmark's own value is AAA's alone.
     """
     first, last = date(2020, 1, 1), date(2020, 12, 31)
     store = _FakeDaily({
@@ -186,12 +203,26 @@ def test_the_benchmark_factor_TALLY_counts_symbols_the_benchmark_itself_EXCLUDES
                              last_day=last, initial_capital_paise=CAPITAL)
 
     assert tuple(pair.share_count.symbols) == ("AAA",), "only AAA is IN the benchmark"
-    # ...but the tally section 10 prints beside it counts BBB's bonus too
     assert pair.share_count_events == 2 and pair.share_count_symbols == 2, (
-        "the printed tally is over the whole universe, not over the benchmark's own members"
+        "the UNIVERSE tally is kept -- it is what the factor table reports, and it is labelled"
     )
+    assert pair.in_benchmark_share_count_events == 1, "BBB's bonus is not one the benchmark applies"
+    assert pair.in_benchmark_share_count_symbols == 1, "and BBB is not one of its members"
     # the value is AAA's alone: 100,000 x 1/2 = 50,000 -> the holder doubled
     assert pair.share_count.total_return == 1, "BBB's factor moves no rupee of the benchmark"
+
+    lines: list[str] = []
+    r9._section_benchmark(
+        lines.append,
+        benchmark=pair,
+        columns={"All": pf.metrics((), label="All", initial_capital_paise=CAPITAL, days=())},
+    )
+    applied = next(line for line in lines if "What THE BENCHMARK applies" in line)
+    assert "**What THE BENCHMARK applies: 1 share-count factors across 1 of its 1 members**" in \
+        applied, "the printed tally is the benchmark's own, not the universe's"
+    assert "Over the WHOLE walked universe the same tally is 2 factors across 2 symbols" in applied, (
+        "the wider tally stays on the page, stated separately and labelled as what it is"
+    )
 
 
 def test_a_ZERO_LENGTH_holding_is_where_the_two_concurrency_conventions_diverge() -> None:

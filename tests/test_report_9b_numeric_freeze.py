@@ -39,7 +39,7 @@ def _baseline_module():
 
 
 def test_every_numeric_token_of_sections_1_to_9_is_UNCHANGED_by_the_final_edits() -> None:
-    """2,455 tokens, in order. One moved figure anywhere above section 10 turns this red."""
+    """2,457 tokens, in order. One moved figure anywhere above section 10 turns this red."""
     baseline = json.loads(BASELINE_JSON.read_text(encoding="utf-8"))
     module = _baseline_module()
     tokens = module.numeric_tokens(REPORT.read_text(encoding="utf-8"))

@@ -648,6 +648,8 @@ def test_the_benchmark_applies_SHARE_COUNT_events_ONLY_and_excludes_every_cash_d
     # THE benchmark: the bonus alone. 100,000 x 1/2 = 50,000 -> the holder doubled.
     assert pair.share_count.total_return == Fraction(1)
     assert pair.share_count_events == 1 and pair.share_count_symbols == 1
+    assert pair.in_benchmark_share_count_events == 1, "AAA has a first-day close: it is a member"
+    assert pair.in_benchmark_share_count_symbols == 1
     # the mixed reading: 1/2 x 24/25 = 12/25, so the dividend factor is inside its multiple
     assert pair.adjusted.total_return == Fraction(25, 12) - 1
     assert pair.events_applied == 2
@@ -691,8 +693,19 @@ def test_section_10_PUBLISHES_the_ruled_benchmark_and_LABELS_the_two_readings_be
     assert pf.format_pct(benchmark.adjusted.total_return) in mixed_row
     assert pf.format_pct(benchmark.raw.total_return) in raw_row
     # ...and the "and stated" half: what is inside each reading, by kind and by count
-    assert "1 share-count factors across 1 symbols" in text
+    assert "**What THE BENCHMARK applies: 1 share-count factors across 1 of its 1 members**" in \
+        text, "the tally is scoped to the benchmark's own members (REVIEW_9B_FINAL Q2)"
+    assert "Over the WHOLE walked universe the same tally is 1 factors across 1 symbols" in text, (
+        "the universe tally is kept, stated separately and labelled"
+    )
     assert "by event kind: dividend 1" in text
+    # the ruling is quoted, not abridged: its own parenthetical and its attribution are there
+    assert "(491.90% as generated)" in text and "the adjusted one is THE benchmark. Architect." \
+        in text, "REVIEW_9B_FINAL Q1 -- an abridged quotation is not a quotation"
+    assert "ARCHITECT'S RULING (06-Aug-2026), QUESTIONS.md Q-23:" not in text, (
+        "the pointer the architect did not write is outside the quotation"
+    )
+    assert "Quoted BYTE-VERBATIM from the architect's own record in `QUESTIONS.md` Q-23" in text
 
 
 def test_the_traceability_section_no_longer_calls_Q_23_open(tmp_path: Path) -> None:
@@ -834,24 +847,42 @@ def test_section_1_separates_the_ALL_THREE_GATES_figure_from_gate_1P_ALONE(
     The gate-1P share is computed from the register the report already read, over the SETTLED
     symbols only -- a quarantined symbol is not part of the settled universe and must not drag
     the figure down.
+
+    **Both figures are computed** (REVIEW_9B_FINAL finding C2). The headline one used to be a
+    string literal beside the computed narrower one, which pinned it to itself: a register that
+    moved would have moved section 9 and left section 1 alone with the suite green. Its
+    denominator is the WHOLE lake -- every stored symbol-day of every symbol in the register,
+    quarantined included -- while its numerator is the settled symbols' usable days, and those
+    two different domains are exactly what the sentence says out loud.
     """
     run = r9.read_run(write_run(tmp_path, sample_rows()))
     register = {
         "AAA": bt.ResidualEntry(symbol="AAA", status="settled", gate1p_pass=90,
-                                gate1p_total=100, gate1p_no_oracle=0, residual_reason=""),
+                                gate1p_total=100, gate1p_no_oracle=0, residual_reason="",
+                                usable_pass=85),
         "BBB": bt.ResidualEntry(symbol="BBB", status="settled", gate1p_pass=80,
-                                gate1p_total=100, gate1p_no_oracle=0, residual_reason=""),
+                                gate1p_total=100, gate1p_no_oracle=0, residual_reason="",
+                                usable_pass=75),
         "CCC": bt.ResidualEntry(symbol="CCC", status="quarantined", gate1p_pass=0,
-                                gate1p_total=100, gate1p_no_oracle=0, residual_reason=""),
+                                gate1p_total=100, gate1p_no_oracle=0, residual_reason="",
+                                usable_pass=0),
     }
     assert r9._gate1p_share(register) == Fraction(170, 200)
+    assert r9._usable_share(register) == Fraction(160, 300), (
+        "settled usable days over EVERY stored symbol-day, the quarantined symbol's included"
+    )
+    assert r9._usable_share({}) is None and r9._gate1p_share({}) is None
 
     lines: list[str] = []
     r9._section_what_this_is(lines.append, run=run, capital_paise=CAPITAL, register=register)
     text = "\n".join(lines)
     assert "ALL THREE GATES, not the price gate alone" in text
     assert "85.0000%" in text, "gate 1P alone, over the settled universe, printed beside it"
-    assert "93.9317% USABLE" in text
+    assert "53.3333% USABLE" in text, (
+        "the headline share is COMPUTED from this register, not typed: a literal would still "
+        "print the real run's 93.9317% here"
+    )
+    assert "93.9317%" not in text, "the retired literal is gone from the renderer"
     assert "56.6667%" not in text, (
         "the quarantined symbol's 0/100 must not be inside the settled-universe ratio"
     )
@@ -943,8 +974,13 @@ def test_the_two_concurrency_conventions_DISAGREE_and_both_are_printed(tmp_path:
     """One trade closes at exactly the stamp the next opens: the whole question, minimally.
 
     `pf.disclosures` counts the closing position as still open, so it sees TWO at 13:00. The
-    15-minute path closes it at its exit mark and sees ONE. Both are right about their own
-    convention; a report that prints one without naming it is not.
+    HALF-OPEN sweep `entry <= T < exit` closes it at its exit stamp and sees ONE. Both are right
+    about their own convention; a report that prints one without naming it is not.
+
+    **Neither is the 15-minute path's convention** (REVIEW_9B_FINAL finding Q3): that path marks
+    a trade THROUGH its exit candle's close stamp, so it holds the position at T and its own
+    maximum is the pessimistic one. The rendered label carried that misattribution and is pinned
+    here, on the page, rather than only at `concurrency_closing_first`.
     """
     day = date(2020, 1, 6)
     rows = (
@@ -953,11 +989,20 @@ def test_the_two_concurrency_conventions_DISAGREE_and_both_are_printed(tmp_path:
     )
     assert pf.disclosures(rows).max_concurrent_positions.positions == 2
     closing_first = r9.concurrency_closing_first(rows)
-    assert closing_first.positions == 1, "the exit mark ends the position"
+    assert closing_first.positions == 1, "the exit stamp ends the position"
 
     text = render(tmp_path)
     assert "a close at the same stamp counted as still OPEN" in text
-    assert "the 15-minute path's convention: closed AT its exit mark" in text
+    assert "the HALF-OPEN convention `entry <= T < exit`: closed AT its exit stamp" in text
+    assert "the 15-minute path's convention" not in text, (
+        "the half-open row is NOT the 15-minute path's convention -- finding Q3"
+    )
+    assert "**That is not the 15-minute equity path's convention:**" in text, (
+        "section 4 says so where it defines the two rows"
+    )
+    assert "**Neither row is a smaller reading of the 15-minute equity path**" in text, (
+        "and section 11 says so beside them"
+    )
     assert "**Concurrency, and which convention the headline uses.**" in text
     assert text.index("**Concurrency, and which convention") < text.index("## 5. The headline"), (
         "the convention is defined in the definitions block, above the tables"

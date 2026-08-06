@@ -96,11 +96,21 @@ Q17_OUTAGE_NOTE: str = (
 #: and its same-day refinement are quoted VERBATIM beside the readings they decide, which is how
 #: every architect ruling travels in this repo. The figures inside the quote are the architect's
 #: own words about this run; every figure the section PRINTS is computed from the run beneath it.
+#:
+#: BYTE-VERBATIM against QUESTIONS.md's record, and nothing else (REVIEW_9B_FINAL finding Q1, and
+#: the architect's ruling of 06-Aug-2026: *"a quoted architect ruling is BYTE-VERBATIM or it is a
+#: paraphrase outside quotation marks with a citation -- abridged quotations are forbidden"*). Two
+#: things this constant used to do are therefore gone: the ruling's own parenthetical
+#: ``(491.90% as generated)`` is RESTORED, and the ``QUESTIONS.md`` pointer that was inserted into
+#: the architect's opening now lives OUTSIDE the quotation, in the sentence above the blockquote
+#: and in the attribution line beneath it. The one licensed difference is the ASCII fold every
+#: report file carries (``--`` for the record's em dash; src/acumen/config.py's rule).
 BENCHMARK_RULING: str = (
-    "ARCHITECT'S RULING (06-Aug-2026), QUESTIONS.md Q-23: the buy&hold benchmark is the "
-    "SHARE-COUNT-ADJUSTED construction -- buy-and-hold holds UNITS, which multiply through "
-    "bonuses/splits; fixed-unit raw closes falsify wealth at every event. Dividends excluded and "
-    "stated. Both figures remain printed; the adjusted one is THE benchmark. ARCHITECT'S "
+    "ARCHITECT'S RULING (06-Aug-2026), Q-23: the buy&hold benchmark is the "
+    "SHARE-COUNT-ADJUSTED construction (491.90% as generated) -- buy-and-hold holds UNITS, which "
+    "multiply through bonuses/splits; fixed-unit raw closes falsify wealth at every event. "
+    "Dividends excluded and stated. Both figures remain printed; the adjusted one is THE "
+    "benchmark. Architect. ARCHITECT'S "
     "REFINEMENT (06-Aug-2026), Q-23 'and stated': the benchmark applies SHARE-COUNT EVENTS ONLY "
     "(125 factors) = 466.67% -- all cash distributions excluded uniformly, ordinary and special "
     "alike; the mixed 491.90% (special dividends credited) remains printed with one stated line. "
@@ -631,6 +641,13 @@ class BenchmarkPair:
     events_applied: int
     share_count_symbols: int
     share_count_events: int
+    #: The same two tallies, restricted to the symbols the benchmark is actually BUILT from -- the
+    #: ones carrying a close on the first trade date. A factor on a symbol with no first-day close
+    #: is counted by the universe tally above and applied to no rupee of the portfolio, so the
+    #: sentence that begins "What THE BENCHMARK applies" prints THESE (REVIEW_9B_FINAL finding Q2).
+    #: Defaulted, so the eleven kept probes that build a pair by hand are unchanged.
+    in_benchmark_share_count_symbols: int = 0
+    in_benchmark_share_count_events: int = 0
     excluded_by_kind: dict[str, int] = field(default_factory=dict)
     ruling: str = BENCHMARK_RULING
 
@@ -668,6 +685,7 @@ def benchmark_pair(
     per_symbol = manifest["factor_table"]["per_symbol"]
     adjusted_symbols = share_count_symbols = 0
     events = share_events = 0
+    in_bench_symbols = in_bench_events = 0
     excluded: Counter = Counter()
     for symbol in symbols:
         frame = daily_store.daily(symbol, first_day, last_day)
@@ -697,6 +715,11 @@ def benchmark_pair(
             share_count_symbols += 1
             share_events += share_applied
         first_close = series.get(first_day)
+        if first_close is not None and share_applied:
+            # IN the benchmark: E13 buys at the first trade date's close, so a symbol without one
+            # is excluded by `pf.buy_and_hold` and its factors move no rupee of the portfolio.
+            in_bench_symbols += 1
+            in_bench_events += share_applied
         if first_close is None:
             adjusted_closes[symbol] = series
             share_closes[symbol] = series
@@ -719,6 +742,8 @@ def benchmark_pair(
         events_applied=events,
         share_count_symbols=share_count_symbols,
         share_count_events=share_events,
+        in_benchmark_share_count_symbols=in_bench_symbols,
+        in_benchmark_share_count_events=in_bench_events,
         excluded_by_kind=dict(sorted(excluded.items())),
     )
 
@@ -899,12 +924,20 @@ def _column_ties(run: RunData) -> dict[str, tuple[LargestTies, LargestTies]]:
 
 
 def concurrency_closing_first(rows: Sequence[bt.LedgerRow]) -> pf.ConcurrencyPeak:
-    """Max concurrency under the OTHER convention: a position is closed AT its exit mark. PURE.
+    """Max concurrency under the HALF-OPEN convention ``entry <= T < exit``. PURE.
 
     :func:`acumen.portfolio.disclosures` processes an OPEN before a CLOSE at the same stamp, so a
     position closing at T is still counted as open at T -- the pessimistic reading, and the only
-    one that cannot understate what the trader's capital would have had to carry. The 15-minute
-    equity path uses the other convention, because a trade's marks END at its exit candle.
+    one that cannot understate what the trader's capital would have had to carry. This function
+    reverses that order, which closes a position AT its exit stamp and counts exactly
+    ``#{trades with entry <= T < exit}``.
+
+    **It is NOT the 15-minute equity path's convention** (REVIEW_9B_FINAL finding Q3).
+    :func:`acumen.backtest.assemble_trade_paths` marks a trade *through the EXIT candle's close
+    stamp*, so the path HOLDS the position at its exit stamp and its own maximum is the
+    pessimistic one ``disclosures`` reports, not this one. What this function measures is a third
+    reading, printed because it is the optimistic bound of the same quantity and a reader is owed
+    both ends of it -- never because any other artefact on the page counts this way.
 
     Both are defensible and they do not agree, so the report prints BOTH and the definitions
     block names the one the headline figure uses (REVIEW_9B_REPORT finding Q7). This is the same
@@ -1321,6 +1354,24 @@ def _gate1p_share(register: Mapping[str, bt.ResidualEntry]) -> Fraction | None:
     return Fraction(sum(entry.gate1p_pass for entry in settled), total)
 
 
+def _usable_share(register: Mapping[str, bt.ResidualEntry]) -> Fraction | None:
+    """ALL THREE GATES, over the WHOLE lake: settled usable days / every stored symbol-day.
+
+    CONTEXT 4.6 v1.6's headline coverage figure, and the chunk-5B backfill report's own
+    arithmetic: the numerator is the settled symbols' ``usable_pass`` (gate 1 AND gate 2 AND
+    gate 1P), the denominator is every stored symbol-day of every symbol in the register,
+    quarantined ones included -- a day with no raw daily row is a gate-1P FAILURE, not an absence.
+    Computed here from the register the report already read rather than typed beside the narrower
+    :func:`_gate1p_share` (REVIEW_9B_FINAL finding C2: a literal beside a computed figure pins
+    itself to itself, so a register that moved would move section 9 and leave section 1 alone).
+    """
+    total = sum(entry.gate1p_total for entry in register.values())
+    if total <= 0:
+        return None
+    usable = sum(entry.usable_pass for entry in register.values() if entry.status == "settled")
+    return Fraction(usable, total)
+
+
 def _section_what_this_is(add, *, run: RunData, capital_paise: int, register=None, **_) -> None:
     add("## 1. What this is -- and the seven things it is not")
     add("")
@@ -1370,9 +1421,13 @@ def _section_what_this_is(add, *, run: RunData, capital_paise: int, register=Non
     gate1p = _gate1p_share(register or {})
     narrower = ("is not computable from the register this run read" if gate1p is None
                 else f"is {_pct(gate1p, 4)} over the settled universe")
-    add("**The data era is 93.9317% USABLE, not 100% -- and that figure is ALL THREE GATES, not "
-        "the price gate alone.** 93.9317% is CONTEXT 4.6 v1.6's coverage figure: the settled "
-        "symbols' usable stored symbol-days over the WHOLE lake's stored days, so a day refused "
+    usable = _usable_share(register or {})
+    headline = ("not computable from the register this run read" if usable is None
+                else _pct(usable, 4))
+    add(f"**The data era is {headline} USABLE, not 100% -- and that figure is ALL THREE GATES, "
+        f"not the price gate alone.** {headline} is CONTEXT 4.6 v1.6's coverage figure: the "
+        "settled symbols' usable stored symbol-days over the WHOLE lake's stored days, so a day "
+        "refused "
         "for having no candles, for failing the volume reconciliation, for failing price "
         "containment or for candle integrity is outside it equally. The narrower quantity "
         "section 9's `price-proven` column carries -- gate 1P alone, a day whose 1-minute prices "
@@ -1596,9 +1651,12 @@ def _section_definitions(add, *, run: RunData, capital_paise: int, columns, **_)
         "same 15-minute stamp another closes, section 11's `max concurrent positions` counts the "
         "OPEN first -- so a position closing at T is still counted as open at T. That is the "
         "pessimistic reading and the only one that cannot understate what the trader's capital "
-        "would have had to carry. The 15-minute equity path uses the other convention, because a "
-        "trade's marks END at its exit candle, and it therefore reports a smaller maximum. Both "
-        "are printed in section 11 rather than one being chosen silently.")
+        "would have had to carry. The second row is the HALF-OPEN convention `entry <= T < exit` "
+        "-- a position is closed AT its exit stamp -- and it therefore reports a smaller maximum. "
+        "**That is not the 15-minute equity path's convention:** `assemble_trade_paths` marks a "
+        "trade THROUGH its exit candle's close stamp, so the path holds the position at that "
+        "stamp and its own maximum is the pessimistic one in the first row. Both are printed in "
+        "section 11 rather than one being chosen silently.")
     add("* **Rupees.** All money is exact integer paise internally and is printed to the paisa. "
         "No float is produced anywhere in the computation (CONTEXT 7-E11).")
     add("")
@@ -2019,6 +2077,10 @@ def _section_benchmark(add, *, benchmark: BenchmarkPair, columns, **_) -> None:
     add("")
     add(f"> {benchmark.ruling}.")
     add("")
+    add("*Quoted BYTE-VERBATIM from the architect's own record in `QUESTIONS.md` Q-23, ASCII-"
+        "folded like every file in `docs/reports/`. The pointer to that record is this line and "
+        "the sentence above the quotation, not the architect's words.*")
+    add("")
     add("| Reading | Start value | End value | Total return |")
     add("|---|---:|---:|---:|")
     add(f"| **THE BENCHMARK -- share-count events only (bonus / split / rights)** | "
@@ -2039,11 +2101,18 @@ def _section_benchmark(add, *, benchmark: BenchmarkPair, columns, **_) -> None:
         f"executed trade -- and held to **{benchmark.last_day.isoformat()}**.")
     add(f"* Symbols in the benchmark: **{_num(len(benchmark.raw.symbols))}**. "
         f"{benchmark.raw.note}.")
-    add(f"* **What THE BENCHMARK applies: {_num(benchmark.share_count_events)} share-count "
-        f"factors across {_num(benchmark.share_count_symbols)} symbols** -- every bonus, split "
-        "and rights factor inside the hold window and nothing else, each one taken from the "
-        "factor table THIS RUN wired, which is the same `P x pending factors` the bias engine "
-        "applies (CONTEXT 3.2 / 7-E11) and never a second source.")
+    add(f"* **What THE BENCHMARK applies: "
+        f"{_num(benchmark.in_benchmark_share_count_events)} share-count factors across "
+        f"{_num(benchmark.in_benchmark_share_count_symbols)} of its "
+        f"{_num(len(benchmark.share_count.symbols))} members** -- every bonus, split and rights "
+        "factor inside the hold window that sits on a symbol the portfolio actually holds, and "
+        "nothing else, each one taken from the factor table THIS RUN wired, which is the same "
+        "`P x pending factors` the bias engine applies (CONTEXT 3.2 / 7-E11) and never a second "
+        f"source. Over the WHOLE walked universe the same tally is "
+        f"{_num(benchmark.share_count_events)} factors across "
+        f"{_num(benchmark.share_count_symbols)} symbols -- that figure is stated here because it "
+        "is the one the factor table reports, and the difference is factors on symbols with no "
+        "close on the first trade date, which E13 excludes and section 10 names above.")
     add(f"* **The one stated line the ruling asks for, on the mixed reading.** The mixed row "
         f"applies all {_num(benchmark.events_applied)} non-unit factors in the table, which is "
         f"the {_num(benchmark.share_count_events)} share-count events plus "
@@ -2094,8 +2163,8 @@ def _section_take_all(add, *, disclosures: pf.Disclosures, capital_flag_report, 
         f"**{_num(peak_positions.positions)}**, first reached {_stamp(peak_positions.at)}, "
         f"carrying {_money(peak_positions.notional_paise)} of notional |")
     if path_concurrency is not None:
-        add(f"| Max concurrent positions (the 15-minute path's convention: closed AT its exit "
-            f"mark) | **{_num(path_concurrency.positions)}**, first reached "
+        add(f"| Max concurrent positions (the HALF-OPEN convention `entry <= T < exit`: closed AT "
+            f"its exit stamp) | **{_num(path_concurrency.positions)}**, first reached "
             f"{_stamp(path_concurrency.at)}, carrying "
             f"{_money(path_concurrency.notional_paise)} of notional |")
     add(f"| Peak simultaneous notional | **{_money(peak_notional.notional_paise)}** at "
@@ -2111,8 +2180,10 @@ def _section_take_all(add, *, disclosures: pf.Disclosures, capital_flag_report, 
             "only in what happens when one trade opens at the same 15-minute stamp another "
             "closes: the first row counts the closing position as still open (the pessimistic "
             "reading, and the one every other figure on this page is consistent with), the "
-            "second closes it at its exit mark, which is where its 15-minute marks actually "
-            "stop. Section 4 defines both; neither is a correction of the other.")
+            "second closes it at its exit stamp. **Neither row is a smaller reading of the "
+            "15-minute equity path**: that path marks a trade THROUGH its exit candle's close "
+            "stamp, so it holds the position there and its own maximum is the first row's. "
+            "Section 4 defines both; neither is a correction of the other.")
         add("")
     add("**This is the disclosure that matters most on this page.** A portfolio that at its peak "
         f"held {_num(peak_notional.positions)} positions worth "

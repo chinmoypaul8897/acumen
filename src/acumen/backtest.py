@@ -674,6 +674,11 @@ class ResidualEntry:
     gate1p_total: int
     gate1p_no_oracle: int
     residual_reason: str
+    #: Days that pass gate 1 AND gate 2 AND gate 1P -- the chunk-5B ledger's own ``usable_pass``.
+    #: Carried so the ALL-THREE-GATES coverage figure can be COMPUTED from the register a reader
+    #: already has in hand rather than typed beside the narrower gate-1P one (REVIEW_9B_FINAL
+    #: finding C2). Defaulted, so every existing positional construction is unchanged.
+    usable_pass: int = 0
 
     @property
     def price_proven_ratio(self) -> Fraction | None:
@@ -724,6 +729,7 @@ def load_residual_register(path: Path) -> dict[str, ResidualEntry]:
             gate1p_total=int(row.get("gate1p_total", 0)),
             gate1p_no_oracle=int(row.get("gate1p_no_oracle", 0)),
             residual_reason=str(row.get("residual_reason", "")),
+            usable_pass=int(row.get("usable_pass", 0)),
         )
     return register
 
