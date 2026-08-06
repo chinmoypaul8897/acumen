@@ -24,7 +24,7 @@ This is the result of the strategy the trader specified, applied without discret
 
 **The universe is TODAY's list, walked backwards** (CONTEXT 7-E5). The 204 symbols are the settled members of the sealed 210-symbol F&O universe as it stands now, and the backtest runs them from 2016. **A stock that was in the index in 2017 and has since left is not here, and a stock that entered in 2024 is walked from 2016 anyway.** That is survivorship bias, it flatters any strategy that trades liquid large caps, and it is an engineering default disclosed rather than a trader instruction. Point-in-time membership is a documented upgrade (OPEN-5).
 
-**The data era is 93.9317% price-proven, not 100%.** The gates refuse a day whose 1-minute prices cannot be reconciled against the exchange's own bhavcopy, and refused days are counted, never traded. Section 3a partitions all 495,312 walked days and section 9 carries each symbol's own coverage beside its figures; the residual is disclosed in the register, not chased.
+**The data era is 93.9317% USABLE, not 100% -- and that figure is ALL THREE GATES, not the price gate alone.** 93.9317% is CONTEXT 4.6 v1.6's coverage figure: the settled symbols' usable stored symbol-days over the WHOLE lake's stored days, so a day refused for having no candles, for failing the volume reconciliation, for failing price containment or for candle integrity is outside it equally. The narrower quantity section 9's `price-proven` column carries -- gate 1P alone, a day whose 1-minute prices reconcile against the exchange's own bhavcopy -- is 97.8444% over the settled universe. The two are different measurements over different denominators, and averaging the section-9 column will never reach the headline. Refused days are counted, never traded: section 3a partitions all 495,312 walked days and section 9 carries each symbol's own coverage beside its figures; the residual is disclosed in the register, not chased.
 
 **Q44 is unconfirmed.** The manifest carries, verbatim: *"PENDING TRADER CONFIRMATION OF Q44 (gap-rule example, POC 2032)"*. If his answer surprises, CONTEXT 3.4 changes, the spec version bumps and the whole run is done again; this ledger is then superseded, retained and labelled, never deleted (the architect's GO ruling, 31-Jul-2026).
 
@@ -181,6 +181,7 @@ The architect's E13 presentation ruling (30-Jul-2026) requires this block, and r
 * **CAGR.** Compound annual growth of the equity curve over the WALKED calendar span, years measured as `(last day - first day) / 365`. It is `undefined` when the final equity is at or below zero, because a negative base has no real root and printing one would be inventing a number.
 * **MFE / MAE.** Measured over the candles AFTER the entry candle up to and including the exit candle (CONTEXT 7-E7: the entry candle cannot move the position). They are **BEFORE COSTS** -- an excursion is a PRICE move against the entry, so neither figure carries the Rs 100 round trip. They bracket a trade's GROSS PnL, not its net.
 * **Notional.** `qty x entry price`. A trade's own percentage return is `net / notional`, which is the only percentage a single trade has.
+* **Concurrency, and which convention the headline uses.** A position OPENS at its entry candle's close and CLOSES at its exit candle's close. When one trade opens at the same 15-minute stamp another closes, section 11's `max concurrent positions` counts the OPEN first -- so a position closing at T is still counted as open at T. That is the pessimistic reading and the only one that cannot understate what the trader's capital would have had to carry. The 15-minute equity path uses the other convention, because a trade's marks END at its exit candle, and it therefore reports a smaller maximum. Both are printed in section 11 rather than one being chosen silently.
 * **Rupees.** All money is exact integer paise internally and is printed to the paisa. No float is produced anywhere in the computation (CONTEXT 7-E11).
 
 ## 5. The headline
@@ -195,7 +196,7 @@ The architect's E13 presentation ruling (30-Jul-2026) requires this block, and r
 | Max drawdown, 15-minute path | Rs 16,864,934.22 (13174.01%), 2016-10-07 11:45 -> 2026-07-30 15:00, 40,909 observation(s) of 40,981, recovered never inside the span |
 | CAGR | undefined -- the final equity is at or below zero, and a negative base has no real root |
 | Return on initial capital | -16836.02% |
-| Best year | 2016: -Rs 225,598.97 |
+| Best year | 2016: -Rs 225,598.97 -- **a PARTIAL year**, 61 walked days (2016-10-03 .. 2016-12-30), neither annualized nor comparable to a full one; the best FULL year is 2018 at -Rs 1,178,849.98 |
 | Worst year | 2023: -Rs 2,098,184.07 |
 | Final equity | -Rs 16,736,018.20 on Rs 100,000.00 of capital |
 
@@ -227,10 +228,10 @@ Each column keeps every walked day, so the three daily series have the same inde
 | Avg loss | -Rs 1,011.09 | -Rs 1,009.50 | -Rs 1,012.60 |
 | Avg profit / avg loss | 1.8905 | 1.8670 | 1.9091 |
 | Largest win | Rs 2,900.00 | Rs 2,900.00 | Rs 2,900.00 |
-| Largest win, % of its own notional | 0.29% | 0.13% | 0.29% |
+| Largest win, % of notional -- RANGE across the tied trades | 0.0196% .. 8.1232% across the 5,383 trades tied at Rs 2,900.00 (notionals Rs 35,700.00 .. Rs 14,800,000.00) | 0.0213% .. 8.1232% across the 2,205 trades tied at Rs 2,900.00 (notionals Rs 35,700.00 .. Rs 13,601,000.00) | 0.0196% .. 7.8378% across the 3,178 trades tied at Rs 2,900.00 (notionals Rs 37,000.00 .. Rs 14,800,000.00) |
 | Largest win, % of gross profit | 0.00255% | 0.00579% | 0.00457% |
 | Largest loss | -Rs 1,100.00 | -Rs 1,100.00 | -Rs 1,100.00 |
-| Largest loss, % of its own notional | -0.23% | -0.23% | -0.42% |
+| Largest loss, % of notional -- RANGE across the tied trades | -6.6667% .. -0.0040% across the 20,939 trades tied at -Rs 1,100.00 (notionals Rs 16,500.00 .. Rs 27,408,000.00) | -3.7931% .. -0.0066% across the 9,718 trades tied at -Rs 1,100.00 (notionals Rs 29,000.00 .. Rs 16,781,000.00) | -6.6667% .. -0.0040% across the 11,221 trades tied at -Rs 1,100.00 (notionals Rs 16,500.00 .. Rs 27,408,000.00) |
 | Largest loss, % of gross loss | 0.00084% | 0.00174% | 0.00164% |
 | Return on initial capital | -16836.02% | -13248.75% | -3587.27% |
 | Final equity | -Rs 16,736,018.20 | -Rs 13,148,749.37 | -Rs 3,487,268.83 |
@@ -244,6 +245,8 @@ Each column keeps every walked day, so the three daily series have the same inde
 | Trading days in the series | 2,428 | 2,428 | 2,428 |
 
 **`winners x avg profit == gross profit` is an identity here, not an approximation** -- that is what one basis and one population buys, and a reader can check it on any column with a calculator.
+
+**Why the two percent-of-notional rows carry a RANGE.** A fixed-R book manufactures TIES: the target pays `qty x 3 x risk` and the stop pays `-qty x risk`, so thousands of trades land on exactly the same rupee figure while their notionals differ by three orders of magnitude. A single trade's `net / notional` at the extreme would then be decided by the ledger's row order and by nothing on this page, so what is printed is the range over EVERY trade tied at that figure, with the size of the tied set beside it. The rupee extremes above them are exact and unaffected.
 
 ### 6a. Outliers, on both branches
 
@@ -273,7 +276,12 @@ The architect's GO ruling, condition (3): one format on both branches, so a run 
 * Above the upper fence: 0 worth Rs 0.00 = 0.00% of gross profit.
 * Below the lower fence: 0 worth Rs 0.00 = 0.00% of gross loss.
 
-A fixed-R strategy bounds its own trades -- a stop pays `-qty x risk` and a target pays `qty x 3 x risk`, so before costs every trade lands in a narrow band and the fences sit outside it. An outlier count is therefore a statement about the SIZING rule as much as about the market.
+A fixed-R strategy bounds its own trades -- a stop pays `-qty x risk` and a target pays `qty x 3 x risk`, so before costs every trade lands in a narrow band. Whether the Tukey fences sit OUTSIDE that band is then a property of the distribution and not of the sizing rule, and it does not hold on every column here, so the claim is made per column rather than in general (REVIEW_9B_REPORT finding Q1).
+
+* **All and Short**: the fences do sit outside the band -- All spans [-Rs 3,683.05, Rs 3,206.15] and contains every one of its 188,345 trades; Short spans [-Rs 3,950.42, Rs 3,651.78] and contains every one of its 99,000 trades.
+* **Long**: the fences do NOT. Q3 sits at Rs 440.00 and the IQR is Rs 1,539.60, which puts the upper fence at Rs 2,749.40 -- BELOW this column's largest win of Rs 2,900.00 -- so **13,243** of its 89,345 trades are outliers, worth Rs 38,311,425.93: 13,243 above the upper fence (76.48% of this column's gross profit) and 0 below the lower one (0.00% of its gross loss). A column whose losers outnumber its winners far enough pulls Q3 down below the target payout, and the upper fence comes down with it.
+
+An outlier count is therefore a statement about the SIZING rule and about the DISTRIBUTION the sizing rule met, and the two do not always agree.
 
 ## 7. Equity, drawdown and run-up
 
@@ -566,24 +574,26 @@ Those are the symbols whose early history the vendor's feed serves in a differen
 
 **Two things this table does NOT carry, said out loud.** Each symbol's equity curve is seeded at the whole run's opening capital, so a per-symbol drawdown is that symbol's own fall in rupees and its percentage would be against a capital base the symbol never had to itself -- only the rupee figure is printed. And the per-symbol rows carry no 15-minute path: 15-minute path NOT supplied to this metric set -- it is assembled in the I/O layer by acumen.backtest.assemble_trade_paths, which is the layer that holds the candles. The path is a portfolio statistic and section 7 is where it is reported.
 
-## 10. Buy & hold -- BOTH readings, and neither published
+## 10. Buy & hold -- THE benchmark, and the two readings printed beside it
 
 CONTEXT 7-E13 defines the benchmark as an *equal-weight portfolio of the traded universe, bought at first trade date's close, held to period end*. It fixes the construction and is silent on the PRICE DOMAIN of those closes, and over ten years that silence is not a detail: a holder's SHARE COUNT follows every split and bonus, so a 1:1 bonus halves the quoted price while doubling the shares held and the raw reading understates that symbol by exactly the factor.
 
-**This report does not decide it.** Under CLAUDE.md's STOP rule the silence is a class-A question, raised as **Q-23**, and both readings are MEASURED here so the architect can rule with the numbers in hand rather than in the abstract.
+**The architect has ruled it (QUESTIONS.md Q-23, 06-Aug-2026, CLOSED).** THE BENCHMARK is the SHARE-COUNT reading: buy-and-hold holds UNITS, and units multiply through bonuses, splits and rights issues and through nothing else. Cash distributions are excluded UNIFORMLY -- ordinary and special alike -- so the benchmark is a price-and-units return on the same terms as the strategy's own PnL, which never receives a distribution either.
 
-> QUESTIONS.md Q-23 (class A, OPEN, raised by this session): CONTEXT 7-E13 defines the benchmark as an equal-weight PORTFOLIO of the traded universe 'bought at first trade date's close, held to period end' but does not say which price domain its closes are in. Over ten years that is not a detail: a holder's SHARE COUNT follows every split and bonus, and 107 such events sit inside this span. Both readings are MEASURED below and NEITHER is published as the benchmark until the architect rules.
+> ARCHITECT'S RULING (06-Aug-2026), QUESTIONS.md Q-23: the buy&hold benchmark is the SHARE-COUNT-ADJUSTED construction -- buy-and-hold holds UNITS, which multiply through bonuses/splits; fixed-unit raw closes falsify wealth at every event. Dividends excluded and stated. Both figures remain printed; the adjusted one is THE benchmark. ARCHITECT'S REFINEMENT (06-Aug-2026), Q-23 'and stated': the benchmark applies SHARE-COUNT EVENTS ONLY (125 factors) = 466.67% -- all cash distributions excluded uniformly, ordinary and special alike; the mixed 491.90% (special dividends credited) remains printed with one stated line. Uniform exclusion is the principle; the threshold-mixed figure was an artifact of the CA engine's 2% rule, not an economic choice. Q-23 CLOSED.
 
 | Reading | Start value | End value | Total return |
 |---|---:|---:|---:|
-| RAW closes, exactly as stored | Rs 100,000.00 | Rs 398,922.17 | 298.92% |
-| Share-count ADJUSTED, through the run's own factor table | Rs 100,000.00 | Rs 591,899.89 | 491.90% |
+| **THE BENCHMARK -- share-count events only (bonus / split / rights)** | Rs 100,000.00 | **Rs 566,668.64** | **466.67%** |
+| Mixed -- share-count events AND the special dividends CONTEXT 4.2 gives a factor (NOT the benchmark) | Rs 100,000.00 | Rs 591,899.89 | 491.90% |
+| RAW closes, exactly as stored -- no adjustment of any kind (NOT the benchmark) | Rs 100,000.00 | Rs 398,922.17 | 298.92% |
 | The strategy, over the same window | Rs 100,000.00 | -Rs 16,736,018.20 | -16836.02% |
 
 * Bought at the close of **2016-10-03** -- the run's first executed trade -- and held to **2026-07-30**.
 * Symbols in the benchmark: **134**. equal-weight, fractional units, no rebalancing (CONTEXT 7-E13); excluded (no close on the first trade date): 360ONE, ABCAPITAL, ADANIENSOL, ADANIGREEN, AMBER, ANGELONE, AUBANK, BANDHANBNK, BDL, BSE, CAMS, CDSL, CGPOWER, COCHINSHIP, COFORGE, DALBHARAT, DELHIVERY, DIXON, DMART, ETERNAL, FORCEMOT, GMRAIRPORT, GVT&D, HAL, HDFCAMC, HDFCLIFE, HYUNDAI, ICICIGI, IDFCFIRSTB, INDUSTOWER, IREDA, IRFC, JIOFIN, KALYANKJIL, KAYNES, KFINTECH, KPITTECH, LAURUSLABS, LICI, LODHA, LTF, LTM, MANKIND, MAXHEALTH, MAZDOCK, MOTHERSON, NAM-INDIA, NUVAMA, NYKAA, PATANJALI, PAYTM, PNBHOUSING, POLICYBZR, POLYCAB, POWERINDIA, PREMIERENE, RVNL, SBICARD, SBILIFE, SHRIRAMFIN, SONACOMS, SWIGGY, TATACONSUM, TIINDIA, TMPV, UNITDSPR, UNOMINDA, VMM, WAAREEENER, ZYDUSLIFE.
-* The adjustment touches **115** symbols and applies **433** share-count factors, each one taken from the factor table THIS RUN wired -- the same `P x pending factors` the bias engine applies (CONTEXT 3.2 / 7-E11), never a second source.
-* Both readings are PRICE returns. Ordinary dividends carry `k = 1` under CONTEXT 4.2's 2% threshold and are not added back on either side, which matches the strategy's own PnL: it never receives a dividend either.
+* **What THE BENCHMARK applies: 125 share-count factors across 86 symbols** -- every bonus, split and rights factor inside the hold window and nothing else, each one taken from the factor table THIS RUN wired, which is the same `P x pending factors` the bias engine applies (CONTEXT 3.2 / 7-E11) and never a second source.
+* **The one stated line the ruling asks for, on the mixed reading.** The mixed row applies all 433 non-unit factors in the table, which is the 125 share-count events plus **308** the benchmark leaves out (by event kind: dividend 308). CONTEXT 4.2 gives a dividend at or above 2% of the cum close a factor of `1 - D/P_cum` and everything below it `k = 1`, so the mixed row credits the special distributions back into the benchmark while the ordinary ones stay out -- divided at a boundary the CA engine owns rather than an economic one. It is worth **25.23%** of opening capital, i.e. 5.13% of its own figure. It is printed because it is the figure the ruling first named and because a reader should be able to see the size of the difference; it is NOT the benchmark.
+* **Dividends, uniformly.** THE BENCHMARK adds back no distribution of any kind, neither the ordinary ones CONTEXT 4.2 leaves at `k = 1` nor the special ones it gives a factor. That is the Q-23 refinement's principle -- uniform exclusion -- and it is also what makes the comparison fair: the strategy's own PnL never receives a dividend.
 
 ## 11. The take-all disclosures (CONTEXT 3.5, Round-3 Q40 option d)
 
@@ -591,12 +601,15 @@ The trader's own answer requires these, and they are the price of the no-limits 
 
 | Disclosure | Value |
 |---|---|
-| Max concurrent positions | **90**, first reached 2026-05-07 12:45, carrying Rs 29,033,458.63 of notional |
+| Max concurrent positions (a close at the same stamp counted as still OPEN) | **90**, first reached 2026-05-07 12:45, carrying Rs 29,033,458.63 of notional |
+| Max concurrent positions (the 15-minute path's convention: closed AT its exit mark) | **77**, first reached 2026-03-20 12:30, carrying Rs 18,698,137.26 of notional |
 | Peak simultaneous notional | **Rs 42,148,077.61** at 2023-10-31 13:00, across 39 positions |
 | That peak against the Rs 1,00,000 capital | **421.4808x** |
 | Largest single-trade notional | Rs 27,408,000.00 |
 | Most trades in one day | 151 |
 | Executed trades | 188,345 |
+
+**The two concurrency rows are two CONVENTIONS, not a disagreement.** They differ only in what happens when one trade opens at the same 15-minute stamp another closes: the first row counts the closing position as still open (the pessimistic reading, and the one every other figure on this page is consistent with), the second closes it at its exit mark, which is where its 15-minute marks actually stop. Section 4 defines both; neither is a correction of the other.
 
 **This is the disclosure that matters most on this page.** A portfolio that at its peak held 39 positions worth Rs 42,148,077.61 against Rs 1,00,000 of capital is not a portfolio the trader's cash could have carried; the run takes every signal because he asked for the honest numbers with no limits, and this is what no limits actually meant. Which trades his capital could not have taken is the Q40-d FLAG question, and it is not computed:
 
@@ -720,17 +733,19 @@ CONTEXT 3.5 asks for the distribution, not a summary of it. The index is every W
 
 REVIEW_9B_FIXES finding **R10** is discharged here. The fix arc disclosed its own cost in ROWS only, and a refused day is not merely a row: it is a day that would have carried a trade. Two refusal classes have a counterfactual on disk -- the crashed run walked those very days under the pre-ruling code -- and they are priced from it. The rest have NO counterfactual anywhere, because the crashed run refused them for the same reason this one does; pricing those would need a re-simulation that deliberately disables a gate, which this report does not do and does not estimate around.
 
-| Refusal reason | Days | Share of the walk | Trades those days carried, measured | Their net PnL | Evidence |
-|---|---:|---:|---:|---:|---|
-| no stored 1-minute candles for this symbol-day | 75,195 | 15.181% | - | - | none -- the crashed run refused these days for the same reason |
-| gate 1 (volume reconciliation) | 6,056 | 1.223% | - | - | none -- the crashed run refused these days for the same reason |
-| gate-1P (per-day price containment) | 5,157 | 1.041% | - | - | none -- the crashed run refused these days for the same reason |
-| CONTEXT 7-E2 non-standard session (stored candles outside 09:15-15:30) | 1,632 | 0.329% | - | - | none -- the crashed run refused these days for the same reason |
-| no POC for the day (CONTEXT 3.3): no-poc-no-candles-in-window | 288 | 0.058% | - | - | none -- the crashed run refused these days for the same reason |
-| no bias yet (CONTEXT 3.2 seeding: not seeded) | 217 | 0.044% | - | - | none -- the crashed run refused these days for the same reason |
-| bias unresolvable (CONTEXT 3.2 pair could not be assembled): minutes-ungated | 210 | 0.042% | 13 | -Rs 7,358.35 | the crashed run's 103 retained shards walked these days under the pre-ruling code; 13 of them executed a trade there |
-| gate 2 (candle integrity) | 47 | 0.009% | 7 | -Rs 3,698.60 | the crashed run's 103 retained shards walked these days under the pre-ruling code; 7 of them executed a trade there |
-| bias suppressed across a demerger/rights ex-date (CONTEXT 3.2) | 22 | 0.004% | - | - | none -- the crashed run refused these days for the same reason |
+| Refusal reason | Days | Share of the walk | Days with a counterfactual | Trades they carried | Their net PnL | Evidence |
+|---|---:|---:|---:|---:|---:|---|
+| no stored 1-minute candles for this symbol-day | 75,195 | 15.181% | - | - | - | none -- the crashed run refused these days for the same reason |
+| gate 1 (volume reconciliation) | 6,056 | 1.223% | - | - | - | none -- the crashed run refused these days for the same reason |
+| gate-1P (per-day price containment) | 5,157 | 1.041% | - | - | - | none -- the crashed run refused these days for the same reason |
+| CONTEXT 7-E2 non-standard session (stored candles outside 09:15-15:30) | 1,632 | 0.329% | - | - | - | none -- the crashed run refused these days for the same reason |
+| no POC for the day (CONTEXT 3.3): no-poc-no-candles-in-window | 288 | 0.058% | - | - | - | none -- the crashed run refused these days for the same reason |
+| no bias yet (CONTEXT 3.2 seeding: not seeded) | 217 | 0.044% | - | - | - | none -- the crashed run refused these days for the same reason |
+| bias unresolvable (CONTEXT 3.2 pair could not be assembled): minutes-ungated | 210 | 0.042% | 105 | 13 | -Rs 7,358.35 | 103 of the crashed run's shards survive, and they walked 105 of these 210 days under the pre-ruling code; 13 of those 105 executed a trade there |
+| gate 2 (candle integrity) | 47 | 0.009% | 18 | 7 | -Rs 3,698.60 | 103 of the crashed run's shards survive, and they walked 18 of these 47 days under the pre-ruling code; 7 of those 18 executed a trade there |
+| bias suppressed across a demerger/rights ex-date (CONTEXT 3.2) | 22 | 0.004% | - | - | - | none -- the crashed run refused these days for the same reason |
+
+**The trade counts have their own denominator, and it is the fourth column, not the second.** Only 103 of 204 shards survived the crash, so the counterfactual exists for a SUBSET of each priced class's days. A reader who divides a trade count by the `Days` column is dividing by days no evidence was ever read for; the measured base is the `Days with a counterfactual` column beside it (REVIEW_9B_REPORT finding Q6). Nothing here is scaled up from that subset to the whole class, and this report does not estimate what the unwalked remainder would have been.
 
 **Read the priced rows carefully.** They are what the refused days DID produce under a superseded reading of the spec, not what they would be worth today. The gate-2 completion refuses a day whose 1-minute bar is impossible; the trades it removes were computed FROM that impossible bar. Removing them is the point -- *corrupt days are refused, never repaired* -- and the figure is published so the cost of that principle is stated in rupees rather than only in coverage.
 
@@ -871,10 +886,10 @@ Two further shapes are worth naming because they are nearly-never rather than ne
 | Every E13 metric | `acumen.portfolio`, pure and reviewed; this report supplies rows and renders what comes back | CONTEXT 7-E13 |
 | The 15-minute path | `acumen.backtest.assemble_trade_paths` over the same 15-minute aggregation the signal engine used | QUESTIONS.md Q-16(b) |
 | Per-symbol coverage | the disclosed-residual register, read before any per-symbol statistic | CONTEXT 4.6 |
-| The benchmark's closes | the raw daily store; the adjustment factors from THIS run's own factor table | CONTEXT 7-E13 / 4.2 |
+| The benchmark's closes | the raw daily store; the SHARE-COUNT factors (bonus / split / rights) from THIS run's own factor table | CONTEXT 7-E13 / 4.2, QUESTIONS.md Q-23 (ruled and refined 06-Aug-2026, CLOSED) |
 | The refusal pricing | the crashed run's retained shards, named per class | REVIEW_9B_FIXES R10 |
 | The rare-shape witnesses | the ledger's own flags, recounted against the manifest's counters | CONTEXT 7-E2 / Q-17 / Q-21 |
 
-**Nothing on this page is estimated, modelled or extrapolated.** Where a number could not be measured it is absent and says why: the capital-infeasibility flags (Q43 pending), the benchmark's price domain (Q-23 open, both readings shown), the foregone trades on refusal classes with no counterfactual (section 11b), and the per-symbol 15-minute paths (section 9).
+**Nothing on this page is estimated, modelled or extrapolated.** Where a number could not be measured it is absent and says why: the capital-infeasibility flags (Q43 pending), the foregone trades on refusal classes with no counterfactual (section 11b), and the per-symbol 15-minute paths (section 9). The benchmark's price domain is no longer among them: Q-23 is RULED and CLOSED, section 10 publishes the benchmark the ruling names, and the two other readings are printed beside it and labelled as not being it.
 
 Ledger sha256 `c70a72b097879914a3026331c1e651b70c7e6052327d0f34121fd30909a4d134`; manifest sha256 `2594c6e81d404029c655645a6eb3d8b5fe58d02a0be1891ec9040aebcd25b764`.
