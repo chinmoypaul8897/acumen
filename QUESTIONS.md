@@ -3462,7 +3462,7 @@ already been carried out correctly by hand.
 
 ---
 
-## Q-23 · chunk 9B REPORT · class A · **RULED 06-Aug-2026 — the ruling is recorded below; the report's section 10 does NOT yet publish it (the one open edit)** · was blocking ONE figure: CONTEXT 7-E13's buy&hold benchmark
+## Q-23 · chunk 9B REPORT · class A · **CLOSED 06-Aug-2026 — ruled, refined, and PUBLISHED by the FINAL-EDITS session** · was blocking ONE figure: CONTEXT 7-E13's buy&hold benchmark
 
 **Question.** CONTEXT 7-E13 defines the benchmark as *"equal-weight portfolio of the traded
 universe, bought at first trade date's close, held to period end (engineering default, disclosed
@@ -3574,4 +3574,42 @@ reviews; it does not fix. What the ruling means for the artefact, verified rathe
 * **Nothing else in the report depends on this.** Verified: the benchmark is computed in
   `benchmark_pair`, consumed by `_section_benchmark`, and reaches no metric, no ledger row and
   no other section.
+
+---
+
+**ARCHITECT'S REFINEMENT (relayed to the chunk-9B FINAL-EDITS session, 06-Aug-2026), verbatim
+— this answers the second of the two riders recorded above and CLOSES the item:**
+
+> "ARCHITECT'S REFINEMENT (06-Aug-2026), Q-23 'and stated': the benchmark applies SHARE-COUNT EVENTS ONLY (125 factors) = 466.67% — all cash distributions excluded uniformly, ordinary and special alike; the mixed 491.90% (special dividends credited) remains printed with one stated line. Uniform exclusion is the principle; the threshold-mixed figure was an artifact of the CA engine's 2% rule, not an economic choice. Q-23 CLOSED."
+
+**EXECUTED by the chunk-9B FINAL-EDITS session (06-Aug-2026).** Both riders are discharged in
+`src/acumen/report_9b.py`, and the report was regenerated from it:
+
+- **Rider 1 — the ruling is now PUBLISHED.** `BENCHMARK_STOP` is gone; `BENCHMARK_RULING` carries
+  the ruling AND this refinement verbatim and is quoted in section 10. The section is retitled
+  *"Buy & hold -- THE benchmark, and the two readings printed beside it"*, the share-count row is
+  labelled **THE BENCHMARK**, and the other two rows are labelled *(NOT the benchmark)*. Section
+  13 no longer lists the benchmark's price domain among the things that could not be measured.
+  **B275 is re-pointed** by **B282** (this session's `decisions:`): both readings computed and
+  neither published was right under the STOP rule and is what let the architect rule with numbers
+  in hand; it is superseded, not reversed.
+- **Rider 2 — the exclusion is by KIND, uniformly.** `SHARE_COUNT_KINDS = ("bonus", "split",
+  "rights")` is the only thing THE benchmark applies. Measured over this run, unchanged from what
+  the review re-derived independently: **125** share-count factors across **86** symbols give
+  **Rs 566,668.64 = 466.67%**; the **308** special-dividend factors CONTEXT 4.2 gives a
+  `k = 1 - D/P_cum` are excluded, and the mixed reading that applies all **433** stays printed
+  with the stated line the refinement asks for — **+25.23 pp of opening capital, 5.13% of its own
+  figure**. RAW (298.92%) stays printed too, labelled. The exclusion is by event kind and not by
+  size, so the ordinary dividends already at `k = 1` and the special ones above the 2% threshold
+  leave the benchmark on the same terms: the threshold is the CA engine's boundary, not an
+  economic one.
+- **No number outside section 10 moved**, proved rather than asserted:
+  `docs/evidence/chunk9b_report_numeric_baseline.{py,json}` freezes every numeric token of
+  sections 1..9 of the pre-edit report and
+  `tests/test_report_9b_numeric_freeze.py` re-extracts them from the regenerated file.
+- The other event kinds in the run's factor table are inert here, and that was checked rather
+  than assumed: enumerating every `in_span` entry inside the hold window, the ONLY non-unit
+  factors are 77 bonus + 35 split + 13 rights + 308 special dividends. Buybacks and the ordinary
+  and near-threshold dividends all carry `k = 1`, so they are already invisible to every reading,
+  and the 308 special dividends are the whole of what THE benchmark's by-kind exclusion removes.
 
