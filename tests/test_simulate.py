@@ -111,9 +111,16 @@ def priced(
 # THE GOLDEN MONEY TABLE -- CONTEXT 8's F1-F4 and every mirror, at PnL level
 # ==============================================================================================
 #
+# The two F1/F2 rows are the POC-2032 candles, which CONTEXT v1.8 section 8 now labels the
+# low == POC boundary ILLUSTRATION rather than F1/F2 themselves (the trader's Round-4
+# diagram-answer makes his example a GAP day at POC 2030). The numbers are untouched -- the
+# architect's ruling is explicit that nothing is re-measured -- and the gap branch keeps its own
+# PnL-level golden here in F4 (prior close 2028, risk 14.00, qty 71), which section 8 still names
+# the gap witness. See QUESTIONS.md ROUND-4 RECEIPTS (06-Aug-2026).
+#
 #  case              side  entry   stop    target  risk   qty  exit         gross      net
-#  F1                long  2037    2032    2052     5.00  200  target     +3,000.00 +2,900.00
-#  F2                long  2037    2032    2052     5.00  200  target     +3,000.00 +2,900.00
+#  F1 illustration   long  2037    2032    2052     5.00  200  target     +3,000.00 +2,900.00
+#  F2 illustration   long  2037    2032    2052     5.00  200  target     +3,000.00 +2,900.00
 #  F3                short 1980    1988    1956     8.00  125  target     +3,000.00 +2,900.00
 #  F4 (gap)          long  2042    2028    2084    14.00   71  target     +2,982.00 +2,882.00
 #  F4 stop variant   long  2042    2028    2084    14.00   71  stop         -994.00 -1,094.00
@@ -165,8 +172,9 @@ F4_SHORT_BARS = F4_SHORT_HEAD + (
 )
 
 
-def test_f1_golden_money_target_hit_pays_three_r_minus_the_cost() -> None:
-    """**F1 at PnL level.** CONTEXT 8 F1 (v1.4, POC 2032): entry 2037, SL 2032, TP 2052.
+def test_illustration_money_target_hit_pays_three_r_minus_the_cost() -> None:
+    """**The F1 low == POC ILLUSTRATION at PnL level** (CONTEXT v1.8 8; it was F1's own golden
+    under v1.4-v1.7): POC 2032, entry 2037, SL 2032, TP 2052.
 
     HAND-COMPUTED from CONTEXT 3.5:
 
@@ -193,9 +201,10 @@ def test_f1_golden_money_target_hit_pays_three_r_minus_the_cost() -> None:
     assert not record.gap_entry
 
 
-def test_f2_golden_money_is_the_same_trade_reached_by_the_entry_2_path() -> None:
-    """**F2 at PnL level.** Same four numbers as F1 (entry 2037 / SL 2032 / TP 2052), reached
-    through WAIT-BELOW -> the 2027 close arms -> the re-cross at 2037.
+def test_illustration_money_is_the_same_trade_reached_by_the_entry_2_path() -> None:
+    """**The F2 low == POC ILLUSTRATION at PnL level.** Same four numbers as its F1 counterpart
+    (entry 2037 / SL 2032 / TP 2052), reached through WAIT-BELOW -> the 2027 close arms -> the
+    re-cross at 2037.
 
     HAND-COMPUTED: risk 5.00 -> qty ``floor(100,000 / 500)`` = **200**; TARGET fill at 2052;
     gross 200 x 1,500 = **+Rs 3,000.00**; net **+Rs 2,900.00**. The money does not care which
