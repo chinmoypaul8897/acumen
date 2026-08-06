@@ -3667,3 +3667,53 @@ equality in both directions rather than divergence. Clause (2) is `personas/code
 checklist item 10. Clause (3) is the reason no `docs/reviews/REVIEW_*` document follows this
 session; the evidence it names is in the session's PROGRESS entry and its final report.
 
+---
+
+## PLAN AMENDMENTS (class C, architect-authored) · chunk 10 absorbed, chunk 13+ ON HOLD, chunk 12 NOW · recorded 2026-08-06 by the chunk-12 VALIDATION-PACK session
+
+Recorded VERBATIM before any work was done, under the same discipline every architect ruling in
+this file travels by; this session authored none of it. plan.md is architect-owned and is NOT
+edited here — plan.md §5 class C says chunk movement is recorded in PROGRESS.md, and a plan
+version bump is the architect's own act. This block and the STATUS.md lines beneath it are the
+record a later session reads.
+
+> "chunk 10's report scope was completed inside chunk 9B; chunk 13+ live screener ON HOLD
+> pending the trader's decision; chunk 12 = validation pack, now"
+
+**What each clause means for this repo.**
+
+* **Chunk 10 is absorbed into 9B.** plan.md's chunk-10 card is the CONTEXT 7-E13 metric layer,
+  and `src/acumen/portfolio.py` implements the complete E13 list — built, reviewed twice
+  (REVIEW_9A, REVIEW_9A_2) and consumed by `docs/reports/chunk9b_backtest_report.md`, whose own
+  QC review (REVIEW_9B_REPORT) recomputed the headline, all eleven year rows and all 204
+  per-symbol rows independently. There is no separate chunk-10 deliverable owed and no separate
+  chunk-10 review owed. STATUS.md's chunk-10 line records the absorption and points at the
+  evidence; no chunk-10 metric was left uncomputed and none is re-derived here.
+* **Chunk 13, 14 and 15 are ON HOLD** pending the trader's decision, which is the decision this
+  pack exists to inform. They are NOT cancelled and NOT failed: their cards stand exactly as
+  plan.md v1.1 writes them, and the hold is a state, not a verdict. Nothing in this session
+  touches live-screener code, and the CONTEXT 6 replay invariant chunk 13 targets is unaffected.
+* **Chunk 12 is now**, and its dependencies are met: chunks 9A/9B are `reviewed-PASS` and the
+  report is final. plan.md's chunk-12 card asks for a plain-English pack the trader can check on
+  his own charts; the architect's prompt for this session sets its contents. The card's own
+  gate — the trader's confirmation — stays OPEN and is what the pack asks for.
+
+**What is NOT amended.** plan.md §2's chunk-12 TRADER GATE deadline ("chunk-12 gate before chunk
+15") is untouched and is trivially satisfied while 13–15 are on hold. Q43 and Q44 remain OPEN
+with the trader and this pack restates both to him; nothing in the pack is blocked on either,
+exactly as the GO ruling of 31-Jul-2026 established for the run.
+
+**ONE THING THE AMENDMENT DOES NOT SAY, recorded rather than decided (class C, NON-BLOCKING).**
+plan.md §3 lists chunk 12's dependencies as **9 AND 11**, and STATUS.md's chunk-11 line is still
+`todo`. The amendment names chunk 10 and is silent on 11. This session did NOT read the silence
+either way: it did not treat chunk 11 as absorbed, and it did not stop, because the architect's
+prompt schedules chunk 12 *"now"* in the same sentence and setting a session's scope is his to
+do. What is true on the machine, so a later session reads it from here rather than inferring it:
+chunk 11's card is the **getdesign/DESIGN.md web report UI**, and nothing of that card exists in
+this repo -- no `DESIGN.md`, no served report, no UI code. What DOES exist is the static markdown
+report `docs/reports/chunk9b_backtest_report.md`, which carries the equity, drawdown, per-year,
+per-symbol and disclosure content chunk 11's card lists, reviewed under REVIEW_9B_REPORT and
+REVIEW_9B_FINAL. Whether that discharges chunk 11, or whether chunk 11 is deferred beside 13-15,
+is the architect's to say; **this pack does not depend on it either way** -- it is a plain-English
+document built from the ledger, and it reads no UI. Requested here under plan.md §5 class C.
+
