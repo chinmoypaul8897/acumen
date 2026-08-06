@@ -2136,6 +2136,17 @@ parameter and a designation, nothing else:
   hand-computed; no fixture byte changed (`tests/fixtures/`, `poc/data/` untouched). F3 and F4
   are unaffected, and **F4 remains the single gap witness**, exactly as the ruling states.
 
+**ROUND-4 ADDENDUM (06-Aug-2026) -- this ruling's example parametrization is OVERTURNED by the
+trader himself.** Append-only, and it does not touch a word above. His Q44 diagram-answer says
+the PDF's worked example is a GAP day at POC 2030: the stop is the last traded close, at or below
+the POC, which is the gap branch this item's own arithmetic derives and the branch CONTEXT 3.4
+has always implemented. So option (a)'s "the illustrative POC moves to 2032" is superseded --
+CONTEXT v1.8 puts F1/F2 back at POC 2030 on the gap branch and keeps the POC-2032 pair as the
+taught low == POC boundary ILLUSTRATION. What does NOT change: CONTEXT 3.4, which neither ruling
+touched; the engine, which implemented the confirmed rule all along; and every expected value in
+both parametrizations, which were built together in chunk 7 (B164) and only ever needed
+relabelling. See ROUND-4 RECEIPTS + THE ARCHITECT'S RULINGS (06-Aug-2026) at the end of this file.
+
 ---
 
 ## PLAN AMENDMENT (class C, architect-authored) · chunk 9 SPLITS into 9A + 9B · recorded 2026-07-29 by the chunk-9A build session
@@ -3753,3 +3764,122 @@ is the architect's own act).
 **EXECUTED by the chunk-12 QC REVIEW session (06-Aug-2026):** this record; STATUS.md's chunk-11
 line moves from `todo` to `ON HOLD` carrying the ruling; and `docs/reviews/REVIEW_12.md` opens
 with the ruling verbatim as its PART 0. The class-C item the build session raised is **CLOSED**.
+
+---
+
+## ROUND-4 RECEIPTS + THE ARCHITECT'S RULINGS (06-Aug-2026) · Q44 CONFIRMED, Q43 SUPERSEDED · recorded by the chunk-12 ROUND-4 EXECUTION session
+
+Round 4 is the trader's answer to the two questions this repo has carried open since the
+29-Jul-2026 plan amendment that split chunk 9, and which page 6 of the validation pack put back
+to him: **Q43** (which capital figure the Q40-d capital-infeasibility flags must use) and **Q44**
+(the confirmation of the gap-rule worked example). Both are answered. The record is written here
+BEFORE any edit was made, under the same discipline every ruling in this file travels by; this
+session authored none of the ruling.
+
+### THE TRADER'S OWN WORDS -- NOT SUPPLIED TO THIS SESSION (owed, and reserved)
+
+The architect's prompt for this session asks for his Q44 diagram-answer and his Q43
+points-request to be quoted WHOLE. **Neither text reached this session.** The prompt carries the
+architect's rulings and not the trader's own sentences, and nothing on this machine holds them
+(searched: the whole repository, `docs/`, and the stores). The standing quotation-fidelity ruling
+of 06-Aug-2026 is that a quotation is the source's bytes or it is a paraphrase OUTSIDE quotation
+marks with a citation, and that an abridged quotation is forbidden for any reason. A quotation
+this session does not have is therefore one it may not write. The two slots are RESERVED and
+empty, and what is known of each is described here outside quotation marks:
+
+* **Q44 -- his diagram-answer.** He answered the gap-rule worked example with a DIAGRAM. What the
+  architect's ruling below carries of it: the example day is a GAP day at POC 2030, and the stop
+  is the last traded close, at or below the POC -- which is the rule this repo already
+  implements and the rule the ten-year run walked.
+* **Q43 -- his points-request.** He superseded his own capital question and asked instead for a
+  PER-STOCK POINTS view: points rather than rupees, so that what is shown does not move with
+  position size.
+
+**OWED: the operator pastes both texts, and the next session records them here verbatim in these
+two slots.** Nothing executed under this block depends on their wording -- every action below is
+taken from the architect's ruling, which is quoted in full and in one piece.
+
+### THE ARCHITECT'S RULINGS, WORD FOR WORD
+
+The ruling arrived inside the architect's session prompt as running prose rather than as a
+pre-formatted block, so the line breaks below are this file's own wrapping and the words are his.
+Nothing inside the quotation is abridged, reordered or paraphrased.
+
+> ARCHITECT'S RULINGS (06-Aug-2026), Round 4: (1) Q44 CONFIRMS the implemented §3.4 gap rule (SL
+> at the last traded close, at or below the POC) and OVERTURNS Q-15's example parametrization
+> — the PDF example is a GAP day at POC 2030; the trader's word outranks the architect's ruling
+> on his own example. CONTEXT v1.8 flips the F1/F2 rows accordingly; the POC-2032 pair remains
+> as the taught low==POC boundary illustration, relabelled. NO ENGINE CHANGE, NO RE-RUN — the
+> ledger ran the rule he confirmed; the manifest's Q44 stamp closes as CONFIRMED. (2) Q43's
+> capital question is SUPERSEDED by its own asker: capital-infeasibility flags are RETIRED
+> (config keys stay null, labelled 'retired by trader, Round 4'); the requested PER-STOCK POINTS
+> VIEW is adopted — computed post-hoc from the ledger, size-independent (points = exit − entry
+> per share, signed by side), with the multiple-comparisons caveat MANDATORY on any per-stock
+> ranking. Architect.
+
+### What each clause settles
+
+* **(1) Q44 is CONFIRMED, and it costs nothing.** The gap predicate and the gap stop the engine
+  implements are the trader's own, on his own diagram. The GO ruling of 31-Jul-2026 made the run
+  proceed under a stamp that said what would happen *if* his answer surprised -- a CONTEXT 3.4
+  change, a spec version bump and a full re-run. **It did not surprise**: the ledger walked the
+  rule he confirmed, so there is NO engine change and NO re-run, not one number in the report or
+  the pack moves, and the escalation branch is closed unused. The run manifest on disk is frozen
+  and still carries its PENDING stamp -- that is the run's own record and it stays byte-exact;
+  what closes is the STAMP PATH in the code and every sentence in the two documents that told a
+  reader the answer was outstanding.
+* **(1, second half) Q-15's example parametrization is OVERTURNED, and only that.** Q-15 was a
+  conflict between CONTEXT 8's F1/F2 numbers and CONTEXT 3.4's gap predicate; the architect ruled
+  in July that the example's POC moved to 2032 so that all four of the trader's PDF numbers
+  survived on the NORMAL branch. Round 4 reads the same example the other way, on the trader's
+  own authority: the day is a GAP day at POC 2030, so the stop is the previous 15-minute candle's
+  close and the PDF's `SL 2032 / risk 5 / TP 2052` triple is the thing that gives way. CONTEXT
+  10's precedence rule is the mechanism -- later answers correct earlier text -- and the trader's
+  word on his own example outranks the architect's reading of it. **CONTEXT 3.4 is untouched
+  again**: nothing about the RULE changed in July and nothing changes now.
+* **(2) Q43 is SUPERSEDED, not answered.** The question was which capital figure the Q40-d flags
+  must use; the asker withdrew it. The flags are RETIRED: `config.yaml`'s `capital_reference` and
+  `margin_basis` stay null, now labelled *retired by trader, Round 4* rather than *pending*, and
+  no output may go on telling a reader that an answer is awaited. The machinery in
+  `acumen.portfolio.capital_flags` is not deleted -- it computes nothing without both keys, which
+  is exactly the retired state, and a future trader answer would revive it without a rebuild.
+* **(2, second half) the PER-STOCK POINTS VIEW is adopted.** It is what he asked for instead:
+  points per share, signed by side, computed POST-HOC from the ledger, so the ranking is
+  independent of the size the machine happened to take. The caveat that travels with it is
+  MANDATORY, not optional -- 204 ranked stocks will show good ones by chance alone, and a page
+  that ranked them without saying so would be inviting exactly the conclusion the arithmetic does
+  not support.
+
+### EXECUTED by the chunk-12 ROUND-4 EXECUTION session (06-Aug-2026)
+
+* **CONTEXT v1.8**, committed alone, three edits and no fourth: the header bump; §8's F1 and F2
+  rows re-parametrized to the gap day at POC 2030 with the previous candle's close as the stop
+  (and the POC-2032 pair kept beneath them as an ILLUSTRATION row, labelled as one -- the
+  low == POC boundary the Q-15 ruling taught, which is still true and is no longer CONTEXT 8's
+  F1/F2); and the §10 version-log row the architect supplied verbatim.
+* **The F1/F2 designations are FLIPPED** in `tests/test_signals.py`: the POC-2030 gap-branch
+  evaluation becomes THE GOLDEN and the POC-2032 evaluation becomes the recorded ILLUSTRATION.
+  This reverses decisions B164/B166 exactly, and it is a relabelling and nothing else -- both
+  parametrizations were built off the SAME candles in chunk 7 precisely so that whichever way the
+  architect ruled, one was already a passing golden and the other already a recorded measurement.
+  **No expected value was re-measured and no fixture byte moved.** At PnL level (chunk 8,
+  `tests/test_simulate.py`) the F1/F2 rows of the golden money table are the POC-2032 candles, so
+  they are relabelled as the ILLUSTRATION's PnL and no new PnL golden is computed for the gap
+  parametrization -- the ruling's "no expected value re-measured" is a limit on this session, and
+  the gap branch already has its own PnL-level golden in F4 (prior close 2028, risk 14, qty 71),
+  which §8 still names the gap witness.
+* **The Q44 stamp path CLOSES as CONFIRMED**: `acumen.run_backtest` gains the CONFIRMED stamp
+  beside the historical pending one, the report and the pack say the confirmation arrived and
+  what it cost (nothing), and the frozen manifest is quoted as the run's own record with the
+  closure stated beside it rather than inside the quotation.
+* **Every "flags pending Q43" sentence becomes the RETIREMENT wording** -- the report, the
+  validation pack and the constant the manifest carries -- with `config.yaml`'s two keys still
+  null and now labelled *retired by trader, Round 4*.
+* **The per-stock points view is BUILT**: `src/acumen/points_view.py` (PURE over the ledger),
+  page 7 of the validation pack with the top and bottom 20, the full 204 in the JSON companion
+  and in `docs/reports/points_by_symbol.md`, the rupee-cost honesty line, and the
+  multiple-comparisons caveat in full sentences beside the ranking.
+
+**Q43 is CLOSED (superseded by its asker). Q44 is CLOSED (CONFIRMED).** Neither blocks anything,
+and neither ever did after the GO ruling. What remains owed on this block is the operator's paste
+of the two trader texts into the reserved slots above.
