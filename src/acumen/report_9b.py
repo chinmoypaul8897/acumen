@@ -24,8 +24,11 @@ the sign of NET PnL; gross profit, gross loss and profit factor are sums of thos
 over those net populations; the before-costs pair appears once, labelled. See
 :data:`acumen.portfolio.E13_BASIS`.
 
-**What is NOT computed, and says so:** the Q40-d capital-infeasibility FLAGS, because the trader's
-Q43 answer has not arrived and there is no default figure anywhere in this repo.
+**What is NOT computed, and says so:** the Q40-d capital-infeasibility FLAGS, because the trader
+SUPERSEDED his own Q43 question in Round 4 -- they are RETIRED, the config keys stay null, and
+there is no default figure anywhere in this repo. What he asked for instead is computed: the
+per-stock POINTS view (:mod:`acumen.points_view`), rendered as page 7 of the validation pack and
+as the full 204-row companion `docs/reports/points_by_symbol.md`.
 
 Source files in this package are ASCII-only on purpose (see src/acumen/config.py).
 """
@@ -44,6 +47,7 @@ from pathlib import Path
 from typing import Iterable, Mapping, Sequence
 
 from . import backtest as bt
+from . import points_view
 from . import portfolio as pf
 from . import signals as sig
 from . import simulate as sim
@@ -1409,12 +1413,17 @@ def _section_what_this_is(add, *, run: RunData, capital_paise: int, register=Non
         "most positions held at once and the largest simultaneous notional -- so the size of the "
         "assumption is on the page rather than behind it.")
     add("")
-    add("**The capital-infeasibility FLAGS are NOT COMPUTED.** "
-        f"{bt.CAPITAL_FLAGS_PENDING_NOTE}. `capital_reference` and `margin_basis` are optional "
-        "config keys and both are null; the machinery is built and tested and computes POST-HOC "
-        "from this ledger the day the answer arrives, with no re-run. There is no default figure "
-        "anywhere in this repo, because a trade marked infeasible against a guessed number would "
-        "be this repo's claim standing in for the trader's.")
+    add("**The capital-infeasibility FLAGS are RETIRED, not pending.** "
+        f"{bt.CAPITAL_FLAGS_RETIRED_NOTE}. `capital_reference` and `margin_basis` are optional "
+        "config keys and both are still null, so no flag value is computed here or anywhere. "
+        "What replaces them is what he asked for instead: a per-stock POINTS view, computed "
+        "post-hoc from this same ledger and independent of position size. The "
+        "machinery is kept rather than deleted -- a later capital figure would revive it from "
+        "this ledger with no re-run -- and there is still no default figure anywhere in this "
+        "repo, because a trade marked infeasible against a guessed number would be this repo's "
+        "claim standing in for the trader's. The manifest below quotes the sentence this run was "
+        "stamped with, which was written while the question was open; it is the run's own record "
+        "and it is left exactly as the run wrote it.")
     add("")
     add("**The fills are IDEALIZED** (CONTEXT 7-E9). Entries fill at the 15-minute candle's "
         "close, stops and targets fill at their LEVELS even when the candle ran past them, and "
@@ -1459,10 +1468,17 @@ def _section_what_this_is(add, *, run: RunData, capital_paise: int, register=Non
         f"{_num(run.walked)} walked days and section 9 carries each symbol's own coverage beside "
         "its figures; the residual is disclosed in the register, not chased.")
     add("")
-    add(f"**Q44 is unconfirmed.** The manifest carries, verbatim: *\"PENDING TRADER CONFIRMATION "
-        "OF Q44 (gap-rule example, POC 2032)\"*. If his answer surprises, CONTEXT 3.4 changes, "
-        "the spec version bumps and the whole run is done again; this ledger is then superseded, "
-        "retained and labelled, never deleted (the architect's GO ruling, 31-Jul-2026).")
+    add("**Q44 is CONFIRMED (the trader, Round 4, 06-Aug-2026).** This run was stamped while the "
+        "question was open, and its manifest still carries that stamp, verbatim: *\"PENDING "
+        "TRADER CONFIRMATION OF Q44 (gap-rule example, POC 2032)\"*. The answer has since "
+        "arrived and it did NOT surprise: his own diagram makes the worked example a GAP day at "
+        "POC 2030 with the stop at the last traded close, at or below the POC -- CONTEXT 3.4 as "
+        "written, as implemented, and as this run walked it. So the GO ruling's escalation "
+        "branch (a 3.4 change -> spec version bump -> full re-run, this ledger superseded but "
+        "retained) is closed UNUSED, and not one figure in this report moves. CONTEXT v1.8 "
+        "corrects the EXAMPLE's parametrization in section 8 -- F1/F2 at POC 2030 on the gap "
+        "branch, the POC-2032 pair kept as the low == POC boundary illustration -- and changes "
+        "no rule (QUESTIONS.md ROUND-4 RECEIPTS, 06-Aug-2026).")
     add("")
 
 
@@ -1495,7 +1511,7 @@ def _section_the_run(add, *, run: RunData, capital_paise: int, config, **_) -> N
     add(f"| Capital (equity-curve base) | {_money(capital_paise)} | `config.yaml` (CONTEXT 3.5, "
         "R1-Q21a) |")
     add(f"| Row Size N | {spec['row_size']} | `config.yaml` (CONTEXT 3.3, trader screenshot) |")
-    add("| capital_reference / margin_basis | null / null | trader Q43 PENDING |")
+    add("| capital_reference / margin_basis | null / null | retired by trader, Round 4 |")
     add(f"| Ledger | `ledger.jsonl`, {_num(run.ledger_bytes)} bytes | sha256 "
         f"`{run.ledger_sha256[:16]}...` |")
     add(f"| Manifest | `manifest.json` | sha256 `{run.manifest_sha256[:16]}...` |")
@@ -2222,9 +2238,15 @@ def _section_take_all(add, *, disclosures: pf.Disclosures, capital_flag_report, 
         "portfolio the trader's cash could have carried; the run takes every signal because he "
         "asked for the honest numbers with no limits, and this is what no limits actually meant. "
         "Which trades his capital could not have taken is the Q40-d FLAG question, and it is not "
-        "computed:")
+        "computed -- he retired it:")
     add("")
     add(f"> {capital_flag_report.note}")
+    add("")
+    add("**What he asked for in its place is computed**: a per-stock view in POINTS -- the "
+        "per-share move each trade made, signed by side -- which is what a ranking free of "
+        f"position size looks like. It is `{points_view.COMPANION_PATH}`, built from this same "
+        "ledger, and it carries its own multiple-comparisons caveat, because a ranking of "
+        "this many stocks throws up good ones by chance alone.")
     add("")
     add("### 11a. The full distribution of daily trade counts")
     add("")
@@ -2494,8 +2516,9 @@ def _section_traceability(add, *, run: RunData, **_) -> None:
         "counters | CONTEXT 7-E2 / Q-17 / Q-21 |")
     add("")
     add("**Nothing on this page is estimated, modelled or extrapolated.** Where a number could "
-        "not be measured it is absent and says why: the capital-infeasibility flags (Q43 "
-        "pending), the foregone trades on refusal classes with no counterfactual (section 11b), "
+        "not be measured it is absent and says why: the capital-infeasibility flags (RETIRED by "
+        "the trader in Round 4, and replaced by the points companion), the foregone trades "
+        "on refusal classes with no counterfactual (section 11b), "
         "and the per-symbol 15-minute paths (section 9). The benchmark's price domain is no "
         "longer among them: Q-23 is RULED and CLOSED, section 10 publishes the benchmark the "
         "ruling names, and the two other readings are printed beside it and labelled as not "

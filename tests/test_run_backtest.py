@@ -227,22 +227,32 @@ def test_a_run_with_no_disclosures_writes_a_manifest_without_the_key(tmp_path: P
 
 
 def test_the_disclosures_reach_the_manifest_verbatim_and_in_order(tmp_path: Path) -> None:
-    """The architect's GO ruling (31-Jul-2026) stamps two sentences on the run manifest. They
-    are carried VERBATIM -- a paraphrased disclosure is not the disclosure that was ruled."""
-    stamped = replace(
+    """A stamped sentence is carried VERBATIM -- a paraphrased disclosure is not the disclosure
+    that was ruled. Both the HISTORICAL pair (the architect's GO ruling of 31-Jul-2026, which the
+    completed run's frozen manifest carries) and the pair a run stamps NOW after the trader's
+    Round-4 answers are asserted, so neither can drift into the other."""
+    historical = replace(
         make_runner(tmp_path),
         disclosures=(bt.CAPITAL_FLAGS_PENDING_NOTE, rb.Q44_PENDING_STAMP, rb.Q44_ESCALATION),
     )
-    manifest = stamped.build_manifest(stamped.walk_symbol(SYMBOL).rows, {SYMBOL: {}})
+    manifest = historical.build_manifest(historical.walk_symbol(SYMBOL).rows, {SYMBOL: {}})
     assert manifest["disclosures"] == [
         "capital-infeasibility flags NOT computed -- the trader's Q43 answer is pending",
         "PENDING TRADER CONFIRMATION OF Q44 (gap-rule example, POC 2032)",
         rb.Q44_ESCALATION,
     ]
+
+    stamped = replace(
+        make_runner(tmp_path),
+        disclosures=(bt.CAPITAL_FLAGS_RETIRED_NOTE, rb.Q44_CONFIRMED_STAMP),
+    )
+    now = stamped.build_manifest(stamped.walk_symbol(SYMBOL).rows, {SYMBOL: {}})
+    assert now["disclosures"] == [bt.CAPITAL_FLAGS_RETIRED_NOTE, rb.Q44_CONFIRMED_STAMP]
+    assert not any("PENDING" in sentence for sentence in now["disclosures"])
     # ...and the Q43 half is ALSO where it always was, so neither reading of "every report
     # output carries it" depends on the other
-    assert manifest["capital_flags"]["computed"] is False
-    assert manifest["capital_flags"]["note"] == bt.CAPITAL_FLAGS_PENDING_NOTE
+    assert now["capital_flags"]["computed"] is False
+    assert now["capital_flags"]["note"] == bt.CAPITAL_FLAGS_RETIRED_NOTE
 
 
 def test_the_q21b_disclosure_names_the_ruling_its_evidence_and_its_own_limits() -> None:
@@ -268,7 +278,9 @@ def test_the_q21b_disclosure_names_the_ruling_its_evidence_and_its_own_limits() 
     # disclosure still naming only gates 1 and 1P would be a v1.5 figure stamped on a v1.6 ledger.
     # The Q-22 rulings (CONTEXT v1.7) move the SPEC_VERSION again but not this radius: the
     # session filter changes which BARS a scan reads, never whether its D-1 passes the battery.
-    assert "v1.6" in rb.Q21B_BLAST_RADIUS and bt.SPEC_VERSION == "v1.7"
+    # Round 4 (CONTEXT v1.8) moves it once more and again leaves the radius alone: the trader
+    # CONFIRMED the rule the run walked, so no bar, no gate and no bias is re-answered.
+    assert "v1.6" in rb.Q21B_BLAST_RADIUS and bt.SPEC_VERSION == "v1.8"
     assert "1 by gate 2" in rb.Q21B_BLAST_RADIUS
 
 
@@ -278,6 +290,12 @@ def test_the_q44_stamp_is_the_rulings_own_sentence() -> None:
     assert rb.Q44_PENDING_STAMP == "PENDING TRADER CONFIRMATION OF Q44 (gap-rule example, POC 2032)"
     assert "spec version bump" in rb.Q44_ESCALATION
     assert "retained and labelled, never deleted" in rb.Q44_ESCALATION
+    # ...and the answer, when it came, closed that branch UNUSED: the trader confirmed the rule
+    # the run walked, so the stamp a run carries now says so and promises no re-run.
+    assert "Q44 CONFIRMED by the trader (Round 4, 06-Aug-2026)" in rb.Q44_CONFIRMED_STAMP
+    assert "the rule this run walked" in rb.Q44_CONFIRMED_STAMP
+    assert "No engine change, no re-run" in rb.Q44_CONFIRMED_STAMP
+    assert "PENDING" not in rb.Q44_CONFIRMED_STAMP
 
 
 def test_the_disclosures_do_not_change_what_the_run_walked(tmp_path: Path) -> None:
@@ -813,7 +831,7 @@ def test_the_freshness_stamps_never_reach_the_run_manifest() -> None:
         ),
     )
     # main() builds disclosures from report.notes ONLY -- this is that expression, pinned.
-    disclosures = (bt.CAPITAL_FLAGS_PENDING_NOTE, rb.Q44_PENDING_STAMP, rb.Q44_ESCALATION,
+    disclosures = (bt.CAPITAL_FLAGS_RETIRED_NOTE, rb.Q44_CONFIRMED_STAMP,
                    rb.Q21B_BLAST_RADIUS, *stamped.notes)
     assert "a real disclosed condition" in disclosures
     assert not any("last changed" in sentence for sentence in disclosures)

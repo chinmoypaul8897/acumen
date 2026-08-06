@@ -106,10 +106,18 @@ INTRADAY_PATH_NOT_SUPPLIED: str = (
     "acumen.backtest.assemble_trade_paths, which is the layer that holds the candles"
 )
 
-#: What every output says while the trader's Q43 answer is outstanding (same words as the
-#: runner's manifest -- one sentence, one meaning).
+#: HISTORICAL. What every output said while the trader's Q43 answer was outstanding (same words
+#: as the runner's manifest -- one sentence, one meaning). Kept byte-exact because the completed
+#: run's manifest and the committed chunk-9A pilot pack both carry it.
 CAPITAL_FLAGS_PENDING_NOTE: str = (
     "capital-infeasibility flags NOT computed -- the trader's Q43 answer is pending"
+)
+
+#: What every output says now: the trader SUPERSEDED his own Q43 question in Round 4 and the
+#: flags are RETIRED (architect, 06-Aug-2026). Same words as the runner's manifest constant.
+CAPITAL_FLAGS_RETIRED_NOTE: str = (
+    "capital-infeasibility flags RETIRED by the trader (Round 4): he superseded his own Q43 "
+    "question, and the config keys stay null, labelled 'retired by trader, Round 4'"
 )
 
 
@@ -936,11 +944,14 @@ def capital_flags(
     """CONTEXT 3.5's per-trade capital-infeasibility flags, computed POST-HOC. PURE.
 
     The trader answered Q40 with option (d): take every signal, and DISCLOSE the trades his
-    capital could not actually have taken. Which capital figure the flags must use is his to
-    say (Q43) and it has not arrived, so with either input ``None`` this computes NOTHING and
-    returns :data:`CAPITAL_FLAGS_PENDING_NOTE` for the report to print verbatim. No default is
+    capital could not actually have taken. Which capital figure the flags must use was his to
+    say (Q43), and in Round 4 he SUPERSEDED his own question rather than answering it: the flags
+    are RETIRED and a per-stock POINTS view (:mod:`acumen.points_view`) is adopted in their place
+    (architect, 06-Aug-2026). So with either input ``None`` this computes NOTHING and returns
+    :data:`CAPITAL_FLAGS_RETIRED_NOTE` for the report to print verbatim. No default is
     substituted -- flagging a real trade "infeasible" against a guessed figure would put this
-    repo's number in place of his.
+    repo's number in place of his -- and the machinery is kept rather than deleted, so a later
+    answer would revive it without a rebuild.
 
     When both are supplied: a trade is beyond CASH when its notional (qty x entry) exceeds the
     capital reference, and beyond MARGIN when it exceeds ``capital_reference x margin_basis``
@@ -950,7 +961,7 @@ def capital_flags(
     if capital_reference_paise is None or margin_basis is None:
         return CapitalFlagReport(
             computed=False,
-            note=CAPITAL_FLAGS_PENDING_NOTE,
+            note=CAPITAL_FLAGS_RETIRED_NOTE,
             capital_reference_paise=capital_reference_paise,
             margin_basis=margin_basis,
         )

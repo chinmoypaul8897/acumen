@@ -79,16 +79,35 @@ DEFAULT_LABEL: str = "chunk9b_full"
 #: The earliest year NSE's corporate-action API answers for (CONTEXT 4.2, verified).
 CA_FIRST_YEAR: int = 2005
 
-#: The architect's GO RULING (31-Jul-2026), condition (2), VERBATIM. Stamped on the manifest of
-#: every run this module drives, so a ledger can never be read as trader-confirmed.
+#: HISTORICAL -- the architect's GO RULING (31-Jul-2026), condition (2), VERBATIM. It was
+#: stamped on the manifest of every run this module drove while the confirmation was
+#: outstanding, so a ledger could never be read as trader-confirmed. **The completed
+#: full-history run's manifest carries it and that manifest is frozen**, so the sentence is kept
+#: byte-exact here: the report and the validation pack quote the run's own record and state the
+#: closure beside the quotation, never inside it (the quotation-fidelity ruling, 06-Aug-2026).
 Q44_PENDING_STAMP: str = "PENDING TRADER CONFIRMATION OF Q44 (gap-rule example, POC 2032)"
 
-#: The same ruling's escalation and retention rule, carried with the stamp so the manifest says
-#: what happens if the confirmation contradicts CONTEXT 3.4 rather than leaving it to memory.
+#: HISTORICAL -- the same ruling's escalation and retention rule, carried with the stamp so the
+#: manifest said what would happen if the confirmation contradicted CONTEXT 3.4. It did not:
+#: the branch is closed unused (see :data:`Q44_CONFIRMED_STAMP`).
 Q44_ESCALATION: str = (
     "if the trader's Q44 answer surprises, that is a CONTEXT 3.4 change -> spec version bump "
     "-> full re-run; this ledger is then SUPERSEDED, retained and labelled, never deleted "
     "(architect's GO ruling, 31-Jul-2026)"
+)
+
+#: What every run stamps NOW. The trader CONFIRMED the gap rule in Round 4 (architect,
+#: 06-Aug-2026): his own diagram makes the worked example a GAP day at POC 2030 with the stop at
+#: the last traded close, at or below the POC -- which is CONTEXT 3.4 as written and as
+#: implemented, and therefore the rule the completed run already walked. The GO ruling's
+#: escalation is closed UNUSED: no spec-rule change, no version bump of 3.4, no re-run, and no
+#: figure in any artefact moves. CONTEXT v1.8 re-parametrizes section 8's F1/F2 EXAMPLE to match
+#: his reading; it changes no rule.
+Q44_CONFIRMED_STAMP: str = (
+    "Q44 CONFIRMED by the trader (Round 4, 06-Aug-2026): the gap-rule example is a GAP day at "
+    "POC 2030 and the stop is the last traded close, at or below the POC -- the rule this run "
+    "walked. No engine change, no re-run; CONTEXT v1.8 corrects the EXAMPLE's parametrization "
+    "only (section 8 F1/F2)"
 )
 
 #: The architect's Q-21(b) ruling and the blast radius MEASURED under it before the relaunch,
@@ -406,10 +425,10 @@ def preflight(
     )
     checks.append(
         Check(
-            "Q40-d flag keys still NULL -> flags-pending path confirmed",
+            "Q40-d flag keys still NULL -> flags-retired path confirmed",
             reference is None and basis is None,
             f"capital_reference={reference!r}, margin_basis={basis!r}; every output will carry "
-            f'"{bt.CAPITAL_FLAGS_PENDING_NOTE}"',
+            f'"{bt.CAPITAL_FLAGS_RETIRED_NOTE}"',
         )
     )
 
@@ -970,9 +989,8 @@ def main(argv: list[str] | None = None) -> int:
         # preflight measured about these inputs -- so the manifest says both what it is not
         # allowed to claim and why its span is the span it is.
         disclosures=(
-            bt.CAPITAL_FLAGS_PENDING_NOTE,
-            Q44_PENDING_STAMP,
-            Q44_ESCALATION,
+            bt.CAPITAL_FLAGS_RETIRED_NOTE,
+            Q44_CONFIRMED_STAMP,
             Q21B_BLAST_RADIUS,
             *report.notes,
         ),

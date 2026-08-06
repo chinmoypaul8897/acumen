@@ -705,7 +705,7 @@ def test_the_manifest_carries_the_spec_version_code_sha_and_config_digest(
     tmp_path: Path,
 ) -> None:
     manifest = make_runner(tmp_path).run(tmp_path / "run").manifest
-    assert manifest["spec_version"] == "v1.7"
+    assert manifest["spec_version"] == "v1.8"
     assert manifest["code_sha"] == "0" * 40
     assert manifest["config_digest"] == make_runner(tmp_path).spec.digest()
     assert manifest["universe"] == [SYMBOL]
@@ -778,13 +778,19 @@ def test_the_manifest_carries_the_residual_register_acknowledgment_verbatim(
     assert register["per_symbol"][SYMBOL]["status"] == "settled"
 
 
-def test_the_manifest_says_the_capital_flags_are_not_computed_while_q43_is_open(
+def test_the_manifest_says_the_capital_flags_are_RETIRED_and_computes_none(
     tmp_path: Path,
 ) -> None:
+    """The trader superseded his own Q43 question in Round 4 (architect, 06-Aug-2026): the flags
+    are RETIRED, so a manifest written now says that rather than promising an answer is coming.
+    The historical sentence is kept as its own constant because the completed run's manifest and
+    the committed chunk-9A pilot pack both carry it and a quotation of either must stay exact."""
     manifest = make_runner(tmp_path).run(tmp_path / "run").manifest
     flags = manifest["capital_flags"]
     assert flags["computed"] is False
-    assert flags["note"] == bt.CAPITAL_FLAGS_PENDING_NOTE
+    assert flags["note"] == bt.CAPITAL_FLAGS_RETIRED_NOTE
+    assert "RETIRED" in flags["note"] and "retired by trader, Round 4" in flags["note"]
+    assert flags["note"] != bt.CAPITAL_FLAGS_PENDING_NOTE
     assert "Q43" in flags["note"]
     assert flags["capital_reference_paise"] is None and flags["margin_basis"] is None
 

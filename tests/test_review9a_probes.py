@@ -345,7 +345,8 @@ def test_the_reason_counts_partition_every_walked_day() -> None:
 
 
 def test_no_capital_figure_is_hidden_in_the_flag_machinery() -> None:
-    """Q43 is pending, so `capital_flags` must hold no number of its own -- not even
+    """Q43 is RETIRED (the trader superseded it in Round 4), so `capital_flags` must hold no
+    number of its own -- not even
     CONTEXT 3.5's Rs 1,00,000. Asserted structurally over the function's numeric literals,
     so a constant cannot hide where a `.get(default)` would."""
     tree = ast.parse(inspect.getsource(pf.capital_flags))
@@ -359,7 +360,7 @@ def test_no_capital_figure_is_hidden_in_the_flag_machinery() -> None:
     assert not pf.capital_flags((), capital_reference_paise=None, margin_basis=None).computed
     assert (
         pf.capital_flags((), capital_reference_paise=None, margin_basis=None).note
-        == pf.CAPITAL_FLAGS_PENDING_NOTE
+        == pf.CAPITAL_FLAGS_RETIRED_NOTE
     )
 
 

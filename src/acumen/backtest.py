@@ -124,8 +124,12 @@ from .signal_engine import SignalPipeline
 #: Rule-3 first-break scan, which changes which BARS decide a bias and therefore what a
 #: ledger row can say -- measured at 21 re-answered Rule-3 days across the span. The bump is
 #: compelled by this constant's own contract ("a ledger always names the law it was produced
-#: under"), exactly as the v1.6 bump was.
-SPEC_VERSION: str = "v1.7"
+#: under"), exactly as the v1.6 bump was. Moved to v1.8 on 06-Aug-2026 with the trader's Round-4
+#: answers: CONTEXT 3.4 is UNCHANGED (his Q44 answer confirms the rule this engine implements),
+#: so this bump changes no walked row and the completed run's v1.7 manifest stays exactly as
+#: true as it was -- the constant tracks the spec's version because a ledger names the law it
+#: was produced under, and section 8's F1/F2 example and section 10 are what moved.
+SPEC_VERSION: str = "v1.8"
 
 #: What the manifest's ``instrument_master`` block says about itself, so a reader who has never
 #: seen QUESTIONS.md Q-20 still knows why a filename is pinned rather than resolved. Verbatim on
@@ -1207,7 +1211,7 @@ class BacktestRunner:
             "residual_register": self._residual_summary(),
             "capital_flags": {
                 "computed": False,
-                "note": CAPITAL_FLAGS_PENDING_NOTE,
+                "note": CAPITAL_FLAGS_RETIRED_NOTE,
                 "capital_reference_paise": self.spec.capital_reference_paise,
                 "margin_basis": self.spec.margin_basis,
             }
@@ -1368,9 +1372,22 @@ if _UNFLAGGED_RULES:  # pragma: no cover -- the tripwire's failure mode, asserte
     )
 
 
-#: What every output says while the trader's Q43 answer is outstanding. Verbatim, everywhere.
+#: HISTORICAL. What every output said while the trader's Q43 answer was outstanding, kept
+#: byte-exact because the completed run's manifest and the committed chunk-9A pilot pack both
+#: carry this sentence and a quotation of either must stay verbatim (the architect's
+#: quotation-fidelity ruling, 06-Aug-2026). Nothing NEW says it -- see
+#: :data:`CAPITAL_FLAGS_RETIRED_NOTE`.
 CAPITAL_FLAGS_PENDING_NOTE: str = (
     "capital-infeasibility flags NOT computed -- the trader's Q43 answer is pending"
+)
+
+#: What every output says now. The trader SUPERSEDED his own Q43 question in Round 4 (architect,
+#: 06-Aug-2026): the capital-infeasibility flags are RETIRED and a per-stock POINTS view is
+#: adopted in their place. The two config keys stay null, so the machinery still computes
+#: nothing -- what changes is that no reader is told an answer is on its way.
+CAPITAL_FLAGS_RETIRED_NOTE: str = (
+    "capital-infeasibility flags RETIRED by the trader (Round 4): he superseded his own Q43 "
+    "question, and the config keys stay null, labelled 'retired by trader, Round 4'"
 )
 
 

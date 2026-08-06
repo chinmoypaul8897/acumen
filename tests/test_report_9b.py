@@ -460,12 +460,18 @@ def test_the_report_is_a_pure_function_of_its_inputs(tmp_path: Path) -> None:
     assert render(tmp_path / "a") == render(tmp_path / "b")
 
 
-def test_the_report_carries_the_Q43_pending_sentence_VERBATIM_and_no_flag_value(
-    tmp_path: Path,
-) -> None:
-    """The GO ruling's condition (1). A computed flag here would be this repo's number, not his."""
+def test_the_report_says_the_flags_are_RETIRED_and_computes_none(tmp_path: Path) -> None:
+    """The GO ruling's condition (1), as the trader's Round-4 answer leaves it: he superseded
+    the question, so the flags are RETIRED and no value is computed. The run's OWN manifest
+    sentence is still quoted verbatim wherever the manifest is quoted -- that record is frozen --
+    and the report's own prose says what is true now."""
     text = render(tmp_path)
-    assert bt.CAPITAL_FLAGS_PENDING_NOTE in text
+    assert bt.CAPITAL_FLAGS_RETIRED_NOTE in text
+    assert "The capital-infeasibility FLAGS are RETIRED, not pending." in text
+    assert "retired by trader, Round 4" in text
+    assert bt.CAPITAL_FLAGS_PENDING_NOTE in text, (
+        "the manifest's own disclosures are quoted as the run wrote them"
+    )
     assert "capital_reference / margin_basis | null / null" in text
     assert "beyond cash" not in text.lower() and "beyond margin" not in text.lower()
 

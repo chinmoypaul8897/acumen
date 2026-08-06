@@ -892,14 +892,17 @@ def test_the_daily_count_distribution_is_the_full_distribution_not_just_its_max(
 
 
 # ==============================================================================================
-# The Q40-d capital-infeasibility flags -- BLOCKED on the trader's Q43
+# The Q40-d capital-infeasibility flags -- RETIRED by the trader in Round 4 (they were
+# BLOCKED on his Q43; he superseded the question rather than answering it, 06-Aug-2026)
 # ==============================================================================================
 
 
-def test_the_flags_are_not_computed_while_q43_is_pending() -> None:
+def test_the_flags_are_not_computed_and_say_they_are_RETIRED() -> None:
+    """Unchanged behaviour, corrected sentence: with either key null nothing is computed, and
+    the note no longer tells a reader an answer is on its way (architect, Round 4)."""
     report = pf.capital_flags(ROWS, capital_reference_paise=None, margin_basis=None)
     assert report.computed is False
-    assert report.note == pf.CAPITAL_FLAGS_PENDING_NOTE
+    assert report.note == pf.CAPITAL_FLAGS_RETIRED_NOTE
     assert "Q43" in report.note
     assert report.beyond_cash == () and report.beyond_margin == ()
 
@@ -911,7 +914,7 @@ def test_the_flags_are_not_computed_while_q43_is_pending() -> None:
 def test_half_an_answer_is_still_no_answer(capital, basis) -> None:
     """Neither key defaults. One without the other computes nothing."""
     report = pf.capital_flags(ROWS, capital_reference_paise=capital, margin_basis=basis)
-    assert report.computed is False and report.note == pf.CAPITAL_FLAGS_PENDING_NOTE
+    assert report.computed is False and report.note == pf.CAPITAL_FLAGS_RETIRED_NOTE
 
 
 def test_the_flags_compute_post_hoc_once_both_answers_are_in() -> None:
