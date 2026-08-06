@@ -57,7 +57,7 @@ def test_every_numeric_token_of_sections_1_to_9_is_UNCHANGED_by_the_final_edits(
 
 
 def test_the_frozen_baseline_covers_the_whole_of_sections_1_to_9() -> None:
-    """The freeze must be over the real thing: nine sections, and only six excluded lines."""
+    """The freeze must be over the real thing: nine sections, and only five excluded lines."""
     baseline = json.loads(BASELINE_JSON.read_text(encoding="utf-8"))
     module = _baseline_module()
     lines = module.sections_1_to_9(REPORT.read_text(encoding="utf-8"))
@@ -65,9 +65,11 @@ def test_the_frozen_baseline_covers_the_whole_of_sections_1_to_9() -> None:
     assert {section for section, _ in lines} == set(range(1, 10)), (
         "the baseline must span sections 1 through 9 of the regenerated report"
     )
-    assert baseline["lines_excluded_as_edited"] == 6, (
-        "the PRE-EDIT report has exactly six corrected lines; a seventh means the exclusion list "
-        "grew, and an exclusion list that grows is how a moved number hides"
+    assert baseline["lines_excluded_as_edited"] == 5, (
+        "the PRE-EDIT report has exactly five lines the corrections rewrite (section 5's `Worst "
+        "year` row goes through the same renderer but comes out byte-identical, so it is COMPARED, "
+        "not excluded); a sixth means the exclusion list grew, and an exclusion list that grows "
+        "is how a moved number hides"
     )
     assert baseline["ref"] == module.DEFAULT_REF
 

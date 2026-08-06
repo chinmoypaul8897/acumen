@@ -3,7 +3,7 @@
   "ref": "3cbfafa",
   "report": "docs/reports/chunk9b_backtest_report.md",
   "lines_in_sections_1_to_9": 558,
-  "lines_excluded_as_edited": 6,
+  "lines_excluded_as_edited": 5,
   "edited_line_markers": [
     [
       1,
@@ -16,10 +16,6 @@
     [
       5,
       "| Best year |"
-    ],
-    [
-      5,
-      "| Worst year |"
     ],
     [
       6,
@@ -50,7 +46,7 @@
       "An outlier count is therefore a statement"
     ]
   ],
-  "token_count": 2455,
+  "token_count": 2457,
   "tokens": [
     "1",
     "495,312",
@@ -479,6 +475,8 @@
     "40,909",
     "40,981",
     "-16836.02",
+    "2023",
+    "2,098,184.07",
     "16,736,018.20",
     "100,000.00",
     "188,345",

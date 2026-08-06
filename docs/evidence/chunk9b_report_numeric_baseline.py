@@ -44,14 +44,16 @@ TOKEN = re.compile(r"-?\d[\d,:.\-]*\d|\d")
 #: The lines the six presentational corrections rewrite, as (section number, substring). Scoped
 #: to a SECTION on purpose: an unscoped `price-proven` would also swallow section 9's own
 #: paragraph and the B149 caveat, which this session does not touch and which carry numbers of
-#: their own -- an exclusion list that quietly covers unedited lines is not a freeze. A line is
-#: dropped from the comparison on the baseline and on the new file alike; everything else in
-#: sections 1..9 must be token-identical, in order.
+#: their own -- an exclusion list that quietly covers unedited lines is not a freeze. Nor does
+#: this list cover a line the corrections merely COULD have touched: section 5's `Worst year`
+#: row goes through the same rewritten renderer as `Best year` but 2023 is a full year, so the
+#: row comes out byte-identical and is compared like any other. A line is dropped from the
+#: comparison on the baseline and on the new file alike; everything else in sections 1..9 must
+#: be token-identical, in order.
 EDITED_LINE_MARKERS: tuple[tuple[int, str], ...] = (
     (1, "price-proven"),                            # Q4: section 1's gates sentence
     (4, "**Concurrency, and which convention"),     # Q7: the new definitions bullet
-    (5, "| Best year |"),                           # Q3: section 5's extreme-year rows
-    (5, "| Worst year |"),                          # Q3
+    (5, "| Best year |"),                           # Q3: the one extreme-year row that changed
     (6, "% of its own notional"),                   # Q5: the old single-trade percentage rows
     (6, "% of notional -- RANGE"),                  # Q5: the rows that replace them
     (6, "percent-of-notional rows carry a RANGE"),  # Q5: the paragraph explaining them
