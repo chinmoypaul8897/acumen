@@ -3,8 +3,20 @@
   "ref": "3cbfafa",
   "report": "docs/reports/chunk9b_backtest_report.md",
   "lines_in_sections_1_to_9": 558,
-  "lines_excluded_as_edited": 5,
+  "lines_excluded_as_edited": 8,
   "edited_line_markers": [
+    [
+      1,
+      "The capital-infeasibility FLAGS are"
+    ],
+    [
+      1,
+      "**Q44 is"
+    ],
+    [
+      2,
+      "| capital_reference / margin_basis |"
+    ],
     [
       1,
       "price-proven"
@@ -46,7 +58,7 @@
       "An outlier count is therefore a statement"
     ]
   ],
-  "token_count": 2457,
+  "token_count": 2449,
   "tokens": [
     "1",
     "495,312",
@@ -54,7 +66,6 @@
     "3",
     "40",
     "11",
-    "43",
     "7",
     "9",
     "15",
@@ -80,12 +91,6 @@
     "2024",
     "2016",
     "5",
-    "44",
-    "44",
-    "2032",
-    "3.4",
-    "31",
-    "-2026",
     "2",
     "9",
     "2016-10-03",
@@ -139,7 +144,6 @@
     "21",
     "24",
     "3.3",
-    "43",
     "400,451,219",
     "256",
     "70",

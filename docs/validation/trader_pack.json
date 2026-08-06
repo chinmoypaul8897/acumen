@@ -23,6 +23,8 @@
       "avg_loss_paise": "-3258752603/32230",
       "break_even_win_rate": "12901401555277/37291794816621",
       "delivered_win_rate": "11877/37669",
+      "delivered_win_rate_over_decided_trades": "11877/37661",
+      "decided_trades": 188305,
       "winners": 59385,
       "losers": 128920,
       "flat": 40,
@@ -133,7 +135,7 @@
         "symbol": "HINDZINC",
         "day": "2026-07-30",
         "heading": "a stop-out",
-        "criterion": "a stop-out from the last day the machine walked, chosen so it is a TYPICAL one and not a freak: of that day's stop-outs, the one whose distance from entry to stop is nearest the middle distance of all the run's trades. Ties go to the stock this run traded most often",
+        "criterion": "a stop-out from the last day the machine walked, chosen so it is a TYPICAL one and not a freak: of that day's stop-outs -- all of them, gap entries included -- the one whose distance from entry to stop is nearest the middle distance of all the run's trades. Ties go to the stock this run traded most often, and if that ties too, to the first stock alphabetically",
         "architect_named": false,
         "bias": "bullish",
         "bias_rule": "rule-1-breakout",
@@ -182,7 +184,7 @@
         "symbol": "TIINDIA",
         "day": "2026-07-27",
         "heading": "a gap day",
-        "criterion": "the day the architect named for this slot, and the LAST gap entry of the whole ten years. It QUALIFIES: the ledger records it as a gap entry",
+        "criterion": "the day the architect named for this slot, and it falls on the LAST DAY of the ten years that any stock gapped in. It QUALIFIES: the ledger records it as a gap entry. It was not the only gap entry that day: 2 stocks gapped in on it (INDUSINDBK at 12:45, against this one at 12:30), so this is one of them and not a last of anything",
         "architect_named": true,
         "bias": "bearish",
         "bias_rule": "rule-1-breakout",
@@ -231,7 +233,7 @@
         "symbol": "POLYCAB",
         "day": "2026-07-29",
         "heading": "a day the 11:15 candle closed exactly ON the POC",
-        "criterion": "the most recent day in the whole run where the 11:15 candle closed at exactly the POC price -- your Round-3 answer A, the one where the first candle only picks the side. Where more than one stock did that on the same day, the one that went on to take a trade is shown, because a day with no trade cannot show the rest of the rule",
+        "criterion": "the most recent day in the whole run where the 11:15 candle closed at exactly the POC price -- your Round-3 answer A, the one where the first candle only picks the side. Where more than one stock did that on the same day, the one that went on to take a trade is shown, because a day with no trade cannot show the rest of the rule; then the stock this run traded most often, and then the last one alphabetically",
         "architect_named": false,
         "bias": "bullish",
         "bias_rule": "rule-1-breakout",
@@ -280,7 +282,7 @@
         "symbol": "SBIN",
         "day": "2026-07-30",
         "heading": "a day with no trade at all",
-        "criterion": "a day from the last day the machine walked where no rule fired on the two daily candles, so the machine kept the bias it already had -- and where no trade followed. Ties go to the stock this run traded most often",
+        "criterion": "a day from the last day the machine walked where no NEW rule fired on the two daily candles -- either an inside bar, which is your rule 1 and says the bias does not change, or nothing fitting at all -- so the machine kept the bias it already had, and no trade followed. Ties go to the stock this run traded most often, and then to the last one alphabetically",
         "architect_named": false,
         "bias": "bearish",
         "bias_rule": "inside-bar-carry",
@@ -313,7 +315,7 @@
         "symbol": "BAJFINANCE",
         "day": "2026-04-10",
         "heading": "the day that settles one open question",
-        "criterion": "a day where the two possible ways of rounding the profile's tick count draw a DIFFERENT number of rows -- so counting the rows on your own chart settles a question the specification still calls provisional. Of the days in the span's last calendar year where that happens, this is the one with the widest gap between the two row counts, and on it the POC itself moves",
+        "criterion": "a day where the two possible ways of rounding the profile's tick count draw a DIFFERENT number of rows -- so counting the rows on your own chart settles a question the specification still calls provisional. Of the days in the span's last calendar year where that happens, this is one of the days with the widest gap between the two row counts and with the POC itself moving. 2 days tie on both of those (ZYDUSLIFE on Wednesday 11 March 2026) -- this one is shown because it also TOOK A TRADE, and a day with no trade cannot show the rest of the rule",
         "architect_named": false,
         "bias": "bullish",
         "bias_rule": "inside-bar-carry",
@@ -384,9 +386,10 @@
     "counts": {
       "wait_rule_days": 4151,
       "wait_rule_days_that_traded": 2246,
-      "wait_rule_most_recent": [
+      "wait_rule_most_recent_day": "2026-07-29",
+      "wait_rule_day_shown_on_page": [
         "2026-07-29",
-        "POWERGRID"
+        "POLYCAB"
       ],
       "rule3_tie_days": 62,
       "rule3_tie_bullish": 62,
@@ -411,6 +414,9 @@
         "suppressed": 30,
         "rule-3-no-break-carry": 5
       },
+      "bias_rules_total": 493680,
+      "bias_rules_walked_without_a_rule": 1632,
+      "bias_rules_ruled_then_refused": 87192,
       "rounding_candidates_in_window": 51,
       "rounding_candidates_where_the_poc_moves": 13
     },
@@ -534,10 +540,21 @@
       "peak_notional_over_capital": "4214807761/10000000",
       "largest_single_notional_paise": 2740800000,
       "coverage": "409205/435641",
+      "coverage_usable_days": 409205,
+      "coverage_stored_days": 435641,
       "walked": 495312,
       "usable": 406488,
       "refused": 88824,
       "symbols": 204,
+      "universe_symbols": 210,
+      "quarantined_symbols": [
+        "APLAPOLLO",
+        "ASTRAL",
+        "IEX",
+        "NTPC",
+        "UPL",
+        "VBL"
+      ],
       "cost_per_trade_paise": 10000
     },
     "questions": {
@@ -551,6 +568,3080 @@
         "retire it",
         "change it",
         "take it live knowing the arithmetic"
+      ]
+    },
+    "points": {
+      "symbols": 204,
+      "trades": 188345,
+      "winners": 61406,
+      "win_rate": "61406/188345",
+      "points_paise": 7209643,
+      "avg_points_paise": "7209643/188345",
+      "cost_in_points_paise_at_one_share": "10000",
+      "shown_each_end": 20,
+      "companion": "docs/reports/points_by_symbol.md",
+      "caveat": "204 stocks ranked: even a no-edge system shows about 10 'good' ones by chance, at the conventional one-in-twenty rate. Treat the top entries as candidates for forward checking, never as proof.",
+      "by_symbol": [
+        {
+          "symbol": "BOSCHLTD",
+          "trades": 1133,
+          "winners": 404,
+          "losers": 727,
+          "flat": 2,
+          "win_rate": "404/1133",
+          "points_paise": 1053870,
+          "avg_points_paise": "1053870/1133",
+          "max_drawdown_points_paise": 325555,
+          "best_trade_points_paise": 94500,
+          "best_trade_day": "2026-06-03",
+          "worst_trade_points_paise": -45900,
+          "worst_trade_day": "2016-11-07"
+        },
+        {
+          "symbol": "SHREECEM",
+          "trades": 1130,
+          "winners": 385,
+          "losers": 744,
+          "flat": 1,
+          "win_rate": "77/226",
+          "points_paise": 895145,
+          "avg_points_paise": "179029/226",
+          "max_drawdown_points_paise": 298730,
+          "best_trade_points_paise": 68205,
+          "best_trade_day": "2024-02-05",
+          "worst_trade_points_paise": -37400,
+          "worst_trade_day": "2020-03-18"
+        },
+        {
+          "symbol": "POWERINDIA",
+          "trades": 712,
+          "winners": 266,
+          "losers": 444,
+          "flat": 2,
+          "win_rate": "133/356",
+          "points_paise": 714215,
+          "avg_points_paise": "714215/712",
+          "max_drawdown_points_paise": 104500,
+          "best_trade_points_paise": 61500,
+          "best_trade_day": "2026-04-24",
+          "worst_trade_points_paise": -38800,
+          "worst_trade_day": "2025-06-20"
+        },
+        {
+          "symbol": "PAGEIND",
+          "trades": 1165,
+          "winners": 387,
+          "losers": 777,
+          "flat": 1,
+          "win_rate": "387/1165",
+          "points_paise": 596495,
+          "avg_points_paise": "119299/233",
+          "max_drawdown_points_paise": 827975,
+          "best_trade_points_paise": 100500,
+          "best_trade_day": "2026-05-21",
+          "worst_trade_points_paise": -74195,
+          "worst_trade_day": "2024-06-04"
+        },
+        {
+          "symbol": "FORCEMOT",
+          "trades": 760,
+          "winners": 257,
+          "losers": 501,
+          "flat": 2,
+          "win_rate": "257/760",
+          "points_paise": 339720,
+          "avg_points_paise": "447",
+          "max_drawdown_points_paise": 106000,
+          "best_trade_points_paise": 76500,
+          "best_trade_day": "2026-01-23",
+          "worst_trade_points_paise": -46900,
+          "worst_trade_day": "2025-07-25"
+        },
+        {
+          "symbol": "BAJFINANCE",
+          "trades": 1121,
+          "winners": 396,
+          "losers": 724,
+          "flat": 1,
+          "win_rate": "396/1121",
+          "points_paise": 274810,
+          "avg_points_paise": "274810/1121",
+          "max_drawdown_points_paise": 40500,
+          "best_trade_points_paise": 13500,
+          "best_trade_day": "2019-07-08",
+          "worst_trade_points_paise": -8930,
+          "worst_trade_day": "2023-07-26"
+        },
+        {
+          "symbol": "EICHERMOT",
+          "trades": 1111,
+          "winners": 382,
+          "losers": 727,
+          "flat": 2,
+          "win_rate": "382/1111",
+          "points_paise": 249905,
+          "avg_points_paise": "249905/1111",
+          "max_drawdown_points_paise": 160820,
+          "best_trade_points_paise": 59770,
+          "best_trade_day": "2018-02-01",
+          "worst_trade_points_paise": -21540,
+          "worst_trade_day": "2019-08-16"
+        },
+        {
+          "symbol": "MARUTI",
+          "trades": 1071,
+          "winners": 383,
+          "losers": 687,
+          "flat": 1,
+          "win_rate": "383/1071",
+          "points_paise": 229325,
+          "avg_points_paise": "229325/1071",
+          "max_drawdown_points_paise": 143000,
+          "best_trade_points_paise": 24165,
+          "best_trade_day": "2018-09-21",
+          "worst_trade_points_paise": -51600,
+          "worst_trade_day": "2026-01-28"
+        },
+        {
+          "symbol": "ULTRACEMCO",
+          "trades": 1116,
+          "winners": 396,
+          "losers": 720,
+          "flat": 0,
+          "win_rate": "11/31",
+          "points_paise": 210680,
+          "avg_points_paise": "52670/279",
+          "max_drawdown_points_paise": 67805,
+          "best_trade_points_paise": 20400,
+          "best_trade_day": "2025-01-23",
+          "worst_trade_points_paise": -10790,
+          "worst_trade_day": "2020-03-26"
+        },
+        {
+          "symbol": "SOLARINDS",
+          "trades": 1174,
+          "winners": 341,
+          "losers": 827,
+          "flat": 6,
+          "win_rate": "341/1174",
+          "points_paise": 175190,
+          "avg_points_paise": "87595/587",
+          "max_drawdown_points_paise": 139640,
+          "best_trade_points_paise": 62400,
+          "best_trade_day": "2026-05-15",
+          "worst_trade_points_paise": -19500,
+          "worst_trade_day": "2025-11-11"
+        },
+        {
+          "symbol": "ADANIENT",
+          "trades": 1099,
+          "winners": 402,
+          "losers": 693,
+          "flat": 4,
+          "win_rate": "402/1099",
+          "points_paise": 169829,
+          "avg_points_paise": "169829/1099",
+          "max_drawdown_points_paise": 15703,
+          "best_trade_points_paise": 13710,
+          "best_trade_day": "2023-02-02",
+          "worst_trade_points_paise": -3525,
+          "worst_trade_day": "2022-09-22"
+        },
+        {
+          "symbol": "BAJAJ-AUTO",
+          "trades": 1107,
+          "winners": 398,
+          "losers": 709,
+          "flat": 0,
+          "win_rate": "398/1107",
+          "points_paise": 169495,
+          "avg_points_paise": "169495/1107",
+          "max_drawdown_points_paise": 54565,
+          "best_trade_points_paise": 13800,
+          "best_trade_day": "2024-10-28",
+          "worst_trade_points_paise": -9370,
+          "worst_trade_day": "2024-10-21"
+        },
+        {
+          "symbol": "INDIGO",
+          "trades": 1085,
+          "winners": 390,
+          "losers": 692,
+          "flat": 3,
+          "win_rate": "78/217",
+          "points_paise": 131330,
+          "avg_points_paise": "26266/217",
+          "max_drawdown_points_paise": 18650,
+          "best_trade_points_paise": 13850,
+          "best_trade_day": "2026-04-06",
+          "worst_trade_points_paise": -5450,
+          "worst_trade_day": "2025-10-24"
+        },
+        {
+          "symbol": "SIEMENS",
+          "trades": 1106,
+          "winners": 382,
+          "losers": 721,
+          "flat": 3,
+          "win_rate": "191/553",
+          "points_paise": 126421,
+          "avg_points_paise": "126421/1106",
+          "max_drawdown_points_paise": 30510,
+          "best_trade_points_paise": 61715,
+          "best_trade_day": "2024-12-20",
+          "worst_trade_points_paise": -14575,
+          "worst_trade_day": "2025-02-12"
+        },
+        {
+          "symbol": "BSE",
+          "trades": 951,
+          "winners": 323,
+          "losers": 626,
+          "flat": 2,
+          "win_rate": "323/951",
+          "points_paise": 123305,
+          "avg_points_paise": "123305/951",
+          "max_drawdown_points_paise": 32288,
+          "best_trade_points_paise": 18205,
+          "best_trade_day": "2024-12-05",
+          "worst_trade_points_paise": -6300,
+          "worst_trade_day": "2025-05-09"
+        },
+        {
+          "symbol": "POLYCAB",
+          "trades": 848,
+          "winners": 299,
+          "losers": 548,
+          "flat": 1,
+          "win_rate": "299/848",
+          "points_paise": 118645,
+          "avg_points_paise": "118645/848",
+          "max_drawdown_points_paise": 44350,
+          "best_trade_points_paise": 19190,
+          "best_trade_day": "2024-01-09",
+          "worst_trade_points_paise": -6350,
+          "worst_trade_day": "2026-07-09"
+        },
+        {
+          "symbol": "DMART",
+          "trades": 1039,
+          "winners": 350,
+          "losers": 686,
+          "flat": 3,
+          "win_rate": "350/1039",
+          "points_paise": 109915,
+          "avg_points_paise": "109915/1039",
+          "max_drawdown_points_paise": 43405,
+          "best_trade_points_paise": 26115,
+          "best_trade_day": "2021-10-13",
+          "worst_trade_points_paise": -5740,
+          "worst_trade_day": "2024-09-24"
+        },
+        {
+          "symbol": "AMBER",
+          "trades": 988,
+          "winners": 298,
+          "losers": 687,
+          "flat": 3,
+          "win_rate": "149/494",
+          "points_paise": 105380,
+          "avg_points_paise": "26345/247",
+          "max_drawdown_points_paise": 70685,
+          "best_trade_points_paise": 26220,
+          "best_trade_day": "2024-10-16",
+          "worst_trade_points_paise": -13700,
+          "worst_trade_day": "2025-01-07"
+        },
+        {
+          "symbol": "LT",
+          "trades": 1128,
+          "winners": 416,
+          "losers": 710,
+          "flat": 2,
+          "win_rate": "52/141",
+          "points_paise": 95181,
+          "avg_points_paise": "31727/376",
+          "max_drawdown_points_paise": 31450,
+          "best_trade_points_paise": 6690,
+          "best_trade_day": "2026-04-06",
+          "worst_trade_points_paise": -4215,
+          "worst_trade_day": "2023-02-01"
+        },
+        {
+          "symbol": "NAUKRI",
+          "trades": 1068,
+          "winners": 379,
+          "losers": 689,
+          "flat": 0,
+          "win_rate": "379/1068",
+          "points_paise": 91605,
+          "avg_points_paise": "30535/356",
+          "max_drawdown_points_paise": 88825,
+          "best_trade_points_paise": 17385,
+          "best_trade_day": "2021-04-12",
+          "worst_trade_points_paise": -14660,
+          "worst_trade_day": "2021-06-09"
+        },
+        {
+          "symbol": "SUPREMEIND",
+          "trades": 1084,
+          "winners": 336,
+          "losers": 739,
+          "flat": 9,
+          "win_rate": "84/271",
+          "points_paise": 88960,
+          "avg_points_paise": "22240/271",
+          "max_drawdown_points_paise": 31420,
+          "best_trade_points_paise": 16410,
+          "best_trade_day": "2024-05-06",
+          "worst_trade_points_paise": -6470,
+          "worst_trade_day": "2024-06-05"
+        },
+        {
+          "symbol": "ANGELONE",
+          "trades": 506,
+          "winners": 185,
+          "losers": 321,
+          "flat": 0,
+          "win_rate": "185/506",
+          "points_paise": 84948,
+          "avg_points_paise": "42474/253",
+          "max_drawdown_points_paise": 20370,
+          "best_trade_points_paise": 12570,
+          "best_trade_day": "2024-07-23",
+          "worst_trade_points_paise": -4290,
+          "worst_trade_day": "2024-10-03"
+        },
+        {
+          "symbol": "RADICO",
+          "trades": 1104,
+          "winners": 382,
+          "losers": 716,
+          "flat": 6,
+          "win_rate": "191/552",
+          "points_paise": 82535,
+          "avg_points_paise": "82535/1104",
+          "max_drawdown_points_paise": 21170,
+          "best_trade_points_paise": 12210,
+          "best_trade_day": "2026-03-06",
+          "worst_trade_points_paise": -5210,
+          "worst_trade_day": "2026-01-23"
+        },
+        {
+          "symbol": "JUBLFOOD",
+          "trades": 935,
+          "winners": 351,
+          "losers": 583,
+          "flat": 1,
+          "win_rate": "351/935",
+          "points_paise": 79965,
+          "avg_points_paise": "15993/187",
+          "max_drawdown_points_paise": 23655,
+          "best_trade_points_paise": 8385,
+          "best_trade_day": "2022-01-31",
+          "worst_trade_points_paise": -5640,
+          "worst_trade_day": "2021-10-12"
+        },
+        {
+          "symbol": "NESTLEIND",
+          "trades": 1132,
+          "winners": 376,
+          "losers": 755,
+          "flat": 1,
+          "win_rate": "94/283",
+          "points_paise": 75508,
+          "avg_points_paise": "18877/283",
+          "max_drawdown_points_paise": 164602,
+          "best_trade_points_paise": 38040,
+          "best_trade_day": "2023-02-16",
+          "worst_trade_points_paise": -21780,
+          "worst_trade_day": "2020-03-13"
+        },
+        {
+          "symbol": "TRENT",
+          "trades": 1116,
+          "winners": 355,
+          "losers": 757,
+          "flat": 4,
+          "win_rate": "355/1116",
+          "points_paise": 73073,
+          "avg_points_paise": "73073/1116",
+          "max_drawdown_points_paise": 49725,
+          "best_trade_points_paise": 38000,
+          "best_trade_day": "2024-08-09",
+          "worst_trade_points_paise": -12335,
+          "worst_trade_day": "2025-02-06"
+        },
+        {
+          "symbol": "BAJAJFINSV",
+          "trades": 746,
+          "winners": 247,
+          "losers": 498,
+          "flat": 1,
+          "win_rate": "247/746",
+          "points_paise": 67200,
+          "avg_points_paise": "33600/373",
+          "max_drawdown_points_paise": 164320,
+          "best_trade_points_paise": 43470,
+          "best_trade_day": "2021-08-24",
+          "worst_trade_points_paise": -13730,
+          "worst_trade_day": "2022-02-01"
+        },
+        {
+          "symbol": "HDFCAMC",
+          "trades": 913,
+          "winners": 317,
+          "losers": 594,
+          "flat": 2,
+          "win_rate": "317/913",
+          "points_paise": 66278,
+          "avg_points_paise": "66278/913",
+          "max_drawdown_points_paise": 38408,
+          "best_trade_points_paise": 9858,
+          "best_trade_day": "2024-05-07",
+          "worst_trade_points_paise": -13800,
+          "worst_trade_day": "2024-07-23"
+        },
+        {
+          "symbol": "RELIANCE",
+          "trades": 1125,
+          "winners": 387,
+          "losers": 738,
+          "flat": 0,
+          "win_rate": "43/125",
+          "points_paise": 61803,
+          "avg_points_paise": "6867/125",
+          "max_drawdown_points_paise": 10315,
+          "best_trade_points_paise": 4881,
+          "best_trade_day": "2022-12-23",
+          "worst_trade_points_paise": -3095,
+          "worst_trade_day": "2022-05-18"
+        },
+        {
+          "symbol": "MCX",
+          "trades": 1058,
+          "winners": 367,
+          "losers": 691,
+          "flat": 0,
+          "win_rate": "367/1058",
+          "points_paise": 58530,
+          "avg_points_paise": "29265/529",
+          "max_drawdown_points_paise": 47560,
+          "best_trade_points_paise": 22715,
+          "best_trade_day": "2024-11-05",
+          "worst_trade_points_paise": -8600,
+          "worst_trade_day": "2025-08-06"
+        },
+        {
+          "symbol": "ABB",
+          "trades": 1085,
+          "winners": 378,
+          "losers": 705,
+          "flat": 2,
+          "win_rate": "54/155",
+          "points_paise": 56114,
+          "avg_points_paise": "56114/1085",
+          "max_drawdown_points_paise": 69290,
+          "best_trade_points_paise": 28385,
+          "best_trade_day": "2024-12-20",
+          "worst_trade_points_paise": -8575,
+          "worst_trade_day": "2025-02-06"
+        },
+        {
+          "symbol": "M&M",
+          "trades": 1105,
+          "winners": 395,
+          "losers": 706,
+          "flat": 4,
+          "win_rate": "79/221",
+          "points_paise": 54828,
+          "avg_points_paise": "54828/1105",
+          "max_drawdown_points_paise": 23915,
+          "best_trade_points_paise": 7230,
+          "best_trade_day": "2026-02-02",
+          "worst_trade_points_paise": -6220,
+          "worst_trade_day": "2026-02-11"
+        },
+        {
+          "symbol": "WAAREEENER",
+          "trades": 205,
+          "winners": 77,
+          "losers": 128,
+          "flat": 0,
+          "win_rate": "77/205",
+          "points_paise": 54800,
+          "avg_points_paise": "10960/41",
+          "max_drawdown_points_paise": 13970,
+          "best_trade_points_paise": 6690,
+          "best_trade_day": "2024-12-17",
+          "worst_trade_points_paise": -5435,
+          "worst_trade_day": "2024-11-13"
+        },
+        {
+          "symbol": "ASIANPAINT",
+          "trades": 1110,
+          "winners": 387,
+          "losers": 721,
+          "flat": 2,
+          "win_rate": "129/370",
+          "points_paise": 50520,
+          "avg_points_paise": "1684/37",
+          "max_drawdown_points_paise": 21800,
+          "best_trade_points_paise": 6300,
+          "best_trade_day": "2021-11-16",
+          "worst_trade_points_paise": -3455,
+          "worst_trade_day": "2020-03-13"
+        },
+        {
+          "symbol": "MANKIND",
+          "trades": 322,
+          "winners": 111,
+          "losers": 211,
+          "flat": 0,
+          "win_rate": "111/322",
+          "points_paise": 45450,
+          "avg_points_paise": "22725/161",
+          "max_drawdown_points_paise": 16075,
+          "best_trade_points_paise": 8175,
+          "best_trade_day": "2024-10-31",
+          "worst_trade_points_paise": -3700,
+          "worst_trade_day": "2024-10-01"
+        },
+        {
+          "symbol": "PAYTM",
+          "trades": 481,
+          "winners": 185,
+          "losers": 294,
+          "flat": 2,
+          "win_rate": "5/13",
+          "points_paise": 42510,
+          "avg_points_paise": "3270/37",
+          "max_drawdown_points_paise": 9130,
+          "best_trade_points_paise": 3360,
+          "best_trade_day": "2026-04-06",
+          "worst_trade_points_paise": -1650,
+          "worst_trade_day": "2024-10-22"
+        },
+        {
+          "symbol": "INDUSINDBK",
+          "trades": 1104,
+          "winners": 385,
+          "losers": 715,
+          "flat": 4,
+          "win_rate": "385/1104",
+          "points_paise": 42230,
+          "avg_points_paise": "21115/552",
+          "max_drawdown_points_paise": 17000,
+          "best_trade_points_paise": 7635,
+          "best_trade_day": "2020-03-18",
+          "worst_trade_points_paise": -2885,
+          "worst_trade_day": "2020-03-26"
+        },
+        {
+          "symbol": "BRITANNIA",
+          "trades": 1088,
+          "winners": 382,
+          "losers": 704,
+          "flat": 2,
+          "win_rate": "191/544",
+          "points_paise": 41419,
+          "avg_points_paise": "41419/1088",
+          "max_drawdown_points_paise": 47830,
+          "best_trade_points_paise": 8155,
+          "best_trade_day": "2020-03-18",
+          "worst_trade_points_paise": -7334,
+          "worst_trade_day": "2018-11-14"
+        },
+        {
+          "symbol": "COFORGE",
+          "trades": 648,
+          "winners": 213,
+          "losers": 435,
+          "flat": 0,
+          "win_rate": "71/216",
+          "points_paise": 40240,
+          "avg_points_paise": "5030/81",
+          "max_drawdown_points_paise": 53700,
+          "best_trade_points_paise": 14625,
+          "best_trade_day": "2024-12-30",
+          "worst_trade_points_paise": -8000,
+          "worst_trade_day": "2024-10-23"
+        },
+        {
+          "symbol": "TATAELXSI",
+          "trades": 1099,
+          "winners": 354,
+          "losers": 744,
+          "flat": 1,
+          "win_rate": "354/1099",
+          "points_paise": 40144,
+          "avg_points_paise": "40144/1099",
+          "max_drawdown_points_paise": 78120,
+          "best_trade_points_paise": 38385,
+          "best_trade_day": "2024-08-27",
+          "worst_trade_points_paise": -9435,
+          "worst_trade_day": "2022-01-21"
+        },
+        {
+          "symbol": "NUVAMA",
+          "trades": 326,
+          "winners": 108,
+          "losers": 218,
+          "flat": 0,
+          "win_rate": "54/163",
+          "points_paise": 38700,
+          "avg_points_paise": "19350/163",
+          "max_drawdown_points_paise": 42845,
+          "best_trade_points_paise": 17535,
+          "best_trade_day": "2025-01-29",
+          "worst_trade_points_paise": -7850,
+          "worst_trade_day": "2025-07-31"
+        },
+        {
+          "symbol": "ICICIGI",
+          "trades": 1028,
+          "winners": 351,
+          "losers": 677,
+          "flat": 0,
+          "win_rate": "351/1028",
+          "points_paise": 37965,
+          "avg_points_paise": "37965/1028",
+          "max_drawdown_points_paise": 36455,
+          "best_trade_points_paise": 8835,
+          "best_trade_day": "2020-03-25",
+          "worst_trade_points_paise": -2330,
+          "worst_trade_day": "2025-01-06"
+        },
+        {
+          "symbol": "COLPAL",
+          "trades": 1146,
+          "winners": 406,
+          "losers": 736,
+          "flat": 4,
+          "win_rate": "203/573",
+          "points_paise": 37940,
+          "avg_points_paise": "18970/573",
+          "max_drawdown_points_paise": 18810,
+          "best_trade_points_paise": 7615,
+          "best_trade_day": "2024-06-04",
+          "worst_trade_points_paise": -2550,
+          "worst_trade_day": "2024-05-14"
+        },
+        {
+          "symbol": "KEI",
+          "trades": 1103,
+          "winners": 335,
+          "losers": 760,
+          "flat": 8,
+          "win_rate": "335/1103",
+          "points_paise": 35965,
+          "avg_points_paise": "35965/1103",
+          "max_drawdown_points_paise": 52990,
+          "best_trade_points_paise": 11550,
+          "best_trade_day": "2026-04-02",
+          "worst_trade_points_paise": -7900,
+          "worst_trade_day": "2026-06-09"
+        },
+        {
+          "symbol": "SRF",
+          "trades": 1087,
+          "winners": 356,
+          "losers": 730,
+          "flat": 1,
+          "win_rate": "356/1087",
+          "points_paise": 35945,
+          "avg_points_paise": "35945/1087",
+          "max_drawdown_points_paise": 79140,
+          "best_trade_points_paise": 12175,
+          "best_trade_day": "2021-09-02",
+          "worst_trade_points_paise": -11395,
+          "worst_trade_day": "2021-07-29"
+        },
+        {
+          "symbol": "CONCOR",
+          "trades": 1103,
+          "winners": 379,
+          "losers": 724,
+          "flat": 0,
+          "win_rate": "379/1103",
+          "points_paise": 34375,
+          "avg_points_paise": "34375/1103",
+          "max_drawdown_points_paise": 14065,
+          "best_trade_points_paise": 4350,
+          "best_trade_day": "2022-05-20",
+          "worst_trade_points_paise": -1360,
+          "worst_trade_day": "2018-02-27"
+        },
+        {
+          "symbol": "BHARATFORG",
+          "trades": 1122,
+          "winners": 385,
+          "losers": 737,
+          "flat": 0,
+          "win_rate": "35/102",
+          "points_paise": 30301,
+          "avg_points_paise": "30301/1122",
+          "max_drawdown_points_paise": 14210,
+          "best_trade_points_paise": 3630,
+          "best_trade_day": "2026-03-11",
+          "worst_trade_points_paise": -1910,
+          "worst_trade_day": "2024-09-19"
+        },
+        {
+          "symbol": "AXISBANK",
+          "trades": 1089,
+          "winners": 375,
+          "losers": 711,
+          "flat": 3,
+          "win_rate": "125/363",
+          "points_paise": 30280,
+          "avg_points_paise": "30280/1089",
+          "max_drawdown_points_paise": 11790,
+          "best_trade_points_paise": 2910,
+          "best_trade_day": "2026-04-02",
+          "worst_trade_points_paise": -1075,
+          "worst_trade_day": "2020-03-20"
+        },
+        {
+          "symbol": "NYKAA",
+          "trades": 541,
+          "winners": 190,
+          "losers": 348,
+          "flat": 3,
+          "win_rate": "190/541",
+          "points_paise": 28886,
+          "avg_points_paise": "28886/541",
+          "max_drawdown_points_paise": 5600,
+          "best_trade_points_paise": 4940,
+          "best_trade_day": "2022-10-03",
+          "worst_trade_points_paise": -1820,
+          "worst_trade_day": "2022-05-26"
+        },
+        {
+          "symbol": "BDL",
+          "trades": 439,
+          "winners": 165,
+          "losers": 273,
+          "flat": 1,
+          "win_rate": "165/439",
+          "points_paise": 27753,
+          "avg_points_paise": "27753/439",
+          "max_drawdown_points_paise": 8455,
+          "best_trade_points_paise": 7122,
+          "best_trade_day": "2024-05-22",
+          "worst_trade_points_paise": -2790,
+          "worst_trade_day": "2024-02-16"
+        },
+        {
+          "symbol": "POLICYBZR",
+          "trades": 512,
+          "winners": 176,
+          "losers": 333,
+          "flat": 3,
+          "win_rate": "11/32",
+          "points_paise": 26625,
+          "avg_points_paise": "26625/512",
+          "max_drawdown_points_paise": 19560,
+          "best_trade_points_paise": 5535,
+          "best_trade_day": "2021-12-13",
+          "worst_trade_points_paise": -2810,
+          "worst_trade_day": "2025-06-26"
+        },
+        {
+          "symbol": "HCLTECH",
+          "trades": 1147,
+          "winners": 403,
+          "losers": 739,
+          "flat": 5,
+          "win_rate": "13/37",
+          "points_paise": 26452,
+          "avg_points_paise": "26452/1147",
+          "max_drawdown_points_paise": 13275,
+          "best_trade_points_paise": 5340,
+          "best_trade_day": "2024-06-04",
+          "worst_trade_points_paise": -2525,
+          "worst_trade_day": "2024-09-20"
+        },
+        {
+          "symbol": "BLUESTARCO",
+          "trades": 1167,
+          "winners": 365,
+          "losers": 796,
+          "flat": 6,
+          "win_rate": "365/1167",
+          "points_paise": 24198,
+          "avg_points_paise": "8066/389",
+          "max_drawdown_points_paise": 34352,
+          "best_trade_points_paise": 7965,
+          "best_trade_day": "2025-01-01",
+          "worst_trade_points_paise": -2425,
+          "worst_trade_day": "2024-06-04"
+        },
+        {
+          "symbol": "HYUNDAI",
+          "trades": 188,
+          "winners": 66,
+          "losers": 122,
+          "flat": 0,
+          "win_rate": "33/94",
+          "points_paise": 23505,
+          "avg_points_paise": "23505/188",
+          "max_drawdown_points_paise": 8430,
+          "best_trade_points_paise": 5390,
+          "best_trade_day": "2025-06-27",
+          "worst_trade_points_paise": -3210,
+          "worst_trade_day": "2026-07-16"
+        },
+        {
+          "symbol": "SUNPHARMA",
+          "trades": 1057,
+          "winners": 369,
+          "losers": 686,
+          "flat": 2,
+          "win_rate": "369/1057",
+          "points_paise": 23060,
+          "avg_points_paise": "23060/1057",
+          "max_drawdown_points_paise": 10180,
+          "best_trade_points_paise": 3900,
+          "best_trade_day": "2024-08-01",
+          "worst_trade_points_paise": -2045,
+          "worst_trade_day": "2022-01-31"
+        },
+        {
+          "symbol": "BANDHANBNK",
+          "trades": 943,
+          "winners": 332,
+          "losers": 607,
+          "flat": 4,
+          "win_rate": "332/943",
+          "points_paise": 22124,
+          "avg_points_paise": "22124/943",
+          "max_drawdown_points_paise": 7100,
+          "best_trade_points_paise": 2100,
+          "best_trade_day": "2019-12-16",
+          "worst_trade_points_paise": -865,
+          "worst_trade_day": "2019-06-19"
+        },
+        {
+          "symbol": "ADANIENSOL",
+          "trades": 338,
+          "winners": 123,
+          "losers": 215,
+          "flat": 0,
+          "win_rate": "123/338",
+          "points_paise": 21805,
+          "avg_points_paise": "21805/338",
+          "max_drawdown_points_paise": 8640,
+          "best_trade_points_paise": 3960,
+          "best_trade_day": "2026-04-10",
+          "worst_trade_points_paise": -1680,
+          "worst_trade_day": "2026-06-05"
+        },
+        {
+          "symbol": "CDSL",
+          "trades": 993,
+          "winners": 327,
+          "losers": 656,
+          "flat": 10,
+          "win_rate": "109/331",
+          "points_paise": 21644,
+          "avg_points_paise": "21644/993",
+          "max_drawdown_points_paise": 19620,
+          "best_trade_points_paise": 3810,
+          "best_trade_day": "2021-12-14",
+          "worst_trade_points_paise": -2756,
+          "worst_trade_day": "2024-07-02"
+        },
+        {
+          "symbol": "INDIANB",
+          "trades": 1127,
+          "winners": 391,
+          "losers": 730,
+          "flat": 6,
+          "win_rate": "17/49",
+          "points_paise": 21580,
+          "avg_points_paise": "21580/1127",
+          "max_drawdown_points_paise": 4085,
+          "best_trade_points_paise": 2265,
+          "best_trade_day": "2026-01-22",
+          "worst_trade_points_paise": -1065,
+          "worst_trade_day": "2026-01-30"
+        },
+        {
+          "symbol": "HAVELLS",
+          "trades": 1113,
+          "winners": 387,
+          "losers": 724,
+          "flat": 2,
+          "win_rate": "129/371",
+          "points_paise": 18420,
+          "avg_points_paise": "6140/371",
+          "max_drawdown_points_paise": 16425,
+          "best_trade_points_paise": 4305,
+          "best_trade_day": "2022-01-24",
+          "worst_trade_points_paise": -4160,
+          "worst_trade_day": "2026-07-17"
+        },
+        {
+          "symbol": "BHARTIARTL",
+          "trades": 1124,
+          "winners": 370,
+          "losers": 748,
+          "flat": 6,
+          "win_rate": "185/562",
+          "points_paise": 17316,
+          "avg_points_paise": "4329/281",
+          "max_drawdown_points_paise": 11640,
+          "best_trade_points_paise": 3300,
+          "best_trade_day": "2026-05-14",
+          "worst_trade_points_paise": -2050,
+          "worst_trade_day": "2019-10-24"
+        },
+        {
+          "symbol": "TVSMOTOR",
+          "trades": 1102,
+          "winners": 357,
+          "losers": 744,
+          "flat": 1,
+          "win_rate": "357/1102",
+          "points_paise": 17050,
+          "avg_points_paise": "8525/551",
+          "max_drawdown_points_paise": 17585,
+          "best_trade_points_paise": 5475,
+          "best_trade_day": "2024-07-23",
+          "worst_trade_points_paise": -2810,
+          "worst_trade_day": "2026-04-08"
+        },
+        {
+          "symbol": "HAL",
+          "trades": 918,
+          "winners": 293,
+          "losers": 621,
+          "flat": 4,
+          "win_rate": "293/918",
+          "points_paise": 16976,
+          "avg_points_paise": "8488/459",
+          "max_drawdown_points_paise": 30740,
+          "best_trade_points_paise": 18785,
+          "best_trade_day": "2024-05-16",
+          "worst_trade_points_paise": -18030,
+          "worst_trade_day": "2026-05-14"
+        },
+        {
+          "symbol": "CHOLAFIN",
+          "trades": 1109,
+          "winners": 366,
+          "losers": 739,
+          "flat": 4,
+          "win_rate": "366/1109",
+          "points_paise": 16600,
+          "avg_points_paise": "16600/1109",
+          "max_drawdown_points_paise": 19005,
+          "best_trade_points_paise": 3625,
+          "best_trade_day": "2019-05-23",
+          "worst_trade_points_paise": -3260,
+          "worst_trade_day": "2025-01-31"
+        },
+        {
+          "symbol": "YESBANK",
+          "trades": 1185,
+          "winners": 314,
+          "losers": 842,
+          "flat": 29,
+          "win_rate": "314/1185",
+          "points_paise": 16463,
+          "avg_points_paise": "16463/1185",
+          "max_drawdown_points_paise": 3355,
+          "best_trade_points_paise": 6420,
+          "best_trade_day": "2017-05-12",
+          "worst_trade_points_paise": -940,
+          "worst_trade_day": "2017-05-04"
+        },
+        {
+          "symbol": "PREMIERENE",
+          "trades": 222,
+          "winners": 77,
+          "losers": 145,
+          "flat": 0,
+          "win_rate": "77/222",
+          "points_paise": 15325,
+          "avg_points_paise": "15325/222",
+          "max_drawdown_points_paise": 10690,
+          "best_trade_points_paise": 4935,
+          "best_trade_day": "2024-11-29",
+          "worst_trade_points_paise": -3275,
+          "worst_trade_day": "2024-09-06"
+        },
+        {
+          "symbol": "GODREJPROP",
+          "trades": 1153,
+          "winners": 380,
+          "losers": 771,
+          "flat": 2,
+          "win_rate": "380/1153",
+          "points_paise": 15195,
+          "avg_points_paise": "15195/1153",
+          "max_drawdown_points_paise": 50200,
+          "best_trade_points_paise": 7725,
+          "best_trade_day": "2021-09-27",
+          "worst_trade_points_paise": -3315,
+          "worst_trade_day": "2024-05-03"
+        },
+        {
+          "symbol": "TECHM",
+          "trades": 1055,
+          "winners": 376,
+          "losers": 674,
+          "flat": 5,
+          "win_rate": "376/1055",
+          "points_paise": 14920,
+          "avg_points_paise": "2984/211",
+          "max_drawdown_points_paise": 19885,
+          "best_trade_points_paise": 3225,
+          "best_trade_day": "2020-03-19",
+          "worst_trade_points_paise": -2395,
+          "worst_trade_day": "2024-12-05"
+        },
+        {
+          "symbol": "PNBHOUSING",
+          "trades": 1143,
+          "winners": 381,
+          "losers": 755,
+          "flat": 7,
+          "win_rate": "1/3",
+          "points_paise": 14581,
+          "avg_points_paise": "14581/1143",
+          "max_drawdown_points_paise": 17865,
+          "best_trade_points_paise": 3495,
+          "best_trade_day": "2017-09-04",
+          "worst_trade_points_paise": -1990,
+          "worst_trade_day": "2017-03-15"
+        },
+        {
+          "symbol": "SBICARD",
+          "trades": 761,
+          "winners": 260,
+          "losers": 499,
+          "flat": 2,
+          "win_rate": "260/761",
+          "points_paise": 13975,
+          "avg_points_paise": "13975/761",
+          "max_drawdown_points_paise": 4910,
+          "best_trade_points_paise": 2220,
+          "best_trade_day": "2025-09-15",
+          "worst_trade_points_paise": -1415,
+          "worst_trade_day": "2021-10-19"
+        },
+        {
+          "symbol": "INDHOTEL",
+          "trades": 1110,
+          "winners": 376,
+          "losers": 728,
+          "flat": 6,
+          "win_rate": "188/555",
+          "points_paise": 13825,
+          "avg_points_paise": "2765/222",
+          "max_drawdown_points_paise": 4075,
+          "best_trade_points_paise": 1530,
+          "best_trade_day": "2024-10-21",
+          "worst_trade_points_paise": -685,
+          "worst_trade_day": "2025-02-19"
+        },
+        {
+          "symbol": "TCS",
+          "trades": 1102,
+          "winners": 374,
+          "losers": 727,
+          "flat": 1,
+          "win_rate": "187/551",
+          "points_paise": 13748,
+          "avg_points_paise": "6874/551",
+          "max_drawdown_points_paise": 33225,
+          "best_trade_points_paise": 5715,
+          "best_trade_day": "2024-11-19",
+          "worst_trade_points_paise": -5185,
+          "worst_trade_day": "2024-06-04"
+        },
+        {
+          "symbol": "ADANIPORTS",
+          "trades": 1106,
+          "winners": 381,
+          "losers": 719,
+          "flat": 6,
+          "win_rate": "381/1106",
+          "points_paise": 13510,
+          "avg_points_paise": "965/79",
+          "max_drawdown_points_paise": 20180,
+          "best_trade_points_paise": 3830,
+          "best_trade_day": "2024-10-29",
+          "worst_trade_points_paise": -4650,
+          "worst_trade_day": "2024-07-23"
+        },
+        {
+          "symbol": "BPCL",
+          "trades": 1007,
+          "winners": 356,
+          "losers": 644,
+          "flat": 7,
+          "win_rate": "356/1007",
+          "points_paise": 13415,
+          "avg_points_paise": "13415/1007",
+          "max_drawdown_points_paise": 8770,
+          "best_trade_points_paise": 1425,
+          "best_trade_day": "2019-09-24",
+          "worst_trade_points_paise": -960,
+          "worst_trade_day": "2019-10-18"
+        },
+        {
+          "symbol": "HDFCLIFE",
+          "trades": 1033,
+          "winners": 360,
+          "losers": 671,
+          "flat": 2,
+          "win_rate": "360/1033",
+          "points_paise": 13005,
+          "avg_points_paise": "13005/1033",
+          "max_drawdown_points_paise": 5435,
+          "best_trade_points_paise": 1785,
+          "best_trade_day": "2020-03-18",
+          "worst_trade_points_paise": -1365,
+          "worst_trade_day": "2020-07-21"
+        },
+        {
+          "symbol": "PIDILITIND",
+          "trades": 1124,
+          "winners": 400,
+          "losers": 722,
+          "flat": 2,
+          "win_rate": "100/281",
+          "points_paise": 12650,
+          "avg_points_paise": "6325/562",
+          "max_drawdown_points_paise": 28618,
+          "best_trade_points_paise": 5980,
+          "best_trade_day": "2024-10-18",
+          "worst_trade_points_paise": -3700,
+          "worst_trade_day": "2022-03-08"
+        },
+        {
+          "symbol": "CGPOWER",
+          "trades": 1031,
+          "winners": 304,
+          "losers": 702,
+          "flat": 25,
+          "win_rate": "304/1031",
+          "points_paise": 11940,
+          "avg_points_paise": "11940/1031",
+          "max_drawdown_points_paise": 4835,
+          "best_trade_points_paise": 2310,
+          "best_trade_day": "2023-11-22",
+          "worst_trade_points_paise": -965,
+          "worst_trade_day": "2026-07-24"
+        },
+        {
+          "symbol": "COALINDIA",
+          "trades": 1095,
+          "winners": 376,
+          "losers": 706,
+          "flat": 13,
+          "win_rate": "376/1095",
+          "points_paise": 11590,
+          "avg_points_paise": "2318/219",
+          "max_drawdown_points_paise": 4570,
+          "best_trade_points_paise": 1770,
+          "best_trade_day": "2026-04-10",
+          "worst_trade_points_paise": -495,
+          "worst_trade_day": "2026-03-13"
+        },
+        {
+          "symbol": "SBIN",
+          "trades": 1157,
+          "winners": 389,
+          "losers": 763,
+          "flat": 5,
+          "win_rate": "389/1157",
+          "points_paise": 11150,
+          "avg_points_paise": "11150/1157",
+          "max_drawdown_points_paise": 5520,
+          "best_trade_points_paise": 2100,
+          "best_trade_day": "2026-06-03",
+          "worst_trade_points_paise": -1000,
+          "worst_trade_day": "2026-05-07"
+        },
+        {
+          "symbol": "ADANIPOWER",
+          "trades": 1109,
+          "winners": 342,
+          "losers": 748,
+          "flat": 19,
+          "win_rate": "342/1109",
+          "points_paise": 11023,
+          "avg_points_paise": "11023/1109",
+          "max_drawdown_points_paise": 5945,
+          "best_trade_points_paise": 1785,
+          "best_trade_day": "2024-07-23",
+          "worst_trade_points_paise": -895,
+          "worst_trade_day": "2025-01-14"
+        },
+        {
+          "symbol": "KALYANKJIL",
+          "trades": 599,
+          "winners": 195,
+          "losers": 397,
+          "flat": 7,
+          "win_rate": "195/599",
+          "points_paise": 10345,
+          "avg_points_paise": "10345/599",
+          "max_drawdown_points_paise": 5180,
+          "best_trade_points_paise": 2040,
+          "best_trade_day": "2025-08-08",
+          "worst_trade_points_paise": -1960,
+          "worst_trade_day": "2024-07-23"
+        },
+        {
+          "symbol": "DLF",
+          "trades": 1106,
+          "winners": 369,
+          "losers": 736,
+          "flat": 1,
+          "win_rate": "369/1106",
+          "points_paise": 9905,
+          "avg_points_paise": "1415/158",
+          "max_drawdown_points_paise": 4395,
+          "best_trade_points_paise": 1560,
+          "best_trade_day": "2024-11-12",
+          "worst_trade_points_paise": -940,
+          "worst_trade_day": "2024-07-23"
+        },
+        {
+          "symbol": "VEDL",
+          "trades": 972,
+          "winners": 328,
+          "losers": 640,
+          "flat": 4,
+          "win_rate": "82/243",
+          "points_paise": 9455,
+          "avg_points_paise": "9455/972",
+          "max_drawdown_points_paise": 7085,
+          "best_trade_points_paise": 990,
+          "best_trade_day": "2016-11-09",
+          "worst_trade_points_paise": -435,
+          "worst_trade_day": "2026-03-09"
+        },
+        {
+          "symbol": "SONACOMS",
+          "trades": 564,
+          "winners": 200,
+          "losers": 364,
+          "flat": 0,
+          "win_rate": "50/141",
+          "points_paise": 9200,
+          "avg_points_paise": "2300/141",
+          "max_drawdown_points_paise": 4840,
+          "best_trade_points_paise": 1980,
+          "best_trade_day": "2022-01-28",
+          "worst_trade_points_paise": -1445,
+          "worst_trade_day": "2024-03-15"
+        },
+        {
+          "symbol": "JSWENERGY",
+          "trades": 1120,
+          "winners": 361,
+          "losers": 750,
+          "flat": 9,
+          "win_rate": "361/1120",
+          "points_paise": 8440,
+          "avg_points_paise": "211/28",
+          "max_drawdown_points_paise": 9855,
+          "best_trade_points_paise": 1980,
+          "best_trade_day": "2024-09-27",
+          "worst_trade_points_paise": -1555,
+          "worst_trade_day": "2024-10-23"
+        },
+        {
+          "symbol": "MFSL",
+          "trades": 1111,
+          "winners": 365,
+          "losers": 743,
+          "flat": 3,
+          "win_rate": "365/1111",
+          "points_paise": 8070,
+          "avg_points_paise": "8070/1111",
+          "max_drawdown_points_paise": 15575,
+          "best_trade_points_paise": 2450,
+          "best_trade_day": "2022-01-07",
+          "worst_trade_points_paise": -1600,
+          "worst_trade_day": "2026-07-03"
+        },
+        {
+          "symbol": "UNOMINDA",
+          "trades": 431,
+          "winners": 143,
+          "losers": 287,
+          "flat": 1,
+          "win_rate": "143/431",
+          "points_paise": 7705,
+          "avg_points_paise": "7705/431",
+          "max_drawdown_points_paise": 11530,
+          "best_trade_points_paise": 3145,
+          "best_trade_day": "2024-11-25",
+          "worst_trade_points_paise": -2430,
+          "worst_trade_day": "2024-07-23"
+        },
+        {
+          "symbol": "BHEL",
+          "trades": 1129,
+          "winners": 377,
+          "losers": 737,
+          "flat": 15,
+          "win_rate": "377/1129",
+          "points_paise": 7497,
+          "avg_points_paise": "7497/1129",
+          "max_drawdown_points_paise": 2190,
+          "best_trade_points_paise": 945,
+          "best_trade_day": "2024-06-06",
+          "worst_trade_points_paise": -420,
+          "worst_trade_day": "2024-06-14"
+        },
+        {
+          "symbol": "POWERGRID",
+          "trades": 1115,
+          "winners": 375,
+          "losers": 728,
+          "flat": 12,
+          "win_rate": "75/223",
+          "points_paise": 7495,
+          "avg_points_paise": "1499/223",
+          "max_drawdown_points_paise": 2775,
+          "best_trade_points_paise": 645,
+          "best_trade_day": "2016-11-17",
+          "worst_trade_points_paise": -285,
+          "worst_trade_day": "2020-03-20"
+        },
+        {
+          "symbol": "KFINTECH",
+          "trades": 380,
+          "winners": 124,
+          "losers": 252,
+          "flat": 4,
+          "win_rate": "31/95",
+          "points_paise": 7330,
+          "avg_points_paise": "733/38",
+          "max_drawdown_points_paise": 14150,
+          "best_trade_points_paise": 5430,
+          "best_trade_day": "2024-08-09",
+          "worst_trade_points_paise": -2200,
+          "worst_trade_day": "2025-06-23"
+        },
+        {
+          "symbol": "WIPRO",
+          "trades": 1155,
+          "winners": 381,
+          "losers": 772,
+          "flat": 2,
+          "win_rate": "127/385",
+          "points_paise": 7216,
+          "avg_points_paise": "656/105",
+          "max_drawdown_points_paise": 2538,
+          "best_trade_points_paise": 918,
+          "best_trade_day": "2021-01-15",
+          "worst_trade_points_paise": -540,
+          "worst_trade_day": "2021-02-19"
+        },
+        {
+          "symbol": "RBLBANK",
+          "trades": 1118,
+          "winners": 366,
+          "losers": 746,
+          "flat": 6,
+          "win_rate": "183/559",
+          "points_paise": 7002,
+          "avg_points_paise": "3501/559",
+          "max_drawdown_points_paise": 6340,
+          "best_trade_points_paise": 2985,
+          "best_trade_day": "2019-10-31",
+          "worst_trade_points_paise": -590,
+          "worst_trade_day": "2019-06-04"
+        },
+        {
+          "symbol": "INFY",
+          "trades": 1106,
+          "winners": 372,
+          "losers": 731,
+          "flat": 3,
+          "win_rate": "186/553",
+          "points_paise": 6899,
+          "avg_points_paise": "6899/1106",
+          "max_drawdown_points_paise": 15430,
+          "best_trade_points_paise": 2745,
+          "best_trade_day": "2024-06-04",
+          "worst_trade_points_paise": -1400,
+          "worst_trade_day": "2025-01-21"
+        },
+        {
+          "symbol": "LODHA",
+          "trades": 588,
+          "winners": 184,
+          "losers": 403,
+          "flat": 1,
+          "win_rate": "46/147",
+          "points_paise": 6630,
+          "avg_points_paise": "1105/98",
+          "max_drawdown_points_paise": 18460,
+          "best_trade_points_paise": 4425,
+          "best_trade_day": "2024-03-06",
+          "worst_trade_points_paise": -2645,
+          "worst_trade_day": "2021-12-14"
+        },
+        {
+          "symbol": "OBEROIRLTY",
+          "trades": 1101,
+          "winners": 337,
+          "losers": 764,
+          "flat": 0,
+          "win_rate": "337/1101",
+          "points_paise": 6525,
+          "avg_points_paise": "2175/367",
+          "max_drawdown_points_paise": 26260,
+          "best_trade_points_paise": 4425,
+          "best_trade_day": "2024-12-20",
+          "worst_trade_points_paise": -2470,
+          "worst_trade_day": "2026-07-09"
+        },
+        {
+          "symbol": "CANBK",
+          "trades": 1150,
+          "winners": 377,
+          "losers": 765,
+          "flat": 8,
+          "win_rate": "377/1150",
+          "points_paise": 6502,
+          "avg_points_paise": "3251/575",
+          "max_drawdown_points_paise": 4715,
+          "best_trade_points_paise": 2690,
+          "best_trade_day": "2024-05-08",
+          "worst_trade_points_paise": -885,
+          "worst_trade_day": "2018-08-10"
+        },
+        {
+          "symbol": "CUMMINSIND",
+          "trades": 1077,
+          "winners": 346,
+          "losers": 726,
+          "flat": 5,
+          "win_rate": "346/1077",
+          "points_paise": 6240,
+          "avg_points_paise": "2080/359",
+          "max_drawdown_points_paise": 32340,
+          "best_trade_points_paise": 10080,
+          "best_trade_day": "2024-12-26",
+          "worst_trade_points_paise": -5225,
+          "worst_trade_day": "2025-03-06"
+        },
+        {
+          "symbol": "DABUR",
+          "trades": 1157,
+          "winners": 387,
+          "losers": 764,
+          "flat": 6,
+          "win_rate": "387/1157",
+          "points_paise": 6135,
+          "avg_points_paise": "6135/1157",
+          "max_drawdown_points_paise": 5365,
+          "best_trade_points_paise": 1025,
+          "best_trade_day": "2024-08-13",
+          "worst_trade_points_paise": -960,
+          "worst_trade_day": "2020-03-23"
+        },
+        {
+          "symbol": "SBILIFE",
+          "trades": 996,
+          "winners": 324,
+          "losers": 670,
+          "flat": 2,
+          "win_rate": "27/83",
+          "points_paise": 6060,
+          "avg_points_paise": "505/83",
+          "max_drawdown_points_paise": 21720,
+          "best_trade_points_paise": 6315,
+          "best_trade_day": "2023-02-01",
+          "worst_trade_points_paise": -1780,
+          "worst_trade_day": "2020-03-13"
+        },
+        {
+          "symbol": "DALBHARAT",
+          "trades": 855,
+          "winners": 295,
+          "losers": 557,
+          "flat": 3,
+          "win_rate": "59/171",
+          "points_paise": 5860,
+          "avg_points_paise": "1172/171",
+          "max_drawdown_points_paise": 21725,
+          "best_trade_points_paise": 4120,
+          "best_trade_day": "2022-02-14",
+          "worst_trade_points_paise": -2925,
+          "worst_trade_day": "2021-06-03"
+        },
+        {
+          "symbol": "AUBANK",
+          "trades": 947,
+          "winners": 290,
+          "losers": 649,
+          "flat": 8,
+          "win_rate": "290/947",
+          "points_paise": 5624,
+          "avg_points_paise": "5624/947",
+          "max_drawdown_points_paise": 20190,
+          "best_trade_points_paise": 3708,
+          "best_trade_day": "2021-03-03",
+          "worst_trade_points_paise": -7284,
+          "worst_trade_day": "2020-03-13"
+        },
+        {
+          "symbol": "SAIL",
+          "trades": 1092,
+          "winners": 376,
+          "losers": 707,
+          "flat": 9,
+          "win_rate": "94/273",
+          "points_paise": 5603,
+          "avg_points_paise": "431/84",
+          "max_drawdown_points_paise": 1890,
+          "best_trade_points_paise": 360,
+          "best_trade_day": "2024-04-02",
+          "worst_trade_points_paise": -210,
+          "worst_trade_day": "2017-11-13"
+        },
+        {
+          "symbol": "RECLTD",
+          "trades": 1011,
+          "winners": 345,
+          "losers": 657,
+          "flat": 9,
+          "win_rate": "115/337",
+          "points_paise": 5355,
+          "avg_points_paise": "1785/337",
+          "max_drawdown_points_paise": 4640,
+          "best_trade_points_paise": 1215,
+          "best_trade_day": "2024-10-29",
+          "worst_trade_points_paise": -525,
+          "worst_trade_day": "2024-05-31"
+        },
+        {
+          "symbol": "LICI",
+          "trades": 454,
+          "winners": 154,
+          "losers": 296,
+          "flat": 4,
+          "win_rate": "77/227",
+          "points_paise": 4470,
+          "avg_points_paise": "2235/227",
+          "max_drawdown_points_paise": 7135,
+          "best_trade_points_paise": 2490,
+          "best_trade_day": "2024-06-03",
+          "worst_trade_points_paise": -1055,
+          "worst_trade_day": "2024-02-13"
+        },
+        {
+          "symbol": "MAZDOCK",
+          "trades": 681,
+          "winners": 227,
+          "losers": 453,
+          "flat": 1,
+          "win_rate": "1/3",
+          "points_paise": 4456,
+          "avg_points_paise": "4456/681",
+          "max_drawdown_points_paise": 43848,
+          "best_trade_points_paise": 10482,
+          "best_trade_day": "2024-07-04",
+          "worst_trade_points_paise": -5840,
+          "worst_trade_day": "2024-07-01"
+        },
+        {
+          "symbol": "PNB",
+          "trades": 1157,
+          "winners": 347,
+          "losers": 796,
+          "flat": 14,
+          "win_rate": "347/1157",
+          "points_paise": 4139,
+          "avg_points_paise": "4139/1157",
+          "max_drawdown_points_paise": 2475,
+          "best_trade_points_paise": 510,
+          "best_trade_day": "2016-11-09",
+          "worst_trade_points_paise": -185,
+          "worst_trade_day": "2017-10-27"
+        },
+        {
+          "symbol": "JINDALSTEL",
+          "trades": 1127,
+          "winners": 371,
+          "losers": 754,
+          "flat": 2,
+          "win_rate": "53/161",
+          "points_paise": 3740,
+          "avg_points_paise": "3740/1127",
+          "max_drawdown_points_paise": 8315,
+          "best_trade_points_paise": 2130,
+          "best_trade_day": "2026-04-06",
+          "worst_trade_points_paise": -1010,
+          "worst_trade_day": "2025-11-13"
+        },
+        {
+          "symbol": "LTF",
+          "trades": 250,
+          "winners": 92,
+          "losers": 156,
+          "flat": 2,
+          "win_rate": "46/125",
+          "points_paise": 3718,
+          "avg_points_paise": "1859/125",
+          "max_drawdown_points_paise": 1600,
+          "best_trade_points_paise": 1125,
+          "best_trade_day": "2026-01-19",
+          "worst_trade_points_paise": -305,
+          "worst_trade_day": "2026-03-06"
+        },
+        {
+          "symbol": "BEL",
+          "trades": 615,
+          "winners": 206,
+          "losers": 407,
+          "flat": 2,
+          "win_rate": "206/615",
+          "points_paise": 3662,
+          "avg_points_paise": "3662/615",
+          "max_drawdown_points_paise": 2585,
+          "best_trade_points_paise": 1120,
+          "best_trade_day": "2026-02-02",
+          "worst_trade_points_paise": -310,
+          "worst_trade_day": "2024-10-28"
+        },
+        {
+          "symbol": "HINDPETRO",
+          "trades": 923,
+          "winners": 314,
+          "losers": 606,
+          "flat": 3,
+          "win_rate": "314/923",
+          "points_paise": 3580,
+          "avg_points_paise": "3580/923",
+          "max_drawdown_points_paise": 6610,
+          "best_trade_points_paise": 920,
+          "best_trade_day": "2023-12-28",
+          "worst_trade_points_paise": -1095,
+          "worst_trade_day": "2020-03-13"
+        },
+        {
+          "symbol": "CIPLA",
+          "trades": 1134,
+          "winners": 384,
+          "losers": 746,
+          "flat": 4,
+          "win_rate": "64/189",
+          "points_paise": 3470,
+          "avg_points_paise": "1735/567",
+          "max_drawdown_points_paise": 25960,
+          "best_trade_points_paise": 2235,
+          "best_trade_day": "2024-10-09",
+          "worst_trade_points_paise": -2740,
+          "worst_trade_day": "2024-06-04"
+        },
+        {
+          "symbol": "DELHIVERY",
+          "trades": 509,
+          "winners": 168,
+          "losers": 336,
+          "flat": 5,
+          "win_rate": "168/509",
+          "points_paise": 3459,
+          "avg_points_paise": "3459/509",
+          "max_drawdown_points_paise": 3575,
+          "best_trade_points_paise": 1545,
+          "best_trade_day": "2022-09-26",
+          "worst_trade_points_paise": -1110,
+          "worst_trade_day": "2022-06-02"
+        },
+        {
+          "symbol": "HINDZINC",
+          "trades": 1176,
+          "winners": 377,
+          "losers": 792,
+          "flat": 7,
+          "win_rate": "377/1176",
+          "points_paise": 3450,
+          "avg_points_paise": "575/196",
+          "max_drawdown_points_paise": 8710,
+          "best_trade_points_paise": 2100,
+          "best_trade_day": "2024-05-10",
+          "worst_trade_points_paise": -1030,
+          "worst_trade_day": "2025-04-25"
+        },
+        {
+          "symbol": "INOXWIND",
+          "trades": 1081,
+          "winners": 336,
+          "losers": 738,
+          "flat": 7,
+          "win_rate": "336/1081",
+          "points_paise": 3245,
+          "avg_points_paise": "3245/1081",
+          "max_drawdown_points_paise": 5250,
+          "best_trade_points_paise": 1814,
+          "best_trade_day": "2023-12-28",
+          "worst_trade_points_paise": -827,
+          "worst_trade_day": "2024-03-28"
+        },
+        {
+          "symbol": "TATAPOWER",
+          "trades": 1098,
+          "winners": 365,
+          "losers": 726,
+          "flat": 7,
+          "win_rate": "365/1098",
+          "points_paise": 3185,
+          "avg_points_paise": "3185/1098",
+          "max_drawdown_points_paise": 3470,
+          "best_trade_points_paise": 1695,
+          "best_trade_day": "2024-03-07",
+          "worst_trade_points_paise": -465,
+          "worst_trade_day": "2024-11-05"
+        },
+        {
+          "symbol": "MUTHOOTFIN",
+          "trades": 1107,
+          "winners": 362,
+          "losers": 745,
+          "flat": 0,
+          "win_rate": "362/1107",
+          "points_paise": 3160,
+          "avg_points_paise": "3160/1107",
+          "max_drawdown_points_paise": 29475,
+          "best_trade_points_paise": 8430,
+          "best_trade_day": "2024-07-23",
+          "worst_trade_points_paise": -2940,
+          "worst_trade_day": "2026-05-14"
+        },
+        {
+          "symbol": "TATASTEEL",
+          "trades": 763,
+          "winners": 244,
+          "losers": 514,
+          "flat": 5,
+          "win_rate": "244/763",
+          "points_paise": 2644,
+          "avg_points_paise": "2644/763",
+          "max_drawdown_points_paise": 3380,
+          "best_trade_points_paise": 1900,
+          "best_trade_day": "2019-05-10",
+          "worst_trade_points_paise": -535,
+          "worst_trade_day": "2018-02-02"
+        },
+        {
+          "symbol": "ONGC",
+          "trades": 1128,
+          "winners": 371,
+          "losers": 754,
+          "flat": 3,
+          "win_rate": "371/1128",
+          "points_paise": 2588,
+          "avg_points_paise": "647/282",
+          "max_drawdown_points_paise": 2735,
+          "best_trade_points_paise": 450,
+          "best_trade_day": "2024-07-08",
+          "worst_trade_points_paise": -340,
+          "worst_trade_day": "2016-10-27"
+        },
+        {
+          "symbol": "EXIDEIND",
+          "trades": 1081,
+          "winners": 364,
+          "losers": 710,
+          "flat": 7,
+          "win_rate": "364/1081",
+          "points_paise": 2445,
+          "avg_points_paise": "2445/1081",
+          "max_drawdown_points_paise": 3685,
+          "best_trade_points_paise": 1000,
+          "best_trade_day": "2025-04-30",
+          "worst_trade_points_paise": -540,
+          "worst_trade_day": "2024-05-16"
+        },
+        {
+          "symbol": "SWIGGY",
+          "trades": 188,
+          "winners": 72,
+          "losers": 116,
+          "flat": 0,
+          "win_rate": "18/47",
+          "points_paise": 2366,
+          "avg_points_paise": "1183/94",
+          "max_drawdown_points_paise": 2210,
+          "best_trade_points_paise": 825,
+          "best_trade_day": "2025-09-12",
+          "worst_trade_points_paise": -720,
+          "worst_trade_day": "2025-01-24"
+        },
+        {
+          "symbol": "MPHASIS",
+          "trades": 1058,
+          "winners": 351,
+          "losers": 706,
+          "flat": 1,
+          "win_rate": "351/1058",
+          "points_paise": 2320,
+          "avg_points_paise": "1160/529",
+          "max_drawdown_points_paise": 42680,
+          "best_trade_points_paise": 7545,
+          "best_trade_day": "2024-12-20",
+          "worst_trade_points_paise": -2935,
+          "worst_trade_day": "2023-07-17"
+        },
+        {
+          "symbol": "BIOCON",
+          "trades": 1086,
+          "winners": 362,
+          "losers": 724,
+          "flat": 0,
+          "win_rate": "1/3",
+          "points_paise": 2300,
+          "avg_points_paise": "1150/543",
+          "max_drawdown_points_paise": 7010,
+          "best_trade_points_paise": 1920,
+          "best_trade_day": "2018-09-11",
+          "worst_trade_points_paise": -1065,
+          "worst_trade_day": "2017-01-25"
+        },
+        {
+          "symbol": "BANKINDIA",
+          "trades": 1109,
+          "winners": 351,
+          "losers": 744,
+          "flat": 14,
+          "win_rate": "351/1109",
+          "points_paise": 2238,
+          "avg_points_paise": "2238/1109",
+          "max_drawdown_points_paise": 1580,
+          "best_trade_points_paise": 465,
+          "best_trade_day": "2018-01-24",
+          "worst_trade_points_paise": -360,
+          "worst_trade_day": "2017-08-09"
+        },
+        {
+          "symbol": "FEDERALBNK",
+          "trades": 1072,
+          "winners": 332,
+          "losers": 729,
+          "flat": 11,
+          "win_rate": "83/268",
+          "points_paise": 2050,
+          "avg_points_paise": "1025/536",
+          "max_drawdown_points_paise": 2642,
+          "best_trade_points_paise": 750,
+          "best_trade_day": "2026-06-03",
+          "worst_trade_points_paise": -340,
+          "worst_trade_day": "2026-03-05"
+        },
+        {
+          "symbol": "PRESTIGE",
+          "trades": 1093,
+          "winners": 330,
+          "losers": 757,
+          "flat": 6,
+          "win_rate": "330/1093",
+          "points_paise": 2025,
+          "avg_points_paise": "2025/1093",
+          "max_drawdown_points_paise": 21395,
+          "best_trade_points_paise": 5535,
+          "best_trade_day": "2024-06-24",
+          "worst_trade_points_paise": -2665,
+          "worst_trade_day": "2023-12-04"
+        },
+        {
+          "symbol": "CAMS",
+          "trades": 703,
+          "winners": 225,
+          "losers": 476,
+          "flat": 2,
+          "win_rate": "225/703",
+          "points_paise": 1980,
+          "avg_points_paise": "1980/703",
+          "max_drawdown_points_paise": 43140,
+          "best_trade_points_paise": 10170,
+          "best_trade_day": "2024-12-31",
+          "worst_trade_points_paise": -8010,
+          "worst_trade_day": "2022-05-05"
+        },
+        {
+          "symbol": "NBCC",
+          "trades": 1080,
+          "winners": 344,
+          "losers": 715,
+          "flat": 21,
+          "win_rate": "43/135",
+          "points_paise": 1777,
+          "avg_points_paise": "1777/1080",
+          "max_drawdown_points_paise": 2139,
+          "best_trade_points_paise": 611,
+          "best_trade_day": "2024-02-02",
+          "worst_trade_points_paise": -1111,
+          "worst_trade_day": "2016-12-26"
+        },
+        {
+          "symbol": "ITC",
+          "trades": 1140,
+          "winners": 360,
+          "losers": 775,
+          "flat": 5,
+          "win_rate": "6/19",
+          "points_paise": 1685,
+          "avg_points_paise": "337/228",
+          "max_drawdown_points_paise": 5960,
+          "best_trade_points_paise": 540,
+          "best_trade_day": "2020-03-27",
+          "worst_trade_points_paise": -365,
+          "worst_trade_day": "2025-01-21"
+        },
+        {
+          "symbol": "HINDALCO",
+          "trades": 1133,
+          "winners": 394,
+          "losers": 733,
+          "flat": 6,
+          "win_rate": "394/1133",
+          "points_paise": 1650,
+          "avg_points_paise": "150/103",
+          "max_drawdown_points_paise": 12310,
+          "best_trade_points_paise": 1635,
+          "best_trade_day": "2026-04-02",
+          "worst_trade_points_paise": -935,
+          "worst_trade_day": "2022-02-01"
+        },
+        {
+          "symbol": "IREDA",
+          "trades": 278,
+          "winners": 83,
+          "losers": 194,
+          "flat": 1,
+          "win_rate": "83/278",
+          "points_paise": 1440,
+          "avg_points_paise": "720/139",
+          "max_drawdown_points_paise": 1384,
+          "best_trade_points_paise": 1239,
+          "best_trade_day": "2024-07-23",
+          "worst_trade_points_paise": -253,
+          "worst_trade_day": "2024-07-08"
+        },
+        {
+          "symbol": "TMPV",
+          "trades": 91,
+          "winners": 34,
+          "losers": 57,
+          "flat": 0,
+          "win_rate": "34/91",
+          "points_paise": 1050,
+          "avg_points_paise": "150/13",
+          "max_drawdown_points_paise": 805,
+          "best_trade_points_paise": 470,
+          "best_trade_day": "2026-06-04",
+          "worst_trade_points_paise": -480,
+          "worst_trade_day": "2026-07-01"
+        },
+        {
+          "symbol": "ICICIBANK",
+          "trades": 1136,
+          "winners": 393,
+          "losers": 741,
+          "flat": 2,
+          "win_rate": "393/1136",
+          "points_paise": 710,
+          "avg_points_paise": "5/8",
+          "max_drawdown_points_paise": 16480,
+          "best_trade_points_paise": 1950,
+          "best_trade_day": "2020-03-12",
+          "worst_trade_points_paise": -1220,
+          "worst_trade_day": "2018-08-10"
+        },
+        {
+          "symbol": "VMM",
+          "trades": 178,
+          "winners": 66,
+          "losers": 112,
+          "flat": 0,
+          "win_rate": "33/89",
+          "points_paise": 710,
+          "avg_points_paise": "355/89",
+          "max_drawdown_points_paise": 712,
+          "best_trade_points_paise": 351,
+          "best_trade_day": "2025-02-04",
+          "worst_trade_points_paise": -131,
+          "worst_trade_day": "2025-02-10"
+        },
+        {
+          "symbol": "ABCAPITAL",
+          "trades": 948,
+          "winners": 299,
+          "losers": 642,
+          "flat": 7,
+          "win_rate": "299/948",
+          "points_paise": 471,
+          "avg_points_paise": "157/316",
+          "max_drawdown_points_paise": 3169,
+          "best_trade_points_paise": 720,
+          "best_trade_day": "2026-01-23",
+          "worst_trade_points_paise": -380,
+          "worst_trade_day": "2026-05-14"
+        },
+        {
+          "symbol": "RVNL",
+          "trades": 802,
+          "winners": 210,
+          "losers": 573,
+          "flat": 19,
+          "win_rate": "105/401",
+          "points_paise": 399,
+          "avg_points_paise": "399/802",
+          "max_drawdown_points_paise": 3725,
+          "best_trade_points_paise": 1785,
+          "best_trade_day": "2024-07-08",
+          "worst_trade_points_paise": -845,
+          "worst_trade_day": "2024-08-27"
+        },
+        {
+          "symbol": "GMRAIRPORT",
+          "trades": 172,
+          "winners": 62,
+          "losers": 110,
+          "flat": 0,
+          "win_rate": "31/86",
+          "points_paise": 374,
+          "avg_points_paise": "187/86",
+          "max_drawdown_points_paise": 658,
+          "best_trade_points_paise": 195,
+          "best_trade_day": "2025-05-16",
+          "worst_trade_points_paise": -156,
+          "worst_trade_day": "2026-05-29"
+        },
+        {
+          "symbol": "BANKBARODA",
+          "trades": 1138,
+          "winners": 351,
+          "losers": 780,
+          "flat": 7,
+          "win_rate": "351/1138",
+          "points_paise": 255,
+          "avg_points_paise": "255/1138",
+          "max_drawdown_points_paise": 4390,
+          "best_trade_points_paise": 960,
+          "best_trade_day": "2024-02-09",
+          "worst_trade_points_paise": -380,
+          "worst_trade_day": "2018-08-10"
+        },
+        {
+          "symbol": "GODREJCP",
+          "trades": 1109,
+          "winners": 386,
+          "losers": 718,
+          "flat": 5,
+          "win_rate": "386/1109",
+          "points_paise": -6,
+          "avg_points_paise": "-6/1109",
+          "max_drawdown_points_paise": 16816,
+          "best_trade_points_paise": 2895,
+          "best_trade_day": "2024-02-01",
+          "worst_trade_points_paise": -2310,
+          "worst_trade_day": "2024-06-05"
+        },
+        {
+          "symbol": "IRFC",
+          "trades": 635,
+          "winners": 151,
+          "losers": 468,
+          "flat": 16,
+          "win_rate": "151/635",
+          "points_paise": -39,
+          "avg_points_paise": "-39/635",
+          "max_drawdown_points_paise": 1625,
+          "best_trade_points_paise": 570,
+          "best_trade_day": "2024-04-26",
+          "worst_trade_points_paise": -280,
+          "worst_trade_day": "2024-02-13"
+        },
+        {
+          "symbol": "ASHOKLEY",
+          "trades": 1079,
+          "winners": 340,
+          "losers": 721,
+          "flat": 18,
+          "win_rate": "340/1079",
+          "points_paise": -282,
+          "avg_points_paise": "-282/1079",
+          "max_drawdown_points_paise": 3138,
+          "best_trade_points_paise": 504,
+          "best_trade_day": "2026-02-02",
+          "worst_trade_points_paise": -264,
+          "worst_trade_day": "2017-07-21"
+        },
+        {
+          "symbol": "MOTHERSON",
+          "trades": 483,
+          "winners": 163,
+          "losers": 316,
+          "flat": 4,
+          "win_rate": "163/483",
+          "points_paise": -291,
+          "avg_points_paise": "-97/161",
+          "max_drawdown_points_paise": 1476,
+          "best_trade_points_paise": 360,
+          "best_trade_day": "2024-12-06",
+          "worst_trade_points_paise": -784,
+          "worst_trade_day": "2024-07-23"
+        },
+        {
+          "symbol": "360ONE",
+          "trades": 397,
+          "winners": 125,
+          "losers": 272,
+          "flat": 0,
+          "win_rate": "125/397",
+          "points_paise": -381,
+          "avg_points_paise": "-381/397",
+          "max_drawdown_points_paise": 15722,
+          "best_trade_points_paise": 3030,
+          "best_trade_day": "2025-03-21",
+          "worst_trade_points_paise": -1976,
+          "worst_trade_day": "2023-02-02"
+        },
+        {
+          "symbol": "ETERNAL",
+          "trades": 141,
+          "winners": 53,
+          "losers": 88,
+          "flat": 0,
+          "win_rate": "53/141",
+          "points_paise": -388,
+          "avg_points_paise": "-388/141",
+          "max_drawdown_points_paise": 3652,
+          "best_trade_points_paise": 795,
+          "best_trade_day": "2026-01-23",
+          "worst_trade_points_paise": -2150,
+          "worst_trade_day": "2025-10-16"
+        },
+        {
+          "symbol": "UNIONBANK",
+          "trades": 1098,
+          "winners": 329,
+          "losers": 751,
+          "flat": 18,
+          "win_rate": "329/1098",
+          "points_paise": -390,
+          "avg_points_paise": "-65/183",
+          "max_drawdown_points_paise": 2550,
+          "best_trade_points_paise": 745,
+          "best_trade_day": "2026-01-14",
+          "worst_trade_points_paise": -260,
+          "worst_trade_day": "2017-11-03"
+        },
+        {
+          "symbol": "GAIL",
+          "trades": 891,
+          "winners": 273,
+          "losers": 615,
+          "flat": 3,
+          "win_rate": "91/297",
+          "points_paise": -588,
+          "avg_points_paise": "-196/297",
+          "max_drawdown_points_paise": 4444,
+          "best_trade_points_paise": 1089,
+          "best_trade_day": "2018-11-28",
+          "worst_trade_points_paise": -709,
+          "worst_trade_day": "2024-06-10"
+        },
+        {
+          "symbol": "KPITTECH",
+          "trades": 833,
+          "winners": 254,
+          "losers": 573,
+          "flat": 6,
+          "win_rate": "254/833",
+          "points_paise": -810,
+          "avg_points_paise": "-810/833",
+          "max_drawdown_points_paise": 20330,
+          "best_trade_points_paise": 5870,
+          "best_trade_day": "2024-04-29",
+          "worst_trade_points_paise": -4020,
+          "worst_trade_day": "2026-05-06"
+        },
+        {
+          "symbol": "IDEA",
+          "trades": 1173,
+          "winners": 272,
+          "losers": 872,
+          "flat": 29,
+          "win_rate": "16/69",
+          "points_paise": -1158,
+          "avg_points_paise": "-386/391",
+          "max_drawdown_points_paise": 2072,
+          "best_trade_points_paise": 327,
+          "best_trade_day": "2017-11-02",
+          "worst_trade_points_paise": -139,
+          "worst_trade_day": "2017-11-15"
+        },
+        {
+          "symbol": "NMDC",
+          "trades": 908,
+          "winners": 295,
+          "losers": 602,
+          "flat": 11,
+          "win_rate": "295/908",
+          "points_paise": -1213,
+          "avg_points_paise": "-1213/908",
+          "max_drawdown_points_paise": 3442,
+          "best_trade_points_paise": 474,
+          "best_trade_day": "2021-05-07",
+          "worst_trade_points_paise": -405,
+          "worst_trade_day": "2024-12-23"
+        },
+        {
+          "symbol": "NHPC",
+          "trades": 1196,
+          "winners": 287,
+          "losers": 873,
+          "flat": 36,
+          "win_rate": "287/1196",
+          "points_paise": -1295,
+          "avg_points_paise": "-1295/1196",
+          "max_drawdown_points_paise": 2486,
+          "best_trade_points_paise": 405,
+          "best_trade_day": "2024-02-12",
+          "worst_trade_points_paise": -135,
+          "worst_trade_day": "2024-01-15"
+        },
+        {
+          "symbol": "GODFRYPHLP",
+          "trades": 1141,
+          "winners": 350,
+          "losers": 785,
+          "flat": 6,
+          "win_rate": "50/163",
+          "points_paise": -1334,
+          "avg_points_paise": "-1334/1141",
+          "max_drawdown_points_paise": 113763,
+          "best_trade_points_paise": 24716,
+          "best_trade_day": "2024-08-30",
+          "worst_trade_points_paise": -11400,
+          "worst_trade_day": "2025-06-25"
+        },
+        {
+          "symbol": "JIOFIN",
+          "trades": 327,
+          "winners": 106,
+          "losers": 219,
+          "flat": 2,
+          "win_rate": "106/327",
+          "points_paise": -1509,
+          "avg_points_paise": "-503/109",
+          "max_drawdown_points_paise": 2969,
+          "best_trade_points_paise": 555,
+          "best_trade_day": "2024-10-22",
+          "worst_trade_points_paise": -325,
+          "worst_trade_day": "2025-06-27"
+        },
+        {
+          "symbol": "IDFCFIRSTB",
+          "trades": 863,
+          "winners": 257,
+          "losers": 599,
+          "flat": 7,
+          "win_rate": "257/863",
+          "points_paise": -1667,
+          "avg_points_paise": "-1667/863",
+          "max_drawdown_points_paise": 2190,
+          "best_trade_points_paise": 150,
+          "best_trade_day": "2021-09-20",
+          "worst_trade_points_paise": -175,
+          "worst_trade_day": "2021-02-19"
+        },
+        {
+          "symbol": "IOC",
+          "trades": 465,
+          "winners": 132,
+          "losers": 320,
+          "flat": 13,
+          "win_rate": "44/155",
+          "points_paise": -2033,
+          "avg_points_paise": "-2033/465",
+          "max_drawdown_points_paise": 3046,
+          "best_trade_points_paise": 390,
+          "best_trade_day": "2024-02-08",
+          "worst_trade_points_paise": -200,
+          "worst_trade_day": "2024-03-14"
+        },
+        {
+          "symbol": "MAXHEALTH",
+          "trades": 641,
+          "winners": 212,
+          "losers": 424,
+          "flat": 5,
+          "win_rate": "212/641",
+          "points_paise": -2725,
+          "avg_points_paise": "-2725/641",
+          "max_drawdown_points_paise": 16885,
+          "best_trade_points_paise": 3165,
+          "best_trade_day": "2023-04-12",
+          "worst_trade_points_paise": -1840,
+          "worst_trade_day": "2025-01-24"
+        },
+        {
+          "symbol": "VOLTAS",
+          "trades": 1072,
+          "winners": 342,
+          "losers": 726,
+          "flat": 4,
+          "win_rate": "171/536",
+          "points_paise": -2970,
+          "avg_points_paise": "-1485/536",
+          "max_drawdown_points_paise": 18310,
+          "best_trade_points_paise": 3795,
+          "best_trade_day": "2024-08-16",
+          "worst_trade_points_paise": -4545,
+          "worst_trade_day": "2021-02-12"
+        },
+        {
+          "symbol": "SUZLON",
+          "trades": 1176,
+          "winners": 193,
+          "losers": 925,
+          "flat": 58,
+          "win_rate": "193/1176",
+          "points_paise": -3005,
+          "avg_points_paise": "-3005/1176",
+          "max_drawdown_points_paise": 3770,
+          "best_trade_points_paise": 144,
+          "best_trade_day": "2024-08-26",
+          "worst_trade_points_paise": -64,
+          "worst_trade_day": "2024-10-09"
+        },
+        {
+          "symbol": "OIL",
+          "trades": 925,
+          "winners": 269,
+          "losers": 648,
+          "flat": 8,
+          "win_rate": "269/925",
+          "points_paise": -3075,
+          "avg_points_paise": "-123/37",
+          "max_drawdown_points_paise": 7945,
+          "best_trade_points_paise": 1545,
+          "best_trade_day": "2024-10-03",
+          "worst_trade_points_paise": -940,
+          "worst_trade_day": "2024-07-12"
+        },
+        {
+          "symbol": "JSWSTEEL",
+          "trades": 1145,
+          "winners": 365,
+          "losers": 776,
+          "flat": 4,
+          "win_rate": "73/229",
+          "points_paise": -3094,
+          "avg_points_paise": "-3094/1145",
+          "max_drawdown_points_paise": 15840,
+          "best_trade_points_paise": 2430,
+          "best_trade_day": "2016-10-26",
+          "worst_trade_points_paise": -2515,
+          "worst_trade_day": "2023-07-21"
+        },
+        {
+          "symbol": "MANAPPURAM",
+          "trades": 1076,
+          "winners": 341,
+          "losers": 724,
+          "flat": 11,
+          "win_rate": "341/1076",
+          "points_paise": -3219,
+          "avg_points_paise": "-3219/1076",
+          "max_drawdown_points_paise": 5490,
+          "best_trade_points_paise": 624,
+          "best_trade_day": "2025-06-13",
+          "worst_trade_points_paise": -345,
+          "worst_trade_day": "2024-01-05"
+        },
+        {
+          "symbol": "LUPIN",
+          "trades": 1088,
+          "winners": 347,
+          "losers": 739,
+          "flat": 2,
+          "win_rate": "347/1088",
+          "points_paise": -3275,
+          "avg_points_paise": "-3275/1088",
+          "max_drawdown_points_paise": 32250,
+          "best_trade_points_paise": 4320,
+          "best_trade_day": "2025-02-12",
+          "worst_trade_points_paise": -2220,
+          "worst_trade_day": "2024-04-08"
+        },
+        {
+          "symbol": "CROMPTON",
+          "trades": 1083,
+          "winners": 334,
+          "losers": 746,
+          "flat": 3,
+          "win_rate": "334/1083",
+          "points_paise": -3746,
+          "avg_points_paise": "-3746/1083",
+          "max_drawdown_points_paise": 6120,
+          "best_trade_points_paise": 1335,
+          "best_trade_day": "2021-08-16",
+          "worst_trade_points_paise": -605,
+          "worst_trade_day": "2021-10-22"
+        },
+        {
+          "symbol": "PFC",
+          "trades": 1073,
+          "winners": 373,
+          "losers": 695,
+          "flat": 5,
+          "win_rate": "373/1073",
+          "points_paise": -3800,
+          "avg_points_paise": "-3800/1073",
+          "max_drawdown_points_paise": 10250,
+          "best_trade_points_paise": 1515,
+          "best_trade_day": "2024-12-20",
+          "worst_trade_points_paise": -765,
+          "worst_trade_day": "2024-07-10"
+        },
+        {
+          "symbol": "UNITDSPR",
+          "trades": 244,
+          "winners": 77,
+          "losers": 167,
+          "flat": 0,
+          "win_rate": "77/244",
+          "points_paise": -4270,
+          "avg_points_paise": "-35/2",
+          "max_drawdown_points_paise": 16995,
+          "best_trade_points_paise": 3360,
+          "best_trade_day": "2025-01-27",
+          "worst_trade_points_paise": -1270,
+          "worst_trade_day": "2025-04-22"
+        },
+        {
+          "symbol": "SHRIRAMFIN",
+          "trades": 420,
+          "winners": 136,
+          "losers": 282,
+          "flat": 2,
+          "win_rate": "34/105",
+          "points_paise": -4515,
+          "avg_points_paise": "-43/4",
+          "max_drawdown_points_paise": 25750,
+          "best_trade_points_paise": 4185,
+          "best_trade_day": "2024-01-31",
+          "worst_trade_points_paise": -2775,
+          "worst_trade_day": "2024-08-01"
+        },
+        {
+          "symbol": "ICICIPRULI",
+          "trades": 1119,
+          "winners": 373,
+          "losers": 744,
+          "flat": 2,
+          "win_rate": "1/3",
+          "points_paise": -4640,
+          "avg_points_paise": "-4640/1119",
+          "max_drawdown_points_paise": 15085,
+          "best_trade_points_paise": 2920,
+          "best_trade_day": "2023-02-01",
+          "worst_trade_points_paise": -1215,
+          "worst_trade_day": "2020-03-13"
+        },
+        {
+          "symbol": "NAM-INDIA",
+          "trades": 741,
+          "winners": 234,
+          "losers": 505,
+          "flat": 2,
+          "win_rate": "6/19",
+          "points_paise": -4730,
+          "avg_points_paise": "-4730/741",
+          "max_drawdown_points_paise": 12900,
+          "best_trade_points_paise": 2920,
+          "best_trade_day": "2026-07-08",
+          "worst_trade_points_paise": -1095,
+          "worst_trade_day": "2024-04-12"
+        },
+        {
+          "symbol": "NATIONALUM",
+          "trades": 1094,
+          "winners": 337,
+          "losers": 743,
+          "flat": 14,
+          "win_rate": "337/1094",
+          "points_paise": -5462,
+          "avg_points_paise": "-2731/547",
+          "max_drawdown_points_paise": 8312,
+          "best_trade_points_paise": 945,
+          "best_trade_day": "2026-06-01",
+          "worst_trade_points_paise": -445,
+          "worst_trade_day": "2026-02-02"
+        },
+        {
+          "symbol": "LTM",
+          "trades": 51,
+          "winners": 18,
+          "losers": 33,
+          "flat": 0,
+          "win_rate": "6/17",
+          "points_paise": -5730,
+          "avg_points_paise": "-1910/17",
+          "max_drawdown_points_paise": 14370,
+          "best_trade_points_paise": 6270,
+          "best_trade_day": "2026-07-10",
+          "worst_trade_points_paise": -2860,
+          "worst_trade_day": "2026-07-17"
+        },
+        {
+          "symbol": "PETRONET",
+          "trades": 1047,
+          "winners": 321,
+          "losers": 724,
+          "flat": 2,
+          "win_rate": "107/349",
+          "points_paise": -5982,
+          "avg_points_paise": "-1994/349",
+          "max_drawdown_points_paise": 12535,
+          "best_trade_points_paise": 900,
+          "best_trade_day": "2018-06-08",
+          "worst_trade_points_paise": -505,
+          "worst_trade_day": "2025-01-02"
+        },
+        {
+          "symbol": "LAURUSLABS",
+          "trades": 1099,
+          "winners": 339,
+          "losers": 756,
+          "flat": 4,
+          "win_rate": "339/1099",
+          "points_paise": -6365,
+          "avg_points_paise": "-6365/1099",
+          "max_drawdown_points_paise": 20260,
+          "best_trade_points_paise": 4800,
+          "best_trade_day": "2020-08-21",
+          "worst_trade_points_paise": -2095,
+          "worst_trade_day": "2020-08-05"
+        },
+        {
+          "symbol": "MOTILALOFS",
+          "trades": 1134,
+          "winners": 368,
+          "losers": 762,
+          "flat": 4,
+          "win_rate": "184/567",
+          "points_paise": -6725,
+          "avg_points_paise": "-6725/1134",
+          "max_drawdown_points_paise": 19635,
+          "best_trade_points_paise": 7215,
+          "best_trade_day": "2024-01-11",
+          "worst_trade_points_paise": -5290,
+          "worst_trade_day": "2024-04-26"
+        },
+        {
+          "symbol": "INDUSTOWER",
+          "trades": 664,
+          "winners": 211,
+          "losers": 450,
+          "flat": 3,
+          "win_rate": "211/664",
+          "points_paise": -6905,
+          "avg_points_paise": "-6905/664",
+          "max_drawdown_points_paise": 7995,
+          "best_trade_points_paise": 1545,
+          "best_trade_day": "2025-10-27",
+          "worst_trade_points_paise": -865,
+          "worst_trade_day": "2021-10-22"
+        },
+        {
+          "symbol": "BAJAJHLDNG",
+          "trades": 1119,
+          "winners": 347,
+          "losers": 768,
+          "flat": 4,
+          "win_rate": "347/1119",
+          "points_paise": -7195,
+          "avg_points_paise": "-7195/1119",
+          "max_drawdown_points_paise": 176840,
+          "best_trade_points_paise": 38200,
+          "best_trade_day": "2025-05-19",
+          "worst_trade_points_paise": -21800,
+          "worst_trade_day": "2025-03-21"
+        },
+        {
+          "symbol": "HDFCBANK",
+          "trades": 1148,
+          "winners": 373,
+          "losers": 773,
+          "flat": 2,
+          "win_rate": "373/1148",
+          "points_paise": -7775,
+          "avg_points_paise": "-7775/1148",
+          "max_drawdown_points_paise": 17465,
+          "best_trade_points_paise": 3420,
+          "best_trade_day": "2019-05-17",
+          "worst_trade_points_paise": -1815,
+          "worst_trade_day": "2020-03-24"
+        },
+        {
+          "symbol": "AMBUJACEM",
+          "trades": 1127,
+          "winners": 370,
+          "losers": 754,
+          "flat": 3,
+          "win_rate": "370/1127",
+          "points_paise": -8555,
+          "avg_points_paise": "-8555/1127",
+          "max_drawdown_points_paise": 16155,
+          "best_trade_points_paise": 1605,
+          "best_trade_day": "2023-02-03",
+          "worst_trade_points_paise": -1925,
+          "worst_trade_day": "2024-07-23"
+        },
+        {
+          "symbol": "FORTIS",
+          "trades": 1104,
+          "winners": 327,
+          "losers": 768,
+          "flat": 9,
+          "win_rate": "109/368",
+          "points_paise": -8755,
+          "avg_points_paise": "-8755/1104",
+          "max_drawdown_points_paise": 13180,
+          "best_trade_points_paise": 1620,
+          "best_trade_day": "2024-06-14",
+          "worst_trade_points_paise": -1020,
+          "worst_trade_day": "2025-04-11"
+        },
+        {
+          "symbol": "PERSISTENT",
+          "trades": 1061,
+          "winners": 319,
+          "losers": 740,
+          "flat": 2,
+          "win_rate": "319/1061",
+          "points_paise": -9340,
+          "avg_points_paise": "-9340/1061",
+          "max_drawdown_points_paise": 78180,
+          "best_trade_points_paise": 13320,
+          "best_trade_day": "2024-10-04",
+          "worst_trade_points_paise": -9960,
+          "worst_trade_day": "2024-07-23"
+        },
+        {
+          "symbol": "TATACONSUM",
+          "trades": 734,
+          "winners": 227,
+          "losers": 505,
+          "flat": 2,
+          "win_rate": "227/734",
+          "points_paise": -11225,
+          "avg_points_paise": "-11225/734",
+          "max_drawdown_points_paise": 29975,
+          "best_trade_points_paise": 2220,
+          "best_trade_day": "2026-05-11",
+          "worst_trade_points_paise": -1555,
+          "worst_trade_day": "2024-06-04"
+        },
+        {
+          "symbol": "GRASIM",
+          "trades": 639,
+          "winners": 205,
+          "losers": 434,
+          "flat": 0,
+          "win_rate": "205/639",
+          "points_paise": -12889,
+          "avg_points_paise": "-12889/639",
+          "max_drawdown_points_paise": 21400,
+          "best_trade_points_paise": 4410,
+          "best_trade_day": "2026-03-13",
+          "worst_trade_points_paise": -3720,
+          "worst_trade_day": "2024-12-05"
+        },
+        {
+          "symbol": "TITAN",
+          "trades": 1120,
+          "winners": 369,
+          "losers": 748,
+          "flat": 3,
+          "win_rate": "369/1120",
+          "points_paise": -13420,
+          "avg_points_paise": "-671/56",
+          "max_drawdown_points_paise": 41730,
+          "best_trade_points_paise": 5460,
+          "best_trade_day": "2025-08-05",
+          "worst_trade_points_paise": -5985,
+          "worst_trade_day": "2025-01-21"
+        },
+        {
+          "symbol": "MARICO",
+          "trades": 1133,
+          "winners": 338,
+          "losers": 791,
+          "flat": 4,
+          "win_rate": "338/1133",
+          "points_paise": -14600,
+          "avg_points_paise": "-14600/1133",
+          "max_drawdown_points_paise": 16320,
+          "best_trade_points_paise": 2065,
+          "best_trade_day": "2025-11-14",
+          "worst_trade_points_paise": -670,
+          "worst_trade_day": "2024-10-08"
+        },
+        {
+          "symbol": "ZYDUSLIFE",
+          "trades": 491,
+          "winners": 158,
+          "losers": 332,
+          "flat": 1,
+          "win_rate": "158/491",
+          "points_paise": -15760,
+          "avg_points_paise": "-15760/491",
+          "max_drawdown_points_paise": 18580,
+          "best_trade_points_paise": 1935,
+          "best_trade_day": "2024-11-12",
+          "worst_trade_points_paise": -2770,
+          "worst_trade_day": "2024-02-09"
+        },
+        {
+          "symbol": "DRREDDY",
+          "trades": 1150,
+          "winners": 375,
+          "losers": 775,
+          "flat": 0,
+          "win_rate": "15/46",
+          "points_paise": -16020,
+          "avg_points_paise": "-1602/115",
+          "max_drawdown_points_paise": 76545,
+          "best_trade_points_paise": 8815,
+          "best_trade_day": "2024-04-18",
+          "worst_trade_points_paise": -6920,
+          "worst_trade_day": "2022-01-28"
+        },
+        {
+          "symbol": "AUROPHARMA",
+          "trades": 1053,
+          "winners": 333,
+          "losers": 717,
+          "flat": 3,
+          "win_rate": "37/117",
+          "points_paise": -17065,
+          "avg_points_paise": "-17065/1053",
+          "max_drawdown_points_paise": 21785,
+          "best_trade_points_paise": 2550,
+          "best_trade_day": "2020-05-06",
+          "worst_trade_points_paise": -2345,
+          "worst_trade_day": "2021-04-22"
+        },
+        {
+          "symbol": "GLENMARK",
+          "trades": 1036,
+          "winners": 327,
+          "losers": 709,
+          "flat": 0,
+          "win_rate": "327/1036",
+          "points_paise": -18500,
+          "avg_points_paise": "-125/7",
+          "max_drawdown_points_paise": 22455,
+          "best_trade_points_paise": 4290,
+          "best_trade_day": "2024-11-04",
+          "worst_trade_points_paise": -3020,
+          "worst_trade_day": "2026-05-29"
+        },
+        {
+          "symbol": "LICHSGFIN",
+          "trades": 1103,
+          "winners": 338,
+          "losers": 760,
+          "flat": 5,
+          "win_rate": "338/1103",
+          "points_paise": -18905,
+          "avg_points_paise": "-18905/1103",
+          "max_drawdown_points_paise": 20660,
+          "best_trade_points_paise": 2100,
+          "best_trade_day": "2017-05-02",
+          "worst_trade_points_paise": -1800,
+          "worst_trade_day": "2017-07-28"
+        },
+        {
+          "symbol": "KOTAKBANK",
+          "trades": 1118,
+          "winners": 354,
+          "losers": 762,
+          "flat": 2,
+          "win_rate": "177/559",
+          "points_paise": -19295,
+          "avg_points_paise": "-19295/1118",
+          "max_drawdown_points_paise": 24375,
+          "best_trade_points_paise": 4290,
+          "best_trade_day": "2020-01-20",
+          "worst_trade_points_paise": -3580,
+          "worst_trade_day": "2024-06-04"
+        },
+        {
+          "symbol": "ADANIGREEN",
+          "trades": 878,
+          "winners": 264,
+          "losers": 602,
+          "flat": 12,
+          "win_rate": "132/439",
+          "points_paise": -20290,
+          "avg_points_paise": "-10145/439",
+          "max_drawdown_points_paise": 50270,
+          "best_trade_points_paise": 7935,
+          "best_trade_day": "2022-05-06",
+          "worst_trade_points_paise": -4885,
+          "worst_trade_day": "2024-05-21"
+        },
+        {
+          "symbol": "DIVISLAB",
+          "trades": 1146,
+          "winners": 373,
+          "losers": 773,
+          "flat": 0,
+          "win_rate": "373/1146",
+          "points_paise": -21175,
+          "avg_points_paise": "-21175/1146",
+          "max_drawdown_points_paise": 65570,
+          "best_trade_points_paise": 15150,
+          "best_trade_day": "2022-11-07",
+          "worst_trade_points_paise": -5900,
+          "worst_trade_day": "2026-02-11"
+        },
+        {
+          "symbol": "GVT&D",
+          "trades": 212,
+          "winners": 62,
+          "losers": 150,
+          "flat": 0,
+          "win_rate": "31/106",
+          "points_paise": -24375,
+          "avg_points_paise": "-24375/212",
+          "max_drawdown_points_paise": 61305,
+          "best_trade_points_paise": 9930,
+          "best_trade_day": "2026-07-01",
+          "worst_trade_points_paise": -5000,
+          "worst_trade_day": "2026-06-29"
+        },
+        {
+          "symbol": "PATANJALI",
+          "trades": 429,
+          "winners": 124,
+          "losers": 304,
+          "flat": 1,
+          "win_rate": "124/429",
+          "points_paise": -25340,
+          "avg_points_paise": "-25340/429",
+          "max_drawdown_points_paise": 31095,
+          "best_trade_points_paise": 3870,
+          "best_trade_day": "2024-01-16",
+          "worst_trade_points_paise": -2380,
+          "worst_trade_day": "2025-07-07"
+        },
+        {
+          "symbol": "TORNTPHARM",
+          "trades": 952,
+          "winners": 305,
+          "losers": 646,
+          "flat": 1,
+          "win_rate": "305/952",
+          "points_paise": -27300,
+          "avg_points_paise": "-975/34",
+          "max_drawdown_points_paise": 43070,
+          "best_trade_points_paise": 8160,
+          "best_trade_day": "2024-09-18",
+          "worst_trade_points_paise": -4546,
+          "worst_trade_day": "2022-01-25"
+        },
+        {
+          "symbol": "HINDUNILVR",
+          "trades": 1157,
+          "winners": 367,
+          "losers": 788,
+          "flat": 2,
+          "win_rate": "367/1157",
+          "points_paise": -28705,
+          "avg_points_paise": "-28705/1157",
+          "max_drawdown_points_paise": 51835,
+          "best_trade_points_paise": 4455,
+          "best_trade_day": "2020-03-30",
+          "worst_trade_points_paise": -5660,
+          "worst_trade_day": "2020-03-25"
+        },
+        {
+          "symbol": "APOLLOHOSP",
+          "trades": 1049,
+          "winners": 345,
+          "losers": 703,
+          "flat": 1,
+          "win_rate": "345/1049",
+          "points_paise": -29985,
+          "avg_points_paise": "-29985/1049",
+          "max_drawdown_points_paise": 104895,
+          "best_trade_points_paise": 9900,
+          "best_trade_day": "2026-04-06",
+          "worst_trade_points_paise": -8265,
+          "worst_trade_day": "2020-03-26"
+        },
+        {
+          "symbol": "PHOENIXLTD",
+          "trades": 1137,
+          "winners": 340,
+          "losers": 792,
+          "flat": 5,
+          "win_rate": "340/1137",
+          "points_paise": -31177,
+          "avg_points_paise": "-31177/1137",
+          "max_drawdown_points_paise": 35759,
+          "best_trade_points_paise": 8626,
+          "best_trade_day": "2024-02-19",
+          "worst_trade_points_paise": -12246,
+          "worst_trade_day": "2024-07-23"
+        },
+        {
+          "symbol": "OFSS",
+          "trades": 1133,
+          "winners": 344,
+          "losers": 787,
+          "flat": 2,
+          "win_rate": "344/1133",
+          "points_paise": -32020,
+          "avg_points_paise": "-32020/1133",
+          "max_drawdown_points_paise": 93790,
+          "best_trade_points_paise": 28485,
+          "best_trade_day": "2024-03-18",
+          "worst_trade_points_paise": -34335,
+          "worst_trade_day": "2024-07-23"
+        },
+        {
+          "symbol": "TIINDIA",
+          "trades": 1004,
+          "winners": 302,
+          "losers": 700,
+          "flat": 2,
+          "win_rate": "151/502",
+          "points_paise": -38865,
+          "avg_points_paise": "-38865/1004",
+          "max_drawdown_points_paise": 45610,
+          "best_trade_points_paise": 8625,
+          "best_trade_day": "2024-01-10",
+          "worst_trade_points_paise": -5090,
+          "worst_trade_day": "2024-11-28"
+        },
+        {
+          "symbol": "PGEL",
+          "trades": 1044,
+          "winners": 314,
+          "losers": 712,
+          "flat": 18,
+          "win_rate": "157/522",
+          "points_paise": -39115,
+          "avg_points_paise": "-39115/1044",
+          "max_drawdown_points_paise": 74420,
+          "best_trade_points_paise": 9520,
+          "best_trade_day": "2024-07-09",
+          "worst_trade_points_paise": -4920,
+          "worst_trade_day": "2024-07-08"
+        },
+        {
+          "symbol": "COCHINSHIP",
+          "trades": 1070,
+          "winners": 307,
+          "losers": 754,
+          "flat": 9,
+          "win_rate": "307/1070",
+          "points_paise": -45804,
+          "avg_points_paise": "-22902/535",
+          "max_drawdown_points_paise": 57674,
+          "best_trade_points_paise": 6525,
+          "best_trade_day": "2024-06-13",
+          "worst_trade_points_paise": -3500,
+          "worst_trade_day": "2024-07-05"
+        },
+        {
+          "symbol": "PIIND",
+          "trades": 1123,
+          "winners": 371,
+          "losers": 750,
+          "flat": 2,
+          "win_rate": "371/1123",
+          "points_paise": -49795,
+          "avg_points_paise": "-49795/1123",
+          "max_drawdown_points_paise": 73565,
+          "best_trade_points_paise": 6535,
+          "best_trade_day": "2021-08-31",
+          "worst_trade_points_paise": -6530,
+          "worst_trade_day": "2026-03-13"
+        },
+        {
+          "symbol": "HEROMOTOCO",
+          "trades": 1118,
+          "winners": 365,
+          "losers": 751,
+          "flat": 2,
+          "win_rate": "365/1118",
+          "points_paise": -57720,
+          "avg_points_paise": "-2220/43",
+          "max_drawdown_points_paise": 108430,
+          "best_trade_points_paise": 10815,
+          "best_trade_day": "2024-06-21",
+          "worst_trade_points_paise": -11300,
+          "worst_trade_day": "2024-07-23"
+        },
+        {
+          "symbol": "ALKEM",
+          "trades": 1130,
+          "winners": 344,
+          "losers": 783,
+          "flat": 3,
+          "win_rate": "172/565",
+          "points_paise": -72250,
+          "avg_points_paise": "-7225/113",
+          "max_drawdown_points_paise": 102350,
+          "best_trade_points_paise": 31050,
+          "best_trade_day": "2024-02-26",
+          "worst_trade_points_paise": -7445,
+          "worst_trade_day": "2020-03-13"
+        },
+        {
+          "symbol": "KAYNES",
+          "trades": 374,
+          "winners": 115,
+          "losers": 257,
+          "flat": 2,
+          "win_rate": "115/374",
+          "points_paise": -84025,
+          "avg_points_paise": "-84025/374",
+          "max_drawdown_points_paise": 89145,
+          "best_trade_points_paise": 11335,
+          "best_trade_day": "2025-02-19",
+          "worst_trade_points_paise": -15320,
+          "worst_trade_day": "2024-08-20"
+        },
+        {
+          "symbol": "DIXON",
+          "trades": 960,
+          "winners": 298,
+          "losers": 660,
+          "flat": 2,
+          "win_rate": "149/480",
+          "points_paise": -153100,
+          "avg_points_paise": "-7655/48",
+          "max_drawdown_points_paise": 234750,
+          "best_trade_points_paise": 27000,
+          "best_trade_day": "2020-11-09",
+          "worst_trade_points_paise": -19000,
+          "worst_trade_day": "2021-02-09"
+        }
       ]
     }
   },
@@ -615,6 +3706,10 @@
       {
         "value": "73835",
         "text": "Rs 738.35"
+      },
+      {
+        "value": "74190",
+        "text": "Rs 741.90"
       },
       {
         "value": "73640",
@@ -839,6 +3934,10 @@
       {
         "value": "284210",
         "text": "Rs 2,842.10"
+      },
+      {
+        "value": "284880",
+        "text": "Rs 2,848.80"
       },
       {
         "value": "870",
@@ -1247,6 +4346,10 @@
         "text": "34.60%"
       },
       {
+        "value": "11877/37661",
+        "text": "31.54%"
+      },
+      {
         "value": "11877/37669",
         "text": "31.53%"
       },
@@ -1305,6 +4408,170 @@
       {
         "value": "409205/435641",
         "text": "93.9317%"
+      },
+      {
+        "value": "61406/188345",
+        "text": "32.60%"
+      },
+      {
+        "value": "404/1133",
+        "text": "35.66%"
+      },
+      {
+        "value": "77/226",
+        "text": "34.07%"
+      },
+      {
+        "value": "133/356",
+        "text": "37.36%"
+      },
+      {
+        "value": "387/1165",
+        "text": "33.22%"
+      },
+      {
+        "value": "257/760",
+        "text": "33.82%"
+      },
+      {
+        "value": "396/1121",
+        "text": "35.33%"
+      },
+      {
+        "value": "382/1111",
+        "text": "34.38%"
+      },
+      {
+        "value": "383/1071",
+        "text": "35.76%"
+      },
+      {
+        "value": "11/31",
+        "text": "35.48%"
+      },
+      {
+        "value": "341/1174",
+        "text": "29.05%"
+      },
+      {
+        "value": "402/1099",
+        "text": "36.58%"
+      },
+      {
+        "value": "398/1107",
+        "text": "35.95%"
+      },
+      {
+        "value": "78/217",
+        "text": "35.94%"
+      },
+      {
+        "value": "191/553",
+        "text": "34.54%"
+      },
+      {
+        "value": "323/951",
+        "text": "33.96%"
+      },
+      {
+        "value": "299/848",
+        "text": "35.26%"
+      },
+      {
+        "value": "350/1039",
+        "text": "33.69%"
+      },
+      {
+        "value": "149/494",
+        "text": "30.16%"
+      },
+      {
+        "value": "52/141",
+        "text": "36.88%"
+      },
+      {
+        "value": "379/1068",
+        "text": "35.49%"
+      },
+      {
+        "value": "327/1036",
+        "text": "31.56%"
+      },
+      {
+        "value": "338/1103",
+        "text": "30.64%"
+      },
+      {
+        "value": "177/559",
+        "text": "31.66%"
+      },
+      {
+        "value": "132/439",
+        "text": "30.07%"
+      },
+      {
+        "value": "373/1146",
+        "text": "32.55%"
+      },
+      {
+        "value": "31/106",
+        "text": "29.25%"
+      },
+      {
+        "value": "124/429",
+        "text": "28.90%"
+      },
+      {
+        "value": "305/952",
+        "text": "32.04%"
+      },
+      {
+        "value": "367/1157",
+        "text": "31.72%"
+      },
+      {
+        "value": "345/1049",
+        "text": "32.89%"
+      },
+      {
+        "value": "340/1137",
+        "text": "29.90%"
+      },
+      {
+        "value": "344/1133",
+        "text": "30.36%"
+      },
+      {
+        "value": "151/502",
+        "text": "30.08%"
+      },
+      {
+        "value": "157/522",
+        "text": "30.08%"
+      },
+      {
+        "value": "307/1070",
+        "text": "28.69%"
+      },
+      {
+        "value": "371/1123",
+        "text": "33.04%"
+      },
+      {
+        "value": "365/1118",
+        "text": "32.65%"
+      },
+      {
+        "value": "172/565",
+        "text": "30.44%"
+      },
+      {
+        "value": "115/374",
+        "text": "30.75%"
+      },
+      {
+        "value": "149/480",
+        "text": "31.04%"
       }
     ],
     "count": [
@@ -1323,6 +4590,14 @@
       {
         "value": "59385",
         "text": "59,385"
+      },
+      {
+        "value": "188305",
+        "text": "188,305"
+      },
+      {
+        "value": "40",
+        "text": "40"
       },
       {
         "value": "24",
@@ -1509,6 +4784,22 @@
         "text": "30"
       },
       {
+        "value": "493680",
+        "text": "493,680"
+      },
+      {
+        "value": "495312",
+        "text": "495,312"
+      },
+      {
+        "value": "1632",
+        "text": "1,632"
+      },
+      {
+        "value": "87192",
+        "text": "87,192"
+      },
+      {
         "value": "3530",
         "text": "3,530"
       },
@@ -1565,12 +4856,982 @@
         "text": "90"
       },
       {
-        "value": "495312",
-        "text": "495,312"
+        "value": "409205",
+        "text": "409,205"
+      },
+      {
+        "value": "435641",
+        "text": "435,641"
       },
       {
         "value": "88824",
         "text": "88,824"
+      },
+      {
+        "value": "10",
+        "text": "10"
+      },
+      {
+        "value": "20",
+        "text": "20"
+      },
+      {
+        "value": "1133",
+        "text": "1,133"
+      },
+      {
+        "value": "1130",
+        "text": "1,130"
+      },
+      {
+        "value": "712",
+        "text": "712"
+      },
+      {
+        "value": "1165",
+        "text": "1,165"
+      },
+      {
+        "value": "760",
+        "text": "760"
+      },
+      {
+        "value": "1121",
+        "text": "1,121"
+      },
+      {
+        "value": "1111",
+        "text": "1,111"
+      },
+      {
+        "value": "1071",
+        "text": "1,071"
+      },
+      {
+        "value": "1116",
+        "text": "1,116"
+      },
+      {
+        "value": "1174",
+        "text": "1,174"
+      },
+      {
+        "value": "1099",
+        "text": "1,099"
+      },
+      {
+        "value": "1107",
+        "text": "1,107"
+      },
+      {
+        "value": "1085",
+        "text": "1,085"
+      },
+      {
+        "value": "1106",
+        "text": "1,106"
+      },
+      {
+        "value": "951",
+        "text": "951"
+      },
+      {
+        "value": "848",
+        "text": "848"
+      },
+      {
+        "value": "1039",
+        "text": "1,039"
+      },
+      {
+        "value": "988",
+        "text": "988"
+      },
+      {
+        "value": "1128",
+        "text": "1,128"
+      },
+      {
+        "value": "1068",
+        "text": "1,068"
+      },
+      {
+        "value": "1036",
+        "text": "1,036"
+      },
+      {
+        "value": "1103",
+        "text": "1,103"
+      },
+      {
+        "value": "1118",
+        "text": "1,118"
+      },
+      {
+        "value": "878",
+        "text": "878"
+      },
+      {
+        "value": "1146",
+        "text": "1,146"
+      },
+      {
+        "value": "212",
+        "text": "212"
+      },
+      {
+        "value": "429",
+        "text": "429"
+      },
+      {
+        "value": "952",
+        "text": "952"
+      },
+      {
+        "value": "1157",
+        "text": "1,157"
+      },
+      {
+        "value": "1049",
+        "text": "1,049"
+      },
+      {
+        "value": "1137",
+        "text": "1,137"
+      },
+      {
+        "value": "1004",
+        "text": "1,004"
+      },
+      {
+        "value": "1044",
+        "text": "1,044"
+      },
+      {
+        "value": "1070",
+        "text": "1,070"
+      },
+      {
+        "value": "1123",
+        "text": "1,123"
+      },
+      {
+        "value": "374",
+        "text": "374"
+      },
+      {
+        "value": "960",
+        "text": "960"
+      }
+    ],
+    "points": [
+      {
+        "value": "10000",
+        "text": "100.00"
+      },
+      {
+        "value": "7209643",
+        "text": "+72,096.43"
+      },
+      {
+        "value": "7209643/188345",
+        "text": "+0.38"
+      },
+      {
+        "value": "1053870",
+        "text": "+10,538.70"
+      },
+      {
+        "value": "1053870/1133",
+        "text": "+9.30"
+      },
+      {
+        "value": "325555",
+        "text": "3,255.55"
+      },
+      {
+        "value": "94500",
+        "text": "+945.00"
+      },
+      {
+        "value": "-45900",
+        "text": "-459.00"
+      },
+      {
+        "value": "895145",
+        "text": "+8,951.45"
+      },
+      {
+        "value": "179029/226",
+        "text": "+7.92"
+      },
+      {
+        "value": "298730",
+        "text": "2,987.30"
+      },
+      {
+        "value": "68205",
+        "text": "+682.05"
+      },
+      {
+        "value": "-37400",
+        "text": "-374.00"
+      },
+      {
+        "value": "714215",
+        "text": "+7,142.15"
+      },
+      {
+        "value": "714215/712",
+        "text": "+10.03"
+      },
+      {
+        "value": "104500",
+        "text": "1,045.00"
+      },
+      {
+        "value": "61500",
+        "text": "+615.00"
+      },
+      {
+        "value": "-38800",
+        "text": "-388.00"
+      },
+      {
+        "value": "596495",
+        "text": "+5,964.95"
+      },
+      {
+        "value": "119299/233",
+        "text": "+5.12"
+      },
+      {
+        "value": "827975",
+        "text": "8,279.75"
+      },
+      {
+        "value": "100500",
+        "text": "+1,005.00"
+      },
+      {
+        "value": "-74195",
+        "text": "-741.95"
+      },
+      {
+        "value": "339720",
+        "text": "+3,397.20"
+      },
+      {
+        "value": "447",
+        "text": "+4.47"
+      },
+      {
+        "value": "106000",
+        "text": "1,060.00"
+      },
+      {
+        "value": "76500",
+        "text": "+765.00"
+      },
+      {
+        "value": "-46900",
+        "text": "-469.00"
+      },
+      {
+        "value": "274810",
+        "text": "+2,748.10"
+      },
+      {
+        "value": "274810/1121",
+        "text": "+2.45"
+      },
+      {
+        "value": "40500",
+        "text": "405.00"
+      },
+      {
+        "value": "13500",
+        "text": "+135.00"
+      },
+      {
+        "value": "-8930",
+        "text": "-89.30"
+      },
+      {
+        "value": "249905",
+        "text": "+2,499.05"
+      },
+      {
+        "value": "249905/1111",
+        "text": "+2.25"
+      },
+      {
+        "value": "160820",
+        "text": "1,608.20"
+      },
+      {
+        "value": "59770",
+        "text": "+597.70"
+      },
+      {
+        "value": "-21540",
+        "text": "-215.40"
+      },
+      {
+        "value": "229325",
+        "text": "+2,293.25"
+      },
+      {
+        "value": "229325/1071",
+        "text": "+2.14"
+      },
+      {
+        "value": "143000",
+        "text": "1,430.00"
+      },
+      {
+        "value": "24165",
+        "text": "+241.65"
+      },
+      {
+        "value": "-51600",
+        "text": "-516.00"
+      },
+      {
+        "value": "210680",
+        "text": "+2,106.80"
+      },
+      {
+        "value": "52670/279",
+        "text": "+1.89"
+      },
+      {
+        "value": "67805",
+        "text": "678.05"
+      },
+      {
+        "value": "20400",
+        "text": "+204.00"
+      },
+      {
+        "value": "-10790",
+        "text": "-107.90"
+      },
+      {
+        "value": "175190",
+        "text": "+1,751.90"
+      },
+      {
+        "value": "87595/587",
+        "text": "+1.49"
+      },
+      {
+        "value": "139640",
+        "text": "1,396.40"
+      },
+      {
+        "value": "62400",
+        "text": "+624.00"
+      },
+      {
+        "value": "-19500",
+        "text": "-195.00"
+      },
+      {
+        "value": "169829",
+        "text": "+1,698.29"
+      },
+      {
+        "value": "169829/1099",
+        "text": "+1.55"
+      },
+      {
+        "value": "15703",
+        "text": "157.03"
+      },
+      {
+        "value": "13710",
+        "text": "+137.10"
+      },
+      {
+        "value": "-3525",
+        "text": "-35.25"
+      },
+      {
+        "value": "169495",
+        "text": "+1,694.95"
+      },
+      {
+        "value": "169495/1107",
+        "text": "+1.53"
+      },
+      {
+        "value": "54565",
+        "text": "545.65"
+      },
+      {
+        "value": "13800",
+        "text": "+138.00"
+      },
+      {
+        "value": "-9370",
+        "text": "-93.70"
+      },
+      {
+        "value": "131330",
+        "text": "+1,313.30"
+      },
+      {
+        "value": "26266/217",
+        "text": "+1.21"
+      },
+      {
+        "value": "18650",
+        "text": "186.50"
+      },
+      {
+        "value": "13850",
+        "text": "+138.50"
+      },
+      {
+        "value": "-5450",
+        "text": "-54.50"
+      },
+      {
+        "value": "126421",
+        "text": "+1,264.21"
+      },
+      {
+        "value": "126421/1106",
+        "text": "+1.14"
+      },
+      {
+        "value": "30510",
+        "text": "305.10"
+      },
+      {
+        "value": "61715",
+        "text": "+617.15"
+      },
+      {
+        "value": "-14575",
+        "text": "-145.75"
+      },
+      {
+        "value": "123305",
+        "text": "+1,233.05"
+      },
+      {
+        "value": "123305/951",
+        "text": "+1.30"
+      },
+      {
+        "value": "32288",
+        "text": "322.88"
+      },
+      {
+        "value": "18205",
+        "text": "+182.05"
+      },
+      {
+        "value": "-6300",
+        "text": "-63.00"
+      },
+      {
+        "value": "118645",
+        "text": "+1,186.45"
+      },
+      {
+        "value": "118645/848",
+        "text": "+1.40"
+      },
+      {
+        "value": "44350",
+        "text": "443.50"
+      },
+      {
+        "value": "19190",
+        "text": "+191.90"
+      },
+      {
+        "value": "-6350",
+        "text": "-63.50"
+      },
+      {
+        "value": "109915",
+        "text": "+1,099.15"
+      },
+      {
+        "value": "109915/1039",
+        "text": "+1.06"
+      },
+      {
+        "value": "43405",
+        "text": "434.05"
+      },
+      {
+        "value": "26115",
+        "text": "+261.15"
+      },
+      {
+        "value": "-5740",
+        "text": "-57.40"
+      },
+      {
+        "value": "105380",
+        "text": "+1,053.80"
+      },
+      {
+        "value": "26345/247",
+        "text": "+1.07"
+      },
+      {
+        "value": "70685",
+        "text": "706.85"
+      },
+      {
+        "value": "26220",
+        "text": "+262.20"
+      },
+      {
+        "value": "-13700",
+        "text": "-137.00"
+      },
+      {
+        "value": "95181",
+        "text": "+951.81"
+      },
+      {
+        "value": "31727/376",
+        "text": "+0.84"
+      },
+      {
+        "value": "31450",
+        "text": "314.50"
+      },
+      {
+        "value": "6690",
+        "text": "+66.90"
+      },
+      {
+        "value": "-4215",
+        "text": "-42.15"
+      },
+      {
+        "value": "91605",
+        "text": "+916.05"
+      },
+      {
+        "value": "30535/356",
+        "text": "+0.86"
+      },
+      {
+        "value": "88825",
+        "text": "888.25"
+      },
+      {
+        "value": "17385",
+        "text": "+173.85"
+      },
+      {
+        "value": "-14660",
+        "text": "-146.60"
+      },
+      {
+        "value": "-18500",
+        "text": "-185.00"
+      },
+      {
+        "value": "-125/7",
+        "text": "-0.18"
+      },
+      {
+        "value": "22455",
+        "text": "224.55"
+      },
+      {
+        "value": "4290",
+        "text": "+42.90"
+      },
+      {
+        "value": "-3020",
+        "text": "-30.20"
+      },
+      {
+        "value": "-18905",
+        "text": "-189.05"
+      },
+      {
+        "value": "-18905/1103",
+        "text": "-0.17"
+      },
+      {
+        "value": "20660",
+        "text": "206.60"
+      },
+      {
+        "value": "2100",
+        "text": "+21.00"
+      },
+      {
+        "value": "-1800",
+        "text": "-18.00"
+      },
+      {
+        "value": "-19295",
+        "text": "-192.95"
+      },
+      {
+        "value": "-19295/1118",
+        "text": "-0.17"
+      },
+      {
+        "value": "24375",
+        "text": "243.75"
+      },
+      {
+        "value": "-3580",
+        "text": "-35.80"
+      },
+      {
+        "value": "-20290",
+        "text": "-202.90"
+      },
+      {
+        "value": "-10145/439",
+        "text": "-0.23"
+      },
+      {
+        "value": "50270",
+        "text": "502.70"
+      },
+      {
+        "value": "7935",
+        "text": "+79.35"
+      },
+      {
+        "value": "-4885",
+        "text": "-48.85"
+      },
+      {
+        "value": "-21175",
+        "text": "-211.75"
+      },
+      {
+        "value": "-21175/1146",
+        "text": "-0.18"
+      },
+      {
+        "value": "65570",
+        "text": "655.70"
+      },
+      {
+        "value": "15150",
+        "text": "+151.50"
+      },
+      {
+        "value": "-5900",
+        "text": "-59.00"
+      },
+      {
+        "value": "-24375",
+        "text": "-243.75"
+      },
+      {
+        "value": "-24375/212",
+        "text": "-1.15"
+      },
+      {
+        "value": "61305",
+        "text": "613.05"
+      },
+      {
+        "value": "9930",
+        "text": "+99.30"
+      },
+      {
+        "value": "-5000",
+        "text": "-50.00"
+      },
+      {
+        "value": "-25340",
+        "text": "-253.40"
+      },
+      {
+        "value": "-25340/429",
+        "text": "-0.59"
+      },
+      {
+        "value": "31095",
+        "text": "310.95"
+      },
+      {
+        "value": "3870",
+        "text": "+38.70"
+      },
+      {
+        "value": "-2380",
+        "text": "-23.80"
+      },
+      {
+        "value": "-27300",
+        "text": "-273.00"
+      },
+      {
+        "value": "-975/34",
+        "text": "-0.29"
+      },
+      {
+        "value": "43070",
+        "text": "430.70"
+      },
+      {
+        "value": "8160",
+        "text": "+81.60"
+      },
+      {
+        "value": "-4546",
+        "text": "-45.46"
+      },
+      {
+        "value": "-28705",
+        "text": "-287.05"
+      },
+      {
+        "value": "-28705/1157",
+        "text": "-0.25"
+      },
+      {
+        "value": "51835",
+        "text": "518.35"
+      },
+      {
+        "value": "4455",
+        "text": "+44.55"
+      },
+      {
+        "value": "-5660",
+        "text": "-56.60"
+      },
+      {
+        "value": "-29985",
+        "text": "-299.85"
+      },
+      {
+        "value": "-29985/1049",
+        "text": "-0.29"
+      },
+      {
+        "value": "104895",
+        "text": "1,048.95"
+      },
+      {
+        "value": "9900",
+        "text": "+99.00"
+      },
+      {
+        "value": "-8265",
+        "text": "-82.65"
+      },
+      {
+        "value": "-31177",
+        "text": "-311.77"
+      },
+      {
+        "value": "-31177/1137",
+        "text": "-0.27"
+      },
+      {
+        "value": "35759",
+        "text": "357.59"
+      },
+      {
+        "value": "8626",
+        "text": "+86.26"
+      },
+      {
+        "value": "-12246",
+        "text": "-122.46"
+      },
+      {
+        "value": "-32020",
+        "text": "-320.20"
+      },
+      {
+        "value": "-32020/1133",
+        "text": "-0.28"
+      },
+      {
+        "value": "93790",
+        "text": "937.90"
+      },
+      {
+        "value": "28485",
+        "text": "+284.85"
+      },
+      {
+        "value": "-34335",
+        "text": "-343.35"
+      },
+      {
+        "value": "-38865",
+        "text": "-388.65"
+      },
+      {
+        "value": "-38865/1004",
+        "text": "-0.39"
+      },
+      {
+        "value": "45610",
+        "text": "456.10"
+      },
+      {
+        "value": "8625",
+        "text": "+86.25"
+      },
+      {
+        "value": "-5090",
+        "text": "-50.90"
+      },
+      {
+        "value": "-39115",
+        "text": "-391.15"
+      },
+      {
+        "value": "-39115/1044",
+        "text": "-0.37"
+      },
+      {
+        "value": "74420",
+        "text": "744.20"
+      },
+      {
+        "value": "9520",
+        "text": "+95.20"
+      },
+      {
+        "value": "-4920",
+        "text": "-49.20"
+      },
+      {
+        "value": "-45804",
+        "text": "-458.04"
+      },
+      {
+        "value": "-22902/535",
+        "text": "-0.43"
+      },
+      {
+        "value": "57674",
+        "text": "576.74"
+      },
+      {
+        "value": "6525",
+        "text": "+65.25"
+      },
+      {
+        "value": "-3500",
+        "text": "-35.00"
+      },
+      {
+        "value": "-49795",
+        "text": "-497.95"
+      },
+      {
+        "value": "-49795/1123",
+        "text": "-0.44"
+      },
+      {
+        "value": "73565",
+        "text": "735.65"
+      },
+      {
+        "value": "6535",
+        "text": "+65.35"
+      },
+      {
+        "value": "-6530",
+        "text": "-65.30"
+      },
+      {
+        "value": "-57720",
+        "text": "-577.20"
+      },
+      {
+        "value": "-2220/43",
+        "text": "-0.52"
+      },
+      {
+        "value": "108430",
+        "text": "1,084.30"
+      },
+      {
+        "value": "10815",
+        "text": "+108.15"
+      },
+      {
+        "value": "-11300",
+        "text": "-113.00"
+      },
+      {
+        "value": "-72250",
+        "text": "-722.50"
+      },
+      {
+        "value": "-7225/113",
+        "text": "-0.64"
+      },
+      {
+        "value": "102350",
+        "text": "1,023.50"
+      },
+      {
+        "value": "31050",
+        "text": "+310.50"
+      },
+      {
+        "value": "-7445",
+        "text": "-74.45"
+      },
+      {
+        "value": "-84025",
+        "text": "-840.25"
+      },
+      {
+        "value": "-84025/374",
+        "text": "-2.25"
+      },
+      {
+        "value": "89145",
+        "text": "891.45"
+      },
+      {
+        "value": "11335",
+        "text": "+113.35"
+      },
+      {
+        "value": "-15320",
+        "text": "-153.20"
+      },
+      {
+        "value": "-153100",
+        "text": "-1,531.00"
+      },
+      {
+        "value": "-7655/48",
+        "text": "-1.59"
+      },
+      {
+        "value": "234750",
+        "text": "2,347.50"
+      },
+      {
+        "value": "27000",
+        "text": "+270.00"
+      },
+      {
+        "value": "-19000",
+        "text": "-190.00"
       }
     ]
   }

@@ -361,7 +361,36 @@ def test_the_numeric_freeze_is_not_VACUOUS_the_pre_edit_report_fails_it() -> Non
     import json
     baseline = json.loads((BASELINE_PY.with_suffix(".json")).read_text(encoding="utf-8"))
     assert module.numeric_tokens(blob) == baseline["tokens"]
-    assert baseline["token_count"] == 2457
+    assert baseline["token_count"] == len(baseline["tokens"]) == 2449
+
+    # The count was 2,457 until the ROUND-4 execution session (06-Aug-2026) excluded three more
+    # lines -- the Q43 flag sentence, the Q44 stamp sentence and the config row -- because the
+    # trader's own answers retire what they said. An exclusion list that grows is how a moved
+    # number hides, so the growth is accounted for here rather than taken on trust: dropping
+    # ONLY the five original markers must still give 2,457, and the eight tokens between the two
+    # readings must be exactly the Q43/Q44 digits those three lines carried. Not one METRIC
+    # token is among them.
+    round_4 = {"The capital-infeasibility FLAGS are", "**Q44 is",
+               "| capital_reference / margin_basis |"}
+    original = [pair for pair in module.EDITED_LINE_MARKERS if pair[1] not in round_4]
+    assert len(original) == len(module.EDITED_LINE_MARKERS) - 3
+
+    def tokens_under(markers) -> list[str]:
+        out: list[str] = []
+        for section, line in lines:
+            if any(section == where and marker in line for where, marker in markers):
+                continue
+            out.extend(module.TOKEN.findall(line))
+        return out
+
+    before = tokens_under(original)
+    assert len(before) == 2457
+    assert len(before) - len(baseline["tokens"]) == 8
+    import collections
+    gone = collections.Counter(before) - collections.Counter(baseline["tokens"])
+    assert gone == collections.Counter(
+        {"43": 2, "44": 2, "2032": 1, "3.4": 1, "31": 1, "-2026": 1}
+    ), f"only the Q43/Q44 digits left the freeze, never a metric: {sorted(gone.elements())}"
 
 
 def test_the_priced_refusal_rows_RENDER_the_measured_base_and_not_the_full_day_count() -> None:

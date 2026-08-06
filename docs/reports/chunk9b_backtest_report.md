@@ -14,7 +14,7 @@ This is the result of the strategy the trader specified, applied without discret
 
 **It is NOT a capital-constrained result.** CONTEXT 3.5, Round-3 Q40 option (d), TRADER-FINAL: *no limits, show me the honest numbers*. Every signal is taken on every stock concurrently, each sized by the fixed rupee-risk rule, with no capital or concurrency cap of any kind. Section 11 measures what that actually required -- the most positions held at once and the largest simultaneous notional -- so the size of the assumption is on the page rather than behind it.
 
-**The capital-infeasibility FLAGS are NOT COMPUTED.** capital-infeasibility flags NOT computed -- the trader's Q43 answer is pending. `capital_reference` and `margin_basis` are optional config keys and both are null; the machinery is built and tested and computes POST-HOC from this ledger the day the answer arrives, with no re-run. There is no default figure anywhere in this repo, because a trade marked infeasible against a guessed number would be this repo's claim standing in for the trader's.
+**The capital-infeasibility FLAGS are RETIRED, not pending.** capital-infeasibility flags RETIRED by the trader (Round 4): he superseded his own Q43 question, and the config keys stay null, labelled 'retired by trader, Round 4'. `capital_reference` and `margin_basis` are optional config keys and both are still null, so no flag value is computed here or anywhere. What replaces them is what he asked for instead: a per-stock POINTS view, computed post-hoc from this same ledger and independent of position size. The machinery is kept rather than deleted -- a later capital figure would revive it from this ledger with no re-run -- and there is still no default figure anywhere in this repo, because a trade marked infeasible against a guessed number would be this repo's claim standing in for the trader's. The manifest below quotes the sentence this run was stamped with, which was written while the question was open; it is the run's own record and it is left exactly as the run wrote it.
 
 **The fills are IDEALIZED** (CONTEXT 7-E9). Entries fill at the 15-minute candle's close, stops and targets fill at their LEVELS even when the candle ran past them, and the only friction is the flat cost below. There is no slippage model, no partial fill, no market impact -- and this portfolio would have carried the notional section 11 reports, which is where impact would have been felt.
 
@@ -26,7 +26,7 @@ This is the result of the strategy the trader specified, applied without discret
 
 **The data era is 93.9317% USABLE, not 100% -- and that figure is ALL THREE GATES, not the price gate alone.** 93.9317% is CONTEXT 4.6 v1.6's coverage figure: the settled symbols' usable stored symbol-days over the WHOLE lake's stored days, so a day refused for having no candles, for failing the volume reconciliation, for failing price containment or for candle integrity is outside it equally. The narrower quantity section 9's `price-proven` column carries -- gate 1P alone, a day whose 1-minute prices reconcile against the exchange's own bhavcopy -- is 97.8444% over the settled universe. The two are different measurements over different denominators, and averaging the section-9 column will never reach the headline. Refused days are counted, never traded: section 3a partitions all 495,312 walked days and section 9 carries each symbol's own coverage beside its figures; the residual is disclosed in the register, not chased.
 
-**Q44 is unconfirmed.** The manifest carries, verbatim: *"PENDING TRADER CONFIRMATION OF Q44 (gap-rule example, POC 2032)"*. If his answer surprises, CONTEXT 3.4 changes, the spec version bumps and the whole run is done again; this ledger is then superseded, retained and labelled, never deleted (the architect's GO ruling, 31-Jul-2026).
+**Q44 is CONFIRMED (the trader, Round 4, 06-Aug-2026).** This run was stamped while the question was open, and its manifest still carries that stamp, verbatim: *"PENDING TRADER CONFIRMATION OF Q44 (gap-rule example, POC 2032)"*. The answer has since arrived and it did NOT surprise: his own diagram makes the worked example a GAP day at POC 2030 with the stop at the last traded close, at or below the POC -- CONTEXT 3.4 as written, as implemented, and as this run walked it. So the GO ruling's escalation branch (a 3.4 change -> spec version bump -> full re-run, this ledger superseded but retained) is closed UNUSED, and not one figure in this report moves. CONTEXT v1.8 corrects the EXAMPLE's parametrization in section 8 -- F1/F2 at POC 2030 on the gap branch, the POC-2032 pair kept as the low == POC boundary illustration -- and changes no rule (QUESTIONS.md ROUND-4 RECEIPTS, 06-Aug-2026).
 
 ## 2. The run this reports on
 
@@ -46,7 +46,7 @@ This is the result of the strategy the trader specified, applied without discret
 | Cost per executed round trip | Rs 100.00 | `config.yaml` (CONTEXT 3.5, R1-Q23) |
 | Capital (equity-curve base) | Rs 100,000.00 | `config.yaml` (CONTEXT 3.5, R1-Q21a) |
 | Row Size N | 24 | `config.yaml` (CONTEXT 3.3, trader screenshot) |
-| capital_reference / margin_basis | null / null | trader Q43 PENDING |
+| capital_reference / margin_basis | null / null | retired by trader, Round 4 |
 | Ledger | `ledger.jsonl`, 400,451,219 bytes | sha256 `c70a72b097879914...` |
 | Manifest | `manifest.json` | sha256 `2594c6e81d404029...` |
 
@@ -613,9 +613,11 @@ The trader's own answer requires these, and they are the price of the no-limits 
 
 **The two concurrency rows are two CONVENTIONS, not a disagreement.** They differ only in what happens when one trade opens at the same 15-minute stamp another closes: the first row counts the closing position as still open (the pessimistic reading, and the one every other figure on this page is consistent with), the second closes it at its exit stamp. **Neither row is a smaller reading of the 15-minute equity path**: that path marks a trade THROUGH its exit candle's close stamp, so it holds the position there and its own maximum is the first row's. Section 4 defines both; neither is a correction of the other.
 
-**This is the disclosure that matters most on this page.** A portfolio that at its peak held 39 positions worth Rs 42,148,077.61 against Rs 1,00,000 of capital is not a portfolio the trader's cash could have carried; the run takes every signal because he asked for the honest numbers with no limits, and this is what no limits actually meant. Which trades his capital could not have taken is the Q40-d FLAG question, and it is not computed:
+**This is the disclosure that matters most on this page.** A portfolio that at its peak held 39 positions worth Rs 42,148,077.61 against Rs 1,00,000 of capital is not a portfolio the trader's cash could have carried; the run takes every signal because he asked for the honest numbers with no limits, and this is what no limits actually meant. Which trades his capital could not have taken is the Q40-d FLAG question, and it is not computed -- he retired it:
 
-> capital-infeasibility flags NOT computed -- the trader's Q43 answer is pending
+> capital-infeasibility flags RETIRED by the trader (Round 4): he superseded his own Q43 question, and the config keys stay null, labelled 'retired by trader, Round 4'
+
+**What he asked for in its place is computed**: a per-stock view in POINTS -- the per-share move each trade made, signed by side -- which is what a ranking free of position size looks like. It is `docs/reports/points_by_symbol.md`, built from this same ledger, and it carries its own multiple-comparisons caveat, because a ranking of this many stocks throws up good ones by chance alone.
 
 ### 11a. The full distribution of daily trade counts
 
@@ -892,6 +894,6 @@ Two further shapes are worth naming because they are nearly-never rather than ne
 | The refusal pricing | the crashed run's retained shards, named per class | REVIEW_9B_FIXES R10 |
 | The rare-shape witnesses | the ledger's own flags, recounted against the manifest's counters | CONTEXT 7-E2 / Q-17 / Q-21 |
 
-**Nothing on this page is estimated, modelled or extrapolated.** Where a number could not be measured it is absent and says why: the capital-infeasibility flags (Q43 pending), the foregone trades on refusal classes with no counterfactual (section 11b), and the per-symbol 15-minute paths (section 9). The benchmark's price domain is no longer among them: Q-23 is RULED and CLOSED, section 10 publishes the benchmark the ruling names, and the two other readings are printed beside it and labelled as not being it.
+**Nothing on this page is estimated, modelled or extrapolated.** Where a number could not be measured it is absent and says why: the capital-infeasibility flags (RETIRED by the trader in Round 4, and replaced by the points companion), the foregone trades on refusal classes with no counterfactual (section 11b), and the per-symbol 15-minute paths (section 9). The benchmark's price domain is no longer among them: Q-23 is RULED and CLOSED, section 10 publishes the benchmark the ruling names, and the two other readings are printed beside it and labelled as not being it.
 
 Ledger sha256 `c70a72b097879914a3026331c1e651b70c7e6052327d0f34121fd30909a4d134`; manifest sha256 `2594c6e81d404029c655645a6eb3d8b5fe58d02a0be1891ec9040aebcd25b764`.

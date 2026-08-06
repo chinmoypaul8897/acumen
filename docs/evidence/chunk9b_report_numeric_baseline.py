@@ -51,6 +51,15 @@ TOKEN = re.compile(r"-?\d[\d,:.\-]*\d|\d")
 #: comparison on the baseline and on the new file alike; everything else in sections 1..9 must
 #: be token-identical, in order.
 EDITED_LINE_MARKERS: tuple[tuple[int, str], ...] = (
+    # --- the ROUND-4 execution session (06-Aug-2026): three lines, each carrying a Q43 or Q44
+    # digit that the trader's own answers retire. The flags are RETIRED rather than pending and
+    # Q44 is CONFIRMED, so the sentences that said an answer was outstanding had to change; the
+    # markers match the line on BOTH sides, and every other line of sections 1..9 -- including
+    # the manifest's own disclosure block, which quotes the frozen run and does not move -- is
+    # compared token for token as before. No METRIC is on any of the three.
+    (1, "The capital-infeasibility FLAGS are"),      # Round 4: retired, not pending
+    (1, "**Q44 is"),                                 # Round 4: confirmed, not unconfirmed
+    (2, "| capital_reference / margin_basis |"),     # Round 4: the config row's own label
     (1, "price-proven"),                            # Q4: section 1's gates sentence
     (4, "**Concurrency, and which convention"),     # Q7: the new definitions bullet
     (5, "| Best year |"),                           # Q3: the one extreme-year row that changed

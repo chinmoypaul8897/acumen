@@ -65,11 +65,13 @@ def test_the_frozen_baseline_covers_the_whole_of_sections_1_to_9() -> None:
     assert {section for section, _ in lines} == set(range(1, 10)), (
         "the baseline must span sections 1 through 9 of the regenerated report"
     )
-    assert baseline["lines_excluded_as_edited"] == 5, (
-        "the PRE-EDIT report has exactly five lines the corrections rewrite (section 5's `Worst "
-        "year` row goes through the same renderer but comes out byte-identical, so it is COMPARED, "
-        "not excluded); a sixth means the exclusion list grew, and an exclusion list that grows "
-        "is how a moved number hides"
+    assert baseline["lines_excluded_as_edited"] == 8, (
+        "the PRE-EDIT report has exactly eight lines the corrections rewrite: FIVE from the "
+        "final-edits session (section 5's `Worst year` row goes through the same renderer but "
+        "comes out byte-identical, so it is COMPARED, not excluded) and THREE from the Round-4 "
+        "execution session, where the trader's own answers retire the Q43 flag sentence, confirm "
+        "Q44 and relabel the config row. A ninth means the exclusion list grew again, and an "
+        "exclusion list that grows is how a moved number hides"
     )
     assert baseline["ref"] == module.DEFAULT_REF
 
@@ -91,6 +93,17 @@ def test_each_of_the_six_corrections_is_PRESENT_in_the_regenerated_report() -> N
     assert present(6, "the fences do sit outside the band"), "Q1"
     assert not present(6, "% of its own notional"), "Q5: the ill-defined rows are gone"
     assert not present(6, "and the fences sit outside it"), "Q1: the blanket claim is gone"
+
+    # ...and the same in both directions for the three Round-4 lines (06-Aug-2026)
+    assert present(1, "The capital-infeasibility FLAGS are RETIRED, not pending."), "Round 4"
+    assert present(1, "**Q44 is CONFIRMED (the trader, Round 4, 06-Aug-2026).**"), "Round 4"
+    assert present(2, "| retired by trader, Round 4 |"), "Round 4"
+    assert not present(1, "**Q44 is unconfirmed.**"), "Round 4: the pending claim is gone"
+    assert not present(2, "| trader Q43 PENDING |"), "Round 4: so is the pending config label"
+    assert present(1, "PENDING TRADER CONFIRMATION OF Q44 (gap-rule example, POC 2032)"), (
+        "the run's own stamp is still quoted verbatim -- the manifest is frozen and says what "
+        "it said; what changed is the sentence around the quotation"
+    )
 
 
 def test_the_ruled_benchmark_and_the_Q6_base_are_published_where_they_belong() -> None:
