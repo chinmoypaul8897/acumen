@@ -1,9 +1,11 @@
 """Chunk 12: THE VALIDATION PACK -- the document the trader reads, in his own language.
 
 ``docs/validation/trader_pack.py`` is the launcher, ``docs/validation/trader_pack.md`` is the
-committed output and ``docs/validation/trader_pack.json`` is its machine-readable companion.
-All three must regenerate BYTE-IDENTICALLY from this code over the same run directory and the
-same read-only stores (REVIEW_8 finding C2). Nothing in the output is written by hand, ever.
+committed output, ``docs/validation/trader_pack.json`` is its machine-readable companion and
+``docs/reports/points_by_symbol.md`` is the full per-stock POINTS table page 7 shows both ends
+of (the trader's own Round-4 request, in place of his Q43 capital question). All of them must
+regenerate BYTE-IDENTICALLY from this code over the same run directory and the same read-only
+stores (REVIEW_8 finding C2). Nothing in the output is written by hand, ever.
 
 **Who this is for.** The trader. Not the architect, not a reviewer, not a future session. So the
 page carries no jargon it does not immediately define, no metric name he never used, and no
@@ -37,7 +39,7 @@ from __future__ import annotations
 import argparse
 import json
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from fractions import Fraction
@@ -47,6 +49,7 @@ from typing import Mapping, Sequence
 from . import backtest as bt
 from . import bias as bias_engine
 from . import poc as poc_engine
+from . import points_view as pts
 from . import portfolio as pf
 from . import report_9b as r9
 from . import signals as sig
@@ -62,6 +65,11 @@ RUN_LABEL: str = r9.RUN_LABEL
 
 DEFAULT_OUT: str = "docs/validation/trader_pack.md"
 DEFAULT_JSON: str = "docs/validation/trader_pack.json"
+
+#: The third artefact this generator writes: the FULL per-stock points table, all of it, beside
+#: the technical report. Page 7 of the pack shows both ends of the same ranking and points here
+#: for the rest, so no stock is only ever a row someone decided not to print.
+DEFAULT_POINTS: str = pts.COMPANION_PATH
 
 #: The technical report this pack sits beside. Named so the trader (and the architect's document
 #: build) can find the long-form evidence for anything the pack states in one line.
@@ -158,8 +166,17 @@ class Census:
     recent_pocs: Mapping[tuple[str, date], int]
     winners: tuple[tuple[date, str], ...]     # executed, target-hit, net > 0, not a gap
     gaps: tuple[tuple[date, str], ...]        # executed gap entries
-    stops: tuple[tuple[date, str, int], ...]  # executed non-gap stop-outs (+ per-share risk)
+    #: EVERY executed stop-out with its per-share risk -- gap entries included. They were
+    #: excluded until REVIEW_12 finding C2 pointed out that the page says "of that day's
+    #: stop-outs" without qualification; a gap entry that stops out is one of that day's
+    #: stop-outs, and the pool now matches the words.
+    stops: tuple[tuple[date, str, int], ...]
     carries: tuple[tuple[date, str, str], ...]  # evaluated, bias CARRIED, no trade
+    #: The entry CLOCK of every gap entry, so the gap slot's criterion can say how many stocks
+    #: gapped in on its day and when -- REVIEW_12 finding Q1: the page claimed a superlative the
+    #: ledger does not support, and nothing checked it. Defaulted so an existing construction of
+    #: this census (the reviewers' own fixtures) needs no change.
+    gap_clocks: Mapping[tuple[date, str], str] = field(default_factory=dict)
 
     @property
     def median_risk_paise(self) -> int:
@@ -195,6 +212,7 @@ def census(run_dir: Path) -> Census:
     gaps: list[tuple[date, str]] = []
     stops: list[tuple[date, str, int]] = []
     carries: list[tuple[date, str, str]] = []
+    clocks: dict[tuple[date, str], str] = {}
     pocs: dict[tuple[str, date], int] = {}
     last: date | None = None
 
@@ -227,7 +245,9 @@ def census(run_dir: Path) -> Census:
                 risks.append(int(row["per_share_risk_paise"]))
                 if row["gap_entry"]:
                     gaps.append((day, symbol))
-                elif row["exit_kind"] == sig.EXIT_STOP and row["net_pnl_paise"] < 0:
+                    stamp = row["entry_close_stamp"]
+                    clocks[(day, symbol)] = stamp[11:16] if stamp else ""
+                if row["exit_kind"] == sig.EXIT_STOP and row["net_pnl_paise"] < 0:
                     stops.append((day, symbol, int(row["per_share_risk_paise"])))
                 if (row["exit_kind"] == sig.EXIT_TARGET and row["net_pnl_paise"] > 0
                         and not row["gap_entry"]):
@@ -250,6 +270,7 @@ def census(run_dir: Path) -> Census:
         gaps=tuple(sorted(gaps)),
         stops=tuple(sorted(stops)),
         carries=tuple(sorted(carries)),
+        gap_clocks=dict(sorted(clocks.items())),
     )
 
 
@@ -297,8 +318,9 @@ def _pick_winner(census: Census) -> Choice:
         key="a", heading="a winner", symbol=best[1], day=best[0],
         criterion=(
             "the most recent trade that reached its target and made money without gapping in, "
-            "on the stock this run traded most often. The day the architect named for this slot "
-            "did not qualify on the ledger's own record, so the rule chose instead"
+            "on the stock this run traded most often, and then the last one alphabetically. The "
+            "day the architect named for this slot did not qualify on the ledger's own record, "
+            "so the rule chose instead"
         ),
     )
 
@@ -313,30 +335,56 @@ def _pick_stop(census: Census) -> Choice:
         key="b", heading="a stop-out", symbol=best[1], day=best[0],
         criterion=(
             "a stop-out from the last day the machine walked, chosen so it is a TYPICAL one and "
-            "not a freak: of that day's stop-outs, the one whose distance from entry to stop is "
-            "nearest the middle distance of all the run's trades. Ties go to the stock this run "
-            "traded most often"
+            "not a freak: of that day's stop-outs -- all of them, gap entries included -- the "
+            "one whose distance from entry to stop is nearest the middle distance of all the "
+            "run's trades. Ties go to the stock this run traded most often, and if that ties "
+            "too, to the first stock alphabetically"
         ),
     )
+
+
+def _gap_neighbours(census: Census, day: date, symbol: str) -> str:
+    """The OTHER stocks that gapped in on the same day, named with their entry times.
+
+    REVIEW_12 finding Q1: the named branch used to print "the LAST gap entry of the whole ten
+    years", which the ledger does not support -- the last gap-entry DAY carries more than one.
+    The sentence now states what is true and COUNTS it, so a data change moves the words.
+    """
+    others = [(census.gap_clocks.get((day, other), ""), other)
+              for one_day, other in census.gaps if one_day == day and other != symbol]
+    if not others:
+        return ""
+    mine = census.gap_clocks.get((day, symbol), "")
+    listed = ", ".join(f"{name} at {clock}" for clock, name in sorted(others))
+    return (f". It was not the only gap entry that day: {len(others) + 1} stocks gapped in on it "
+            f"({listed}, against this one at {mine}), so this is one of them and not a last of "
+            "anything")
 
 
 def _pick_gap(census: Census) -> Choice:
     """A gap-entry day: the architect NAMED one, used if it qualifies."""
     symbol, day = _named(NAMED_GAP)
     if (day, symbol) in set(census.gaps):
+        last_gap_day = max(one_day for one_day, _symbol in census.gaps)
+        placing = ("and it falls on the LAST DAY of the ten years that any stock gapped in"
+                   if day == last_gap_day else
+                   "and it is the day the ledger records for it")
         return Choice(
             key="c", heading="a gap day", symbol=symbol, day=day, named=True,
             criterion=(
-                "the day the architect named for this slot, and the LAST gap entry of the whole "
-                "ten years. It QUALIFIES: the ledger records it as a gap entry"
+                f"the day the architect named for this slot, {placing}. It QUALIFIES: the "
+                "ledger records it as a gap entry"
+                + _gap_neighbours(census, day, symbol)
             ),
         )
     best = max(census.gaps, key=lambda pair: (pair[0], _traded_most(census, pair[1]), pair[1]))
     return Choice(
         key="c", heading="a gap day", symbol=best[1], day=best[0],
         criterion=(
-            "the most recent gap entry in the run. The day the architect named for this slot is "
-            "not a gap entry on the ledger's own record, so the rule chose instead"
+            "the most recent gap entry in the run, on the stock this run traded most often and "
+            "then the last one alphabetically. The day the architect named for this slot is not "
+            "a gap entry on the ledger's own record, so the rule chose instead"
+            + _gap_neighbours(census, best[0], best[1])
         ),
     )
 
@@ -357,7 +405,9 @@ def _pick_wait(census: Census) -> Choice | None:
             "the most recent day in the whole run where the 11:15 candle closed at exactly the "
             "POC price -- your Round-3 answer A, the one where the first candle only picks the "
             "side. Where more than one stock did that on the same day, the one that went on to "
-            "take a trade is shown, because a day with no trade cannot show the rest of the rule"
+            "take a trade is shown, because a day with no trade cannot show the rest of the "
+            "rule; then the stock this run traded most often, and then the last one "
+            "alphabetically"
         ),
     )
 
@@ -370,9 +420,11 @@ def _pick_carry(census: Census) -> Choice:
     return Choice(
         key="e", heading="a day with no trade at all", symbol=best[1], day=best[0],
         criterion=(
-            "a day from the last day the machine walked where no rule fired on the two daily "
-            "candles, so the machine kept the bias it already had -- and where no trade "
-            "followed. Ties go to the stock this run traded most often"
+            "a day from the last day the machine walked where no NEW rule fired on the two "
+            "daily candles -- either an inside bar, which is your rule 1 and says the bias does "
+            "not change, or nothing fitting at all -- so the machine kept the bias it already "
+            "had, and no trade followed. Ties go to the stock this run traded most often, and "
+            "then to the last one alphabetically"
         ),
     )
 
@@ -503,6 +555,31 @@ def rounding_candidates(
     return tuple(sorted(found, key=lambda c: (c.day, c.symbol)))
 
 
+def _rounding_rivals(candidates: Sequence[RoundingCandidate],
+                     probe: RoundingCandidate) -> str:
+    """The days tied with the chosen one on both stated keys, and the key that separated them.
+
+    REVIEW_12 finding Q14: "the one with the widest gap" is a definite description, and on this
+    run it is not unique -- two days tie at the maximum separation with a moving POC. The key
+    that decided it (the day TRADED, so the walk can show the rest of the rule) lived only in a
+    docstring. Both are printed now, and both are computed, so a run where the tie does not
+    happen simply says so.
+    """
+    tied = [one for one in candidates
+            if one.separation == probe.separation and one.poc_moves == probe.poc_moves
+            and (one.symbol, one.day) != (probe.symbol, probe.day)]
+    if not tied:
+        return ", and it is the only such day"
+    listed = ", ".join(f"{one.symbol} on {_long_date(one.day)}" for one in
+                       sorted(tied, key=lambda one: (one.day, one.symbol)))
+    traded = [one for one in tied if not one.executed]
+    because = (" -- this one is shown because it also TOOK A TRADE, and a day with no trade "
+               "cannot show the rest of the rule"
+               if traded and probe.executed else
+               " -- this one is shown because it is the more recent")
+    return (f". {len(tied) + 1} days tie on both of those ({listed}){because}")
+
+
 def pick_rounding_day(candidates: Sequence[RoundingCandidate]) -> RoundingCandidate | None:
     """The candidate a row count read off a chart can settle most cleanly.
 
@@ -528,6 +605,10 @@ class Walk:
     replayed: bt.LedgerRow
     committed: Mapping
     tick_paise: int
+    #: The 1-minute candle that broke one of P's extremes FIRST on a Rule-3 day, as
+    #: ``(stamp, level, side)`` -- the observable the whole day turns on, which REVIEW_12 finding
+    #: Q6 found asserted but not printed. ``None`` on every day that is not decided by Rule 3.
+    first_break: tuple[datetime, int, str] | None = None
     bias_set_on: date | None = None
     bias_set_by: str | None = None
     rounding: RoundingCandidate | None = None
@@ -555,6 +636,34 @@ def _committed_row(run_dir: Path, symbol: str, day: date) -> dict:
             if payload["day"] == wanted:
                 return payload
     raise bt.BacktestError(f"{symbol} {wanted} is not in {shard}.")
+
+
+HIGH_FIRST: str = "high"
+LOW_FIRST: str = "low"
+BOTH_AT_ONCE: str = "both"
+
+
+def first_break(bars: Sequence, previous) -> tuple[datetime, int, str] | None:
+    """The first 1-minute candle to break one of P's extremes, and which one. PURE.
+
+    CONTEXT 3.2's own predicate, restated for the PAGE rather than for the engine: a break is a
+    1-minute high strictly above P's high (or a low strictly below P's low), scanned in time
+    order, and a minute that breaks both is the tie. :func:`acumen.bias._first_break` decides the
+    bias with exactly this test; this returns the STAMP and the LEVEL as well, because REVIEW_12
+    finding Q6 found the pack asserting which side broke first without printing the one
+    observable the trader would have to look at to check it. ``tests/test_trader_pack.py``
+    asserts the two agree.
+    """
+    for bar in bars:
+        high_broke = bar.high_paise > previous.high
+        low_broke = bar.low_paise < previous.low
+        if high_broke and low_broke:
+            return bar.stamp, bar.high_paise, BOTH_AT_ONCE
+        if high_broke:
+            return bar.stamp, bar.high_paise, HIGH_FIRST
+        if low_broke:
+            return bar.stamp, bar.low_paise, LOW_FIRST
+    return None
 
 
 def _bias_origin(series: Mapping[date, DailyBias], day: date) -> tuple[date | None, str | None]:
@@ -590,6 +699,17 @@ def walk(
     if bias.rule in CARRY_RULES:
         set_on, set_by = _bias_origin(series, choice.day)
 
+    broke = None
+    if (bias.rule in (bias_engine.RULE_3, bias_engine.RULE_3_TIE)
+            and bias.current_date is not None and bias.previous_candle is not None):
+        # The Rule-3 scan reads day C's OWN minutes, with CONTEXT 7-E2 / Q-17 strays dropped
+        # first -- the same bars, through the same filter, the run's own loader handed the
+        # engine. Read here only to PRINT the break the bias already turned on.
+        minutes, _dropped = in_session_bars(
+            runner.minute_store.minutes(choice.symbol, bias.current_date)
+        )
+        broke = first_break(minutes, bias.previous_candle)
+
     alt_signal = None
     alt_trade = None
     if rounding is not None and stock_day.signal is not None and stock_day.side is not None:
@@ -605,7 +725,7 @@ def walk(
     return Walk(
         choice=choice, bias=bias, stock_day=stock_day, replayed=replayed, committed=committed,
         tick_paise=runner.pipeline.master.instrument(choice.symbol).tick_size_paise,
-        bias_set_on=set_on, bias_set_by=set_by, rounding=rounding,
+        first_break=broke, bias_set_on=set_on, bias_set_by=set_by, rounding=rounding,
         rounding_signal=alt_signal, rounding_trade=alt_trade, divergences=divergences,
     )
 
@@ -665,8 +785,9 @@ def build_everything(
                 "a day where the two possible ways of rounding the profile's tick count draw a "
                 "DIFFERENT number of rows -- so counting the rows on your own chart settles a "
                 "question the specification still calls provisional. Of the days in the span's "
-                "last calendar year where that happens, this is the one with the widest gap "
-                "between the two row counts, and on it the POC itself moves"
+                "last calendar year where that happens, this is one of the days with the widest "
+                "gap between the two row counts and with the POC itself moving"
+                + _rounding_rivals(candidates, probe)
             ),
         ))
 
@@ -696,6 +817,9 @@ def build_everything(
             rounding=probe if choice.key == "f" else None,
         ))
 
+    progress("ranking the stocks in points")
+    points = pts.per_symbol(run.executed)
+
     return dict(
         run=run,
         config=config,
@@ -710,6 +834,7 @@ def build_everything(
         candidates=candidates,
         probe=probe,
         row_size=config.row_size,
+        points=points,
     )
 
 
@@ -724,7 +849,11 @@ def main(argv: list[str] | None = None) -> int:
     companion.parent.mkdir(parents=True, exist_ok=True)
     companion.write_text(json.dumps(payload, indent=2, sort_keys=False) + "\n",
                          encoding="utf-8", newline="\n")
-    print(f"wrote {out} ({len(text):,} chars) and {companion}")
+    table = Path(args.points)
+    table.parent.mkdir(parents=True, exist_ok=True)
+    table.write_text(render_points_companion(run=pieces["run"], points=pieces["points"]),
+                     encoding="utf-8", newline="\n")
+    print(f"wrote {out} ({len(text):,} chars), {companion} and {table}")
     return 0
 
 
@@ -734,6 +863,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--out", default=DEFAULT_OUT, help="markdown output path")
     parser.add_argument("--json", default=DEFAULT_JSON, help="JSON companion path")
+    parser.add_argument("--points", default=DEFAULT_POINTS,
+                        help="full per-stock points table (markdown)")
     parser.add_argument("--run", default=RUN_LABEL, help="run label under <data_root>/backtests")
     parser.add_argument("--config", default="config.yaml", help="config path")
     return parser.parse_args(argv)
@@ -757,6 +888,7 @@ class _Emit:
         self.money: list[dict] = []
         self.percent: list[dict] = []
         self.count: list[dict] = []
+        self.points: list[dict] = []
         self._seen: set[tuple[str, str]] = set()
 
     def add(self, line: str = "") -> None:
@@ -782,6 +914,17 @@ class _Emit:
         sign = "-" if exact < 0 else ""
         text = f"{sign}Rs {abs(exact):,.3f}"
         self._record(self.money, str(value), text)
+        return text
+
+    def pt(self, paise, *, signed: bool = True) -> str:
+        """A number of POINTS -- a per-share price move, in the same units his chart shows.
+
+        Recorded in its own channel rather than with the money, because a point is not a rupee:
+        page 7 exists precisely to keep the two apart, and the companion has to be able to say
+        which of the two any figure on the page is.
+        """
+        text = pts.format_points(paise, signed=signed)
+        self._record(self.points, str(paise), text)
         return text
 
     def pct(self, value, places: int = 2) -> str:
@@ -850,6 +993,7 @@ def render(
     candidates: Sequence[RoundingCandidate],
     probe: RoundingCandidate | None,
     row_size: int,
+    points: Sequence[pts.SymbolPoints],
 ) -> tuple[str, dict]:
     """The pack and its JSON companion, from the pieces above. PURE."""
     emit = _Emit()
@@ -866,6 +1010,8 @@ def render(
     _page_limits(emit, figures, run=run, disclosures=disclosures, capital_paise=capital_paise,
                  config=config, register=register)
     _page_questions(emit, figures, run=run, walks=walks, probe=probe)
+    _page_points(emit, figures, run=run, points=points)
+    _page_footer(emit, run=run)
 
     payload = {
         "_note": (
@@ -886,7 +1032,8 @@ def render(
             "report": REPORT_PATH,
         },
         "figures": figures,
-        "tokens": {"money": emit.money, "percent": emit.percent, "count": emit.count},
+        "tokens": {"money": emit.money, "percent": emit.percent, "count": emit.count,
+                   "points": emit.points},
     }
     return emit.text, payload
 
@@ -903,16 +1050,21 @@ def _page_header(emit: _Emit, *, run: r9.RunData, columns: pf.Metrics) -> None:
              "EVERY signal your rules produced, on every stock, on every day it had good data "
              f"for -- {emit.n(run.totals['executed'])} trades over "
              f"{emit.n(len(run.days))} trading days and {emit.n(len(run.symbols))} stocks, "
-             f"risking {emit.rs(run.manifest['spec']['risk_per_trade_paise'])} on each one.")
+             f"risking up to {emit.rs(run.manifest['spec']['risk_per_trade_paise'])} on each "
+             "one.")
     emit.add("")
     emit.add("**What this pack asks of you.** Two things, and nothing else. Read your rules on "
              "page 2 and tell us whether they are right. Open the six days on page 3 on your own "
              "TradingView chart and tell us whether the machine did what you would have done. "
              "Everything else here is there so that nothing is hidden from you.")
     emit.add("")
-    emit.add("**What this pack does not do.** It does not tell you what to do next. The last "
-             "page sets out three ways forward, written as flatly as we can manage, with no "
-             "recommendation attached to any of them.")
+    emit.add("**What this pack does not do.** It does not tell you what to do next. Page 6 sets "
+             "out three ways forward, written as flatly as we can manage, with no recommendation "
+             "attached to any of them.")
+    emit.add("")
+    emit.add("**And the view you asked for.** Page 7 is the stocks in POINTS -- what each one "
+             "moved per share, with no position size in it. It is the last page because page 1 "
+             "is the one that says what the account did.")
     emit.add("")
 
 
@@ -943,19 +1095,27 @@ def _page_arithmetic(emit: _Emit, figures: dict, *, run: r9.RunData, columns: pf
              "what it risks has to clear that on every single trade, and this one took "
              f"{emit.n(executed)} of them.")
     emit.add("")
+    decided = columns.winners + columns.losers
+    delivered_on_decided = (Fraction(columns.winners, decided) if decided else None)
     emit.add("**The one number that explains the rest.** With this strategy's own average "
              f"winner ({emit.rs(columns.avg_profit_paise)}) and its own average loser "
              f"({emit.rs(columns.avg_loss_paise)}), both after costs, it would need to win "
              f"**{emit.pct(break_even)}** of its trades just to end level. It won "
-             f"**{emit.pct(columns.percent_profitable)}** of them "
-             f"({emit.n(columns.winners)} of {emit.n(columns.total_trades)}). That gap is the "
-             "whole result. Nothing else on this page changes it.")
+             f"**{emit.pct(delivered_on_decided)}** of them "
+             f"({emit.n(columns.winners)} of {emit.n(decided)}). Both figures are taken over the "
+             "trades that made or lost money, which is the same population the two averages come "
+             f"from: {emit.n(columns.flat)} trades ended exactly level and are in neither. Over "
+             f"all {emit.n(columns.total_trades)} trades the win rate is "
+             f"{emit.pct(columns.percent_profitable)} -- the same story, a hundredth of a "
+             "point apart. That gap is the whole result. Nothing else on this page changes it.")
     emit.add("")
     emit.add("**Say plainly what was run.** This is YOUR strategy, with your rules as YOU "
              "confirmed them -- every one of them is quoted back to you on the next page. Every "
              "signal those rules produced was taken; none was skipped, filtered, improved or "
-             f"second-guessed. Every trade risked {emit.rs(risk_each)}, no more and no less. The "
-             "machine was never allowed to decide anything you had not already decided.")
+             f"second-guessed. Every trade risked at most {emit.rs(risk_each)}, as whole shares "
+             "allow -- the share count is rounded DOWN, so most trades risk a little less and "
+             "none risks more (page 3 shows the exact figure on each day). The machine was never "
+             "allowed to decide anything you had not already decided.")
     emit.add("")
 
     figures["arithmetic"] = {
@@ -970,6 +1130,8 @@ def _page_arithmetic(emit: _Emit, figures: dict, *, run: r9.RunData, columns: pf
         "avg_loss_paise": str(columns.avg_loss_paise),
         "break_even_win_rate": str(break_even),
         "delivered_win_rate": str(columns.percent_profitable),
+        "delivered_win_rate_over_decided_trades": str(delivered_on_decided),
+        "decided_trades": decided,
         "winners": columns.winners,
         "losers": columns.losers,
         "flat": columns.flat,
@@ -1039,10 +1201,13 @@ def _page_rules(emit: _Emit, figures: dict, *, config, row_size: int) -> None:
     emit.add("")
     emit.add("**The target.** Three times the distance from the entry to the stop.")
     emit.add("")
-    emit.add("**Getting out.** If the price touches the stop, you are out at the stop. If it "
-             "touches the target, you are out at the target. If one candle touches both, the "
-             "stop wins. If neither is touched, you are out at the close of the 15:00-15:15 "
-             "candle. No partial exits and no trailing.")
+    emit.add("**Getting out.** Watching starts on the candle AFTER the one you entered on: the "
+             "entry candle has already traded down to its own low, which on a long IS the stop, "
+             "so it can never stop you out itself. From the next candle onwards -- if the price "
+             "touches the stop, you are out at the stop; if it touches the target, you are out "
+             "at the target; if one candle touches both, the stop wins. If neither is touched, "
+             "you are out at the close of the 15:00-15:15 candle. No partial exits and no "
+             "trailing.")
     emit.add("")
     emit.add("**The money.** Every trade risks the same rupee amount, and the number of shares "
              "is that amount divided by the distance from entry to stop, rounded DOWN. If that "
@@ -1122,12 +1287,23 @@ def _page_days(emit: _Emit, figures: dict, *, walks: Sequence[Walk], counted: Ce
              f"{_long_date(counted.tie_days[0][0])} and the latest {counted.tie_days[-1][1]} on "
              f"{_long_date(counted.tie_days[-1][0])}.")
     emit.add("")
-    emit.add("**Which of your bias rules decided the days the machine judged.**")
+    emit.add("**What the machine found on each stock-day it looked at.**")
     emit.add("")
-    emit.add("| Rule | Days it decided |")
+    emit.add("| Rule | Days |")
     emit.add("|---|---:|")
     for rule, count in counted.bias_rules.items():
         emit.add(f"| {_rule_words(rule)} | {emit.n(count)} |")
+    emit.add("")
+    ruled = sum(counted.bias_rules.values())
+    emit.add(f"**Those rows add up to {emit.n(ruled)}, and here is the rest of the arithmetic so "
+             f"you can check it.** The machine walked {emit.n(run.walked)} stock-days in all. "
+             f"{emit.n(run.walked - ruled)} of them carry no rule at all -- they are days the "
+             "market was not open in the normal way (a Muhurat session, say), thrown out before "
+             "any bias was computed. Of the ones that do carry a rule, three of the rows above "
+             "say *not judged*: a bias could not be settled there, so no trade was possible. And "
+             f"{emit.n(ruled - run.usable)} more had a bias but were refused afterwards on a "
+             f"data check, which is why the table is bigger than the {emit.n(run.usable)} "
+             "stock-days the machine actually judged and could have traded.")
     emit.add("")
     used = sorted({one.bias.rule for one in walks})
     missing = [rule for rule in counted.bias_rules
@@ -1145,9 +1321,15 @@ def _page_days(emit: _Emit, figures: dict, *, walks: Sequence[Walk], counted: Ce
     figures["counts"] = {
         "wait_rule_days": len(counted.wait_rule_days),
         "wait_rule_days_that_traded": sum(1 for row in counted.wait_rule_days if row[3]),
-        "wait_rule_most_recent": [counted.wait_rule_days[-1][0].isoformat(),
-                                  counted.wait_rule_days[-1][1]] if counted.wait_rule_days
-        else None,
+        # REVIEW_12 finding C3: this used to be the LAST TUPLE of a list sorted by (day, symbol),
+        # i.e. the alphabetically last stock on that day -- which is a sort artefact and was not
+        # the day the page shows. The date and the SHOWN day are now separate and each says what
+        # it is.
+        "wait_rule_most_recent_day": (counted.wait_rule_days[-1][0].isoformat()
+                                      if counted.wait_rule_days else None),
+        "wait_rule_day_shown_on_page": next(
+            ([one.choice.day.isoformat(), one.choice.symbol] for one in walks
+             if one.choice.key == "d"), None),
         "rule3_tie_days": len(counted.tie_days),
         "rule3_tie_bullish": sum(1 for row in counted.tie_days
                                  if row[2] == bias_engine.BULLISH),
@@ -1158,6 +1340,9 @@ def _page_days(emit: _Emit, figures: dict, *, walks: Sequence[Walk], counted: Ce
         "rule3_tie_last": [counted.tie_days[-1][0].isoformat(), counted.tie_days[-1][1]]
         if counted.tie_days else None,
         "bias_rules": dict(counted.bias_rules),
+        "bias_rules_total": sum(counted.bias_rules.values()),
+        "bias_rules_walked_without_a_rule": run.walked - sum(counted.bias_rules.values()),
+        "bias_rules_ruled_then_refused": sum(counted.bias_rules.values()) - run.usable,
         "rounding_candidates_in_window": len(candidates),
         "rounding_candidates_where_the_poc_moves": sum(1 for c in candidates if c.poc_moves),
     }
@@ -1308,7 +1493,8 @@ def _render_walk(emit: _Emit, one: Walk, *, index: int, letters: str, row_size: 
         emit.add("|---|---|")
         emit.add(f"| Entered at the close of the {_clock(record.entry_close_stamp)} candle | "
                  f"**{emit.rs(record.entry_paise)}** |")
-        emit.add(f"| Stop | **{emit.rs(record.stop_paise)}** -- {_stop_words(record, signal)} |")
+        emit.add(f"| Stop | **{emit.rs(record.stop_paise)}** -- "
+                 f"{_stop_words(emit, record, signal, one)} |")
         emit.add(f"| Distance from entry to stop | {emit.rs(record.per_share_risk_paise)} |")
         emit.add(f"| Target, three times that distance | **{emit.rs(record.target_paise)}** |")
         emit.add("")
@@ -1416,14 +1602,22 @@ def _render_rounding(emit: _Emit, one: Walk, figures_day: dict, *, row_size: int
              f"without you.** In the last calendar year the machine walked there are "
              f"{emit.n(candidate_count)} days like this one, "
              f"{emit.n(moving_count)} of them with the POC in a different place under the two "
-             "roundings. This is the one where the two row counts are furthest apart, which "
-             "makes it the easiest to read off a chart and be sure.")
+             "roundings. This day is among the ones where the two row counts are furthest apart "
+             "-- which is what makes it the easiest to read off a chart and be sure -- and of "
+             "those it is one that also took a trade, so the rest of the rule is visible on the "
+             "same day. The criterion at the top of this section names the others.")
     emit.add("")
     emit.add(f"**What we need: open {one.choice.symbol} on "
              f"{_long_date(one.choice.day)}, put the Fixed Range Volume Profile over 09:15 to "
-             f"11:15 with Row Size {emit.n(row_size)}, and count the rows in the box.** "
+             f"11:15 with Row Size {emit.n(row_size)}, count the rows in the box, and tell us "
+             "the number you get.** "
              f"If you count {emit.n(probe.rows_half_even)}, the machine is already right. If you "
-             f"count {emit.n(probe.rows_half_up)}, we change one line and re-run.")
+             f"count {emit.n(probe.rows_half_up)}, we change one line and re-run. **And if it is "
+             "neither of those, write down the number you actually counted and send that** -- "
+             "the row count you gave us last time (quoted on page 2) fell between the two "
+             "answers we had then, and it still settled the question, because being one row from "
+             "one answer and three from the other is itself the answer. What we need is your "
+             "count, not a choice between our two.")
     emit.add("")
     figures_day["rounding"] = {
         "tick_paise": probe.tick_paise,
@@ -1478,6 +1672,14 @@ def _bias_sentence(emit: _Emit, bias: DailyBias, previous, current, one: Walk) -
     if rule in (bias_engine.RULE_3, bias_engine.RULE_3_TIE):
         first = ("the HIGH broke first" if bias.bias == bias_engine.BULLISH
                  else "the LOW broke first")
+        if one.first_break is not None:
+            stamp, level, side = one.first_break
+            broke_level = previous.high if side != LOW_FIRST else previous.low
+            first += (f" -- at {_clock(stamp)}, the one-minute candle reaching "
+                      f"{emit.rs(level)} against P's "
+                      + ("high " if side != LOW_FIRST else "low ")
+                      + f"of {emit.rs(broke_level)}, and no earlier minute had touched either "
+                      "extreme")
         tie = ""
         if rule == bias_engine.RULE_3_TIE:
             tie = (" In fact both sides broke inside the SAME one-minute candle -- the tie you "
@@ -1541,13 +1743,53 @@ def _bought_or_sold(side: str | None) -> str:
     return "sold short" if side == sig.SHORT else "bought"
 
 
-def _stop_words(record: bt.LedgerRow, signal: sig.SignalDay | None) -> str:
+def _stop_words(emit: _Emit, record: bt.LedgerRow, signal: sig.SignalDay | None,
+                one: Walk) -> str:
+    """What the stop IS, and on a gap day the two numbers that decide it are printed.
+
+    REVIEW_12 finding Q6: the gap sentence asserted that the entry candle never traded back to
+    the POC without printing the candle's own extreme or its distance from the POC -- and on the
+    pack's own gap day the predicate turns on ten paise.
+    """
     if record.gap_entry:
+        margin = _gap_margin(signal, record, one)
+        shown = ""
+        if margin is not None:
+            extreme, poc, gap = margin
+            shown = (
+                ": the entry candle's "
+                + ("high was " if record.side == sig.SHORT else "low was ")
+                + f"{emit.rs(extreme)} against a POC of {emit.poc(poc)} -- "
+                + f"{emit.rs(gap)} clear of it, and one tick the other way would have made this "
+                "an ordinary stop at the entry candle's own extreme"
+            )
         return ("the entry candle opened clean past the POC and never traded back to it, so the "
-                "stop is the PREVIOUS 15-minute candle's close")
+                "stop is the PREVIOUS 15-minute candle's close" + shown)
     if record.side == sig.LONG:
-        return "the low of the entry candle, with no buffer"
-    return "the high of the entry candle, with no buffer"
+        return ("the low of the entry candle, with no buffer -- and the entry candle itself "
+                "cannot stop you out, so watching starts on the next one")
+    return ("the high of the entry candle, with no buffer -- and the entry candle itself cannot "
+            "stop you out, so watching starts on the next one")
+
+
+def _gap_margin(signal: sig.SignalDay | None, record: bt.LedgerRow,
+                one: Walk) -> tuple[int, Fraction, Fraction] | None:
+    """The entry candle's own extreme, the POC, and the distance between them. PURE."""
+    if signal is None or signal.entry is None or record.entry_close_stamp is None:
+        return None
+    # CONTEXT 7-E12: a 15-minute candle is OPEN-stamped, so the candle closing at HH:MM is the
+    # one stamped fifteen minutes earlier. That identity is what finds the entry candle here.
+    entry_bar = next(
+        (bar for bar in one.stock_day.bars
+         if bar.stamp + timedelta(minutes=15) == record.entry_close_stamp),
+        None,
+    )
+    if entry_bar is None:
+        return None
+    poc = signal.poc_paise
+    if record.side == sig.SHORT:
+        return entry_bar.high_paise, poc, poc - entry_bar.high_paise
+    return entry_bar.low_paise, poc, entry_bar.low_paise - poc
 
 
 def _exit_words(emit: _Emit, record: bt.LedgerRow) -> str:
@@ -1653,7 +1895,16 @@ def _page_limits(emit: _Emit, figures: dict, *, run: r9.RunData, disclosures: pf
                  capital_paise: int, config, register) -> None:
     peak_positions = disclosures.max_concurrent_positions
     peak_notional = disclosures.peak_simultaneous_notional
-    coverage = r9._usable_share(register or {})
+    register = register or {}
+    coverage = r9._usable_share(register)
+    # The two counts BEHIND the coverage percentage, so a reader can do the division himself --
+    # REVIEW_12 findings Q8 and C5: the figure was printed with neither of its own terms, one
+    # sentence away from a different measurement over a different denominator.
+    usable_days = sum(entry.usable_pass for entry in register.values()
+                      if entry.status == "settled")
+    stored_days = sum(entry.gate1p_total for entry in register.values())
+    quarantined = sorted(symbol for symbol, entry in register.items()
+                         if entry.status != "settled")
     crore = Fraction(peak_notional.notional_paise, 100) / RUPEES_PER_CRORE
     against_capital = Fraction(peak_notional.notional_paise, capital_paise)
 
@@ -1680,39 +1931,63 @@ def _page_limits(emit: _Emit, figures: dict, *, run: r9.RunData, disclosures: pf
              "started with. No real account could have carried that, and the machine was never "
              "asked to check.")
     emit.add("")
-    emit.add("**We have not marked which trades your money could not have taken.** That needs "
-             "one number from you (it is the first question on the last page). Until it arrives "
-             "no trade is flagged, because a flag against a figure we guessed would be our "
-             "opinion wearing your name.")
+    emit.add("**We have not marked which trades your money could not have taken, and we are not "
+             "going to.** That would need a capital figure from you, and you withdrew the "
+             "question in favour of the points view on page 7 -- so no trade carries such a "
+             "flag, here or anywhere. Nothing is guessed in its place: the machinery is built "
+             "and switched off rather than run against a number we invented.")
     emit.add("")
     emit.add("**The list of stocks is today's list, walked backwards.** The machine ran the "
-             f"{emit.n(len(run.symbols))} stocks that are in the futures-and-options list NOW, "
-             "all the way back to 2016. A stock that was in the list in 2017 and has since "
-             "dropped out is not here at all, and a stock that only joined in 2024 was still "
-             "traded from 2016. That flatters any strategy that trades large, liquid names, and "
-             "it is our engineering shortcut, not your instruction.")
+             f"{emit.n(len(run.symbols))} stocks it could trust the data for, out of the "
+             f"{emit.n(len(register))} in the futures-and-options list NOW, all the way back to "
+             "2016. A stock that was in the list in 2017 and has since dropped out is not here "
+             "at all, and a stock that only joined in 2024 was still traded from 2016. That "
+             "flatters any strategy that trades large, liquid names, and it is our engineering "
+             "shortcut, not your instruction.")
     emit.add("")
+    if quarantined:
+        emit.add(f"**And {emit.n(len(quarantined))} stocks are missing from the whole thing.** "
+                 + ", ".join(quarantined)
+                 + " are in the futures-and-options list but their stored price history failed "
+                 "our own data checks badly enough that we would not trade on it, so they were "
+                 "never walked at all -- not on any day, in any year. "
+                 + (f"{quarantined[0]} " if len(quarantined) == 1 else "Some of them ")
+                 + "are names you would expect to see, and their absence is a hole in the result "
+                 "rather than a judgement about them: nothing here says what the strategy would "
+                 "have done on them. The technical report lists each one with the measurement "
+                 "that refused it.")
+        emit.add("")
     emit.add(f"**The cost is a flat {emit.rs(run.manifest['spec']['cost_paise'])} a trade.** That "
              "is the figure you gave us. It does not vary with the size of the trade, and a "
              "trade in ten shares pays the same as a trade in thirty thousand.")
     emit.add("")
     emit.add("**One trade per stock per day, and the money never compounds.** The first entry "
-             "uses that stock up for the day, and every trade risks the same rupee amount from "
-             "beginning to end regardless of what the account is worth. The running total adds "
-             "up; it does not grow on itself.")
+             "uses that stock up for the day, and every trade risks the same rupee amount -- as "
+             "near as whole shares allow -- from beginning to end, regardless of what the "
+             "account is worth. The running total adds up; it does not grow on itself.")
     emit.add("")
     if coverage is not None:
         emit.add(f"**The machine could not use every day.** Of every stock-day in the stored "
                  f"data, **{emit.pct(coverage, 4)}** passed the checks that say the prices and "
-                 "volumes really are that stock's, on that day, at the right scale. The rest "
-                 "were REFUSED and counted -- never quietly traded on and never quietly dropped. "
-                 f"Of the {emit.n(run.walked)} stock-days the run walked, "
-                 f"{emit.n(run.usable)} were judged and {emit.n(run.refused)} were refused, and "
-                 "the refusals are broken down by reason in the technical report.")
+                 "volumes really are that stock's, on that day, at the right scale -- that is "
+                 f"{emit.n(usable_days)} days out of {emit.n(stored_days)}, and you can do the "
+                 "division yourself. The rest were REFUSED and counted -- never quietly traded "
+                 "on and never quietly dropped.")
         emit.add("")
-    emit.add("**And two things that are still open.** The rounding question on day 3f above, and "
-             "the two questions on the last page. Nothing in this pack is blocked on any of "
-             "them; they are open because they are yours to answer.")
+        emit.add("**That percentage and the next one are two different measurements, and they "
+                 f"are not meant to agree.** The {emit.pct(coverage, 4)} above is about the "
+                 "stored DATA: every stock-day we hold, including the years and the stocks this "
+                 f"run never walked. What the run itself did is a smaller thing: of the "
+                 f"{emit.n(run.walked)} stock-days it walked, {emit.n(run.usable)} were judged "
+                 f"and {emit.n(run.refused)} were refused, and the refusals are broken down by "
+                 "reason in the technical report. A stock-day can be good data and still be "
+                 "refused here (no bias could be settled that morning, say), which is why the "
+                 "second fraction is the smaller one.")
+        emit.add("")
+    emit.add("**And one thing that is still open.** The rounding question on day 3f above -- the "
+             "row count only your own chart can settle. The two questions you were carrying "
+             "before this pack are both answered and are written up on page 6. Nothing here was "
+             "ever blocked on any of them.")
     emit.add("")
     figures["limits"] = {
         "max_concurrent_positions": peak_positions.positions,
@@ -1723,10 +1998,14 @@ def _page_limits(emit: _Emit, figures: dict, *, run: r9.RunData, disclosures: pf
         "peak_notional_over_capital": str(against_capital),
         "largest_single_notional_paise": disclosures.largest_single_notional_paise,
         "coverage": str(coverage) if coverage is not None else None,
+        "coverage_usable_days": usable_days,
+        "coverage_stored_days": stored_days,
         "walked": run.walked,
         "usable": run.usable,
         "refused": run.refused,
         "symbols": len(run.symbols),
+        "universe_symbols": len(register),
+        "quarantined_symbols": quarantined,
         "cost_per_trade_paise": run.manifest["spec"]["cost_paise"],
     }
 
@@ -1735,33 +2014,39 @@ def _page_questions(emit: _Emit, figures: dict, *, run: r9.RunData, walks: Seque
                     probe: RoundingCandidate | None) -> None:
     emit.add("## 6. What we need from you")
     emit.add("")
-    emit.add("### Two questions still waiting")
+    emit.add("### The two questions you have now answered")
     emit.add("")
-    emit.add("Neither of these has held anything up. They are open because they are yours.")
+    emit.add("Neither ever held anything up, and both are closed by what you sent back.")
     emit.add("")
-    emit.add("**One -- which money figure should decide whether a trade was affordable?** The "
-             "machine took every signal without asking whether the cash existed. To go back and "
-             "mark the trades you could NOT actually have taken, we need to know what to measure "
-             "them against: the cash in the account, or the larger amount an intraday margin "
-             "would have allowed, and how much larger. We have not guessed, and the machine "
-             "carries this sentence wherever the question would otherwise be answered silently:")
+    emit.add("**One -- the money figure for marking unaffordable trades. You withdrew the "
+             "question and asked for something else instead, and we have built what you asked "
+             "for.** The machine took every signal without asking whether the cash existed, and "
+             "it still does; what we are NOT doing is going back to mark trades against a "
+             "capital figure, because you would rather see the stocks in points, where the size "
+             "of the position does not come into it. That is page 7. The flag machinery is left "
+             "in place and switched off, so nothing is lost if you ever want it:")
     emit.add("")
     emit.add(f"> {run.manifest['capital_flags']['note']}")
     emit.add("")
-    emit.add("**Two -- one worked example needs your confirmation.** In the written "
-             "specification there is an example of the gap rule -- where the entry candle jumps "
-             "clean past the POC and the stop comes from the previous candle's close instead of "
-             "from the entry candle. The numbers in that example only fit together one way, and "
-             "we have taken the reading that keeps every price you ever quoted intact. If our "
-             "reading is wrong, that is a change to your entry rule, and the honest consequence "
-             "is that everything in this pack is computed again from scratch. The run itself "
-             "carries the note:")
+    emit.add("That sentence is the one this run was stamped with while the question was open. It "
+             "is the run's own record, so it is quoted as it stands rather than rewritten; what "
+             "is true now is the line above it.")
+    emit.add("")
+    emit.add("**Two -- the worked example of the gap rule. You confirmed it, and it cost "
+             "nothing.** Your diagram says the example day is one where the price jumped clean "
+             "past the POC, so the stop comes from the last traded close before the jump -- "
+             "which is exactly the rule the machine has been running. Nothing is recomputed, no "
+             "number in this pack moves, and the specification's own example is corrected to "
+             "match your reading of it. The run carries the note it was stamped with while the "
+             "question was open:")
     emit.add("")
     for note in run.manifest["disclosures"]:
         if "Q44" in note and "PENDING" in note:
             emit.add(f"> {note}")
             emit.add("")
             break
+    emit.add("-- and that pending note is now closed by your answer, with the rule unchanged.")
+    emit.add("")
     emit.add("### And two things to confirm")
     emit.add("")
     emit.add("**Confirm the rules on page 2 are yours, exactly.** If one line is wrong, say "
@@ -1771,9 +2056,10 @@ def _page_questions(emit: _Emit, figures: dict, *, run: r9.RunData, walks: Seque
         named = next(one for one in walks if one.rounding is not None)
         emit.add("")
         emit.add(f"**Count the rows on {named.choice.symbol}, "
-                 f"{_long_date(named.choice.day)}.** Day 3f explains why. If the box has "
-                 f"{emit.n(probe.rows_half_even)} rows we are already right; if it has "
-                 f"{emit.n(probe.rows_half_up)} we change one line and run it again.")
+                 f"{_long_date(named.choice.day)}, and tell us the number.** Day 3f explains "
+                 f"why. If the box has {emit.n(probe.rows_half_even)} rows we are already right; "
+                 f"if it has {emit.n(probe.rows_half_up)} we change one line and run it again; "
+                 "if it has some other number, that is the useful answer and we work from it.")
     emit.add("")
     emit.add("### Three ways forward")
     emit.add("")
@@ -1784,29 +2070,24 @@ def _page_questions(emit: _Emit, figures: dict, *, run: r9.RunData, walks: Seque
              "across every stock, with no discretion applied. If you conclude that the edge you "
              "trade by is the judgement you add on top of these rules rather than the rules "
              "themselves, then this machine has answered the question it was built to answer, "
-             "and it can be put down. Nothing is lost that was not already spent finding out.")
+             "and it can be put down. What you would be giving up is the automated version of "
+             "these rules; what you would keep is everything you already knew how to do by hand.")
     emit.add("")
     emit.add("**Change it.** The rules are yours to change, and the machinery is now yours too. "
              "A different target multiple, a different profile window, a filter on which days "
              "to trade, a stop placed somewhere else, entries on a different candle -- any of "
              "these is a change to one place in the code and a re-run over the same ten years, "
-             "and the answer comes back in hours rather than months. Every number in this pack "
-             "would be recomputed the same way and would be as checkable as these are. What we "
-             "cannot do is choose the change for you.")
+             "and the answer comes back in hours rather than months. What you would be taking on "
+             "is that a rule changed until it looks good on ten years of history has been fitted "
+             "to that history, and only the next ten years can tell you whether it was worth it.")
     emit.add("")
     emit.add("**Take it live knowing the arithmetic.** The live half of the tool -- the screener "
              "that watches the market and alerts you when a signal fires -- is designed and "
              "specified and is on hold, waiting for this decision. It would run the same code "
-             "that produced these numbers. If you take this path, you take it knowing what page "
-             "1 says: over these ten years, on these rules, taking every signal, the arithmetic "
-             "came out as it came out.")
+             "that produced these numbers, so what you saw tested is what you would be alerted "
+             "on. What you would be taking on is what page 1 says: over these ten years, on "
+             "these rules, taking every signal, the arithmetic came out as it came out.")
     emit.add("")
-    emit.add("---")
-    emit.add("")
-    emit.add(f"Everything in this pack is computed from the machine's own record of the run "
-             f"(ledger `{run.ledger_sha256[:16]}...`) by `src/acumen/trader_pack.py`. Nothing in "
-             f"it is typed by hand. The long technical version, with every figure and every "
-             f"check, is `{REPORT_PATH}`.")
     figures["questions"] = {
         "capital_flags_note": run.manifest["capital_flags"]["note"],
         "q44_note": next((note for note in run.manifest["disclosures"]
@@ -1817,6 +2098,168 @@ def _page_questions(emit: _Emit, figures: dict, *, run: r9.RunData, walks: Seque
         ],
         "paths": ["retire it", "change it", "take it live knowing the arithmetic"],
     }
+
+
+def _page_points(emit: _Emit, figures: dict, *, run: r9.RunData,
+                 points: Sequence[pts.SymbolPoints]) -> None:
+    """Page 7: the stocks in POINTS -- the view he asked for in Round 4, in place of Q43.
+
+    Everything the architect's ruling makes mandatory travels with the ranking and none of it is
+    a footnote: the cost line (points ignore size, and the cost does not), the
+    multiple-comparisons caveat in full sentences, and the cross-reference to page 1 so the two
+    views cannot be read as contradicting each other.
+    """
+    if not points:  # pragma: no cover -- a run with no executed trade has nothing to rank
+        return
+    table = pts.totals(points)
+    top, bottom = pts.ends(points)
+    cost_each = run.manifest["spec"]["cost_paise"]
+
+    emit.add("## 7. Every stock, in points")
+    emit.add("")
+    emit.add("This is the page you asked for instead of the capital question. **A point is one "
+             "rupee of price on one share** -- what a trade moved, before any decision about "
+             "how many shares to take. Every figure here is that and nothing else: the entry "
+             "price against the exit price, added up per stock. It is the same trades as the "
+             "rest of the pack, read in the units your chart is drawn in.")
+    emit.add("")
+    emit.add("**Why it is not the same as page 1, and why neither is wrong.** Page 1 is money "
+             "after size and after costs. This page is price movement per share, before either. "
+             f"At one share, the {emit.rs(cost_each)} round-trip cost equals "
+             f"**{emit.pt(pts.cost_in_points_paise(cost_each, shares=1), signed=False)} "
+             "points** -- costs scale with SIZE, which this view deliberately ignores. So a "
+             "stock can look positive here and still have lost money on page 1, and both "
+             "statements are true of the same trades. Page 1 is the one that says what the "
+             "account did.")
+    emit.add("")
+    caveat = pts.MULTIPLE_COMPARISONS_CAVEAT.format(
+        symbols=emit.n(table.symbols), by_chance=emit.n(pts.by_chance(table.symbols)),
+    )
+    emit.add(f"**{caveat}** "
+             "A ranking of this many stocks will always have a top of it, and the stocks at the "
+             "top of one ten-year window are not reliably the stocks at the top of the next. "
+             "Nothing on this page is a recommendation to trade one stock rather than another; "
+             "it is here because you asked to see the spread.")
+    emit.add("")
+    emit.add(f"Across all {emit.n(table.symbols)} stocks the trades moved "
+             f"**{emit.pt(table.points_paise)} points** in total over "
+             f"{emit.n(table.trades)} trades -- an average of "
+             f"{emit.pt(table.avg_points_paise)} points a trade, with "
+             f"{emit.pct(table.win_rate)} of them positive in points. **That total is positive "
+             "while page 1 is negative, and both are right**: this page has no costs in it and "
+             "no share counts, and page 1 has both. The two do not disagree; they measure "
+             f"different things. Both ends of the ranking are printed below; **all "
+             f"{emit.n(table.symbols)} stocks are in `{pts.COMPANION_PATH}`**, so nothing here "
+             "is a selection.")
+    emit.add("")
+    for heading, rows, note in (
+        (f"The {emit.n(len(top))} stocks with the most points", top,
+         "Read this list as candidates for a forward check, not as a result."),
+        (f"The {emit.n(len(bottom))} stocks with the fewest", bottom,
+         "The bottom of a ranking is as much a product of chance as the top of it."),
+    ):
+        emit.add(f"**{heading}.** {note}")
+        emit.add("")
+        emit.add("| Stock | Trades | Trades positive in points | Points | Points a trade | "
+                 "Worst points drawdown | Best trade | Worst trade |")
+        emit.add("|---|---:|---:|---:|---:|---:|---:|---:|")
+        for one in rows:
+            emit.add(f"| {one.symbol} | {emit.n(one.trades)} | {emit.pct(one.win_rate)} | "
+                     f"**{emit.pt(one.points_paise)}** | {emit.pt(one.avg_points_paise)} | "
+                     f"{emit.pt(one.max_drawdown_paise, signed=False)} | "
+                     f"{emit.pt(one.best_paise)} | {emit.pt(one.worst_paise)} |")
+        emit.add("")
+    emit.add("**What the columns mean.** *Points* is the sum of every trade's move on that "
+             "stock. *Points a trade* is that divided by the number of trades. *Worst points "
+             "drawdown* is the deepest fall in the running total of those points, walked in date "
+             "order -- the run of losses you would have sat through on that stock alone. *Best* "
+             "and *worst trade* are its single largest move each way. None of them knows how "
+             "many shares were taken, and none of them has had a cost subtracted.")
+    emit.add("")
+
+    figures["points"] = {
+        "symbols": table.symbols,
+        "trades": table.trades,
+        "winners": table.winners,
+        "win_rate": str(table.win_rate),
+        "points_paise": table.points_paise,
+        "avg_points_paise": str(table.avg_points_paise),
+        "cost_in_points_paise_at_one_share": str(pts.cost_in_points_paise(cost_each, shares=1)),
+        "shown_each_end": pts.SHOWN_EACH_END,
+        "companion": pts.COMPANION_PATH,
+        "caveat": pts.MULTIPLE_COMPARISONS_CAVEAT.format(
+            symbols=f"{table.symbols:,}", by_chance=f"{pts.by_chance(table.symbols):,}"),
+        "by_symbol": list(pts.as_payload(points)),
+    }
+
+
+def _page_footer(emit: _Emit, *, run: r9.RunData) -> None:
+    """The provenance line, last on the page whatever the last page turns out to be."""
+    emit.add("---")
+    emit.add("")
+    emit.add(f"Everything in this pack is computed from the machine's own record of the run "
+             f"(ledger `{run.ledger_sha256[:16]}...`) by `src/acumen/trader_pack.py`. Nothing in "
+             f"it is typed by hand. The long technical version, with every figure and every "
+             f"check, is `{REPORT_PATH}`.")
+
+
+def render_points_companion(*, run: r9.RunData, points: Sequence[pts.SymbolPoints]) -> str:
+    """The FULL per-stock points table, published beside the technical report. PURE.
+
+    Page 7 of the pack shows both ends of this ranking; this is all of it, in the same order and
+    the same units, carrying the same two caveats. A reader who wants to check a stock the pack
+    did not print looks here, and finds it.
+    """
+    table = pts.totals(points)
+    lines: list[str] = []
+    add = lines.append
+    add("# Every stock, in points -- the full table")
+    add("")
+    add("The companion to page 7 of `docs/validation/trader_pack.md`. **A point is one rupee of "
+        "price on one share**: the per-share move each trade made, signed by side "
+        "(`exit - entry` on a long, `entry - exit` on a short), summed per stock. It is computed "
+        "post-hoc from the completed run's ledger and it is INDEPENDENT OF POSITION SIZE, which "
+        "is what the trader asked for in Round 4 in place of his own capital question "
+        "(QUESTIONS.md, ROUND-4 RECEIPTS, 06-Aug-2026).")
+    add("")
+    caveat = pts.MULTIPLE_COMPARISONS_CAVEAT.format(
+        symbols=f"{table.symbols:,}", by_chance=f"{pts.by_chance(table.symbols):,}",
+    )
+    add(f"**{caveat}**")
+    add("")
+    cost_each = run.manifest["spec"]["cost_paise"]
+    cost_in_points = pts.format_points(
+        pts.cost_in_points_paise(cost_each, shares=1), signed=False,
+    )
+    add("**No cost is subtracted anywhere on this page, and none can be**: a flat cost per trade "
+        "is a rupee amount, and converting it to points needs a position size this view refuses "
+        "to consult. At one share the round-trip cost of "
+        f"{pf.format_paise(cost_each)} is "
+        f"{cost_in_points} "
+        "points; at three hundred shares it is a third of a point. The money after costs and "
+        f"size is `{REPORT_PATH}` and page 1 of the pack.")
+    add("")
+    add(f"Ranked by points, biggest first. {table.symbols:,} stocks, {table.trades:,} trades, "
+        f"{pts.format_points(table.points_paise)} points in total, "
+        f"{pts.format_points(table.avg_points_paise)} a trade.")
+    add("")
+    add("| # | Stock | Trades | Trades positive in points | Points | Points a trade | "
+        "Worst points drawdown | Best trade | on | Worst trade | on |")
+    add("|---:|---|---:|---:|---:|---:|---:|---:|---|---:|---|")
+    for index, one in enumerate(points, start=1):
+        add(f"| {index:,} | {one.symbol} | {one.trades:,} | {pf.format_pct(one.win_rate)} | "
+            f"**{pts.format_points(one.points_paise)}** | "
+            f"{pts.format_points(one.avg_points_paise)} | "
+            f"{pts.format_points(one.max_drawdown_paise, signed=False)} | "
+            f"{pts.format_points(one.best_paise)} | "
+            f"{one.best_day.isoformat() if one.best_day else '-'} | "
+            f"{pts.format_points(one.worst_paise)} | "
+            f"{one.worst_day.isoformat() if one.worst_day else '-'} |")
+    add("")
+    add(f"Computed by `src/acumen/points_view.py` from the run ledger "
+        f"`{run.ledger_sha256[:16]}...`, rendered by `src/acumen/trader_pack.py`. Nothing on "
+        "this page is typed by hand.")
+    return "\n".join(lines).rstrip("\n") + "\n"
 
 
 __all__ = [
@@ -1830,6 +2273,7 @@ __all__ = [
     "main",
     "pick_rounding_day",
     "render",
+    "render_points_companion",
     "rounding_candidates",
     "walk",
 ]

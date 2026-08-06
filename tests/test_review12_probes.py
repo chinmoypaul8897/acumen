@@ -1,12 +1,17 @@
 """REVIEW_12 reviewer probes -- the chunk-12 validation pack.
 
-Five probes the builder did not write, kept in the repo per `personas/quant_reviewer.md` step 4
-and `personas/code_reviewer.md` step 4. Two of them PROVE a claim the pack makes to the trader;
-three PIN a finding, so that the fix the architect may order turns them red rather than passing
-silently (the repo's established discipline -- REVIEW_9A/9B probes that pinned a defect and were
-later FLIPPED to assert the corrected property).
+Six probes the builder did not write, kept in the repo per `personas/quant_reviewer.md` step 4
+and `personas/code_reviewer.md` step 4. One PROVES a claim the pack makes to the trader; the
+other five PINNED a finding, written to turn red the moment the finding was fixed.
 
-Offline: the artefact probes read two committed files in the repository and no store.
+**FIVE OF THEM ARE NOW FLIPPED (06-Aug-2026).** The architect ordered REVIEW_12's sentence fixes
+in the Round-4 execution session, so each of those five probes was run FIRST against the pre-fix
+source and was RED on its own assertion, and now asserts the CORRECTED property in both
+directions -- the repo's established discipline (REVIEW_9A/9B probes that pinned a defect and
+were later flipped). A flipped probe is not a weakened one: every original assertion about what
+the code DOES is kept, and what changed is the claim about what the page SAYS.
+
+Offline: the artefact probes read committed files in the repository and no store.
 """
 
 from __future__ import annotations
@@ -76,18 +81,18 @@ def test_the_packs_zero_bearish_ties_is_STRUCTURAL_over_a_dense_grid() -> None:
 # --- 2. PINS a finding: an unverified uniqueness claim on the trader's page -----------------------
 
 
-def test_the_gap_days_LAST_GAP_ENTRY_claim_is_printed_without_being_checked() -> None:
-    """REVIEW_12 finding Q1, pinned.
+def test_the_gap_days_provenance_sentence_is_now_CHECKED_against_the_census() -> None:
+    """REVIEW_12 finding Q1 -- FLIPPED 06-Aug-2026, and RED on the pre-fix source.
 
-    `_pick_gap`'s named branch prints *"the LAST gap entry of the whole ten years"*, but its
-    qualification test is only membership -- `(day, symbol) in census.gaps`. A named day that is
-    a gap entry but NOT the last one still gets the sentence. This probe builds exactly that
-    census and asserts the false sentence is produced, so that a fix (checking the claim, or
-    softening it to the last gap-entry DAY) turns this red instead of passing unnoticed.
+    It pinned the defect: `_pick_gap`'s named branch printed *"the LAST gap entry of the whole
+    ten years"* while its qualification test was only membership (`(day, symbol) in
+    census.gaps`), so a named day that was a gap entry but NOT the last one got the sentence
+    anyway. The fix makes the sentence state only what the census can show. This now asserts the
+    corrected property in BOTH directions:
 
-    On the shipped run the day really is on the last gap-entry DAY, but it shares that day with
-    INDUSINDBK, whose entry is 15 minutes LATER -- so the printed superlative is not the
-    ledger's own record even there.
+    * a named day that is NOT on the last gap-entry day claims no superlative at all;
+    * a named day that IS on it says so about the DAY, and counts and names the other stocks
+      that gapped in beside it, with their entry times.
     """
     symbol, day_text = tp.NAMED_GAP
     named_day = date.fromisoformat(day_text)
@@ -101,21 +106,37 @@ def test_the_gap_days_LAST_GAP_ENTRY_claim_is_printed_without_being_checked() ->
     )
     picked = tp._pick_gap(census)
     assert (picked.symbol, picked.day) == (symbol, named_day) and picked.named
-    assert "the LAST gap entry of the whole ten years" in picked.criterion, (
-        "the claim is unconditional prose in the named branch -- nothing tests it"
+    assert "the LAST gap entry of the whole ten years" not in picked.criterion, (
+        "the unchecked superlative is gone"
     )
+    assert "LAST DAY" not in picked.criterion, (
+        "and it does not claim the day either, because a later gap entry exists in this census"
+    )
+
+    # the shipped shape: the named day IS the last gap-entry day, and it is not alone on it
+    shared = tp.Census(
+        last_day=named_day, trades_by_symbol={symbol: 10, "INDUSINDBK": 99}, risks_paise=(100,),
+        bias_rules={}, wait_rule_days=(), tie_days=(), recent_pocs=(),
+        winners=(), gaps=((named_day, symbol), (named_day, "INDUSINDBK")), stops=(), carries=(),
+        gap_clocks={(named_day, symbol): "12:30", (named_day, "INDUSINDBK"): "12:45"},
+    )
+    words = tp._pick_gap(shared).criterion
+    assert "LAST DAY of the ten years that any stock gapped in" in words
+    assert "2 stocks gapped in on it" in words and "INDUSINDBK at 12:45" in words
+    assert "not a last of anything" in words
 
 
 # --- 3. PINS a finding: a tie-break the page never states ------------------------------------------
 
 
-def test_the_selection_rules_fall_back_to_the_SYMBOL_NAME_and_no_criterion_says_so() -> None:
-    """REVIEW_12 finding Q3, pinned.
+def test_the_selection_rules_state_the_SYMBOL_NAME_last_resort_they_really_use() -> None:
+    """REVIEW_12 finding Q3 -- FLIPPED 06-Aug-2026, and RED on the pre-fix source.
 
-    Every criterion printed beside a day names at most one tie-break -- *"Ties go to the stock
-    this run traded most often"*. When two candidates tie on that too, the choice is decided by
-    the SYMBOL NAME (alphabetical), which appears on no page. Two stop-outs identical in every
-    stated respect are separated here by nothing but their names.
+    It pinned the defect: every criterion beside a day named at most one tie-break (*"Ties go to
+    the stock this run traded most often"*), while the real last resort is the SYMBOL NAME --
+    which runs in OPPOSITE directions in `min` and `max` and appeared on no page. The behaviour
+    is unchanged and is still asserted below; what is fixed is that each criterion now says so,
+    and says which way round it goes.
     """
     census = tp.Census(
         last_day=date(2026, 7, 30), trades_by_symbol={"AAA": 500, "ZZZ": 500},
@@ -127,34 +148,40 @@ def test_the_selection_rules_fall_back_to_the_SYMBOL_NAME_and_no_criterion_says_
     picked = tp._pick_stop(census)
     assert picked.symbol == "AAA", "the alphabetically first symbol wins a fully tied pair"
     assert "traded most often" in picked.criterion
-    assert "name" not in picked.criterion and "alphabet" not in picked.criterion, (
-        "the deciding rule on a full tie is the symbol name, and the page does not say so"
+    assert "first stock alphabetically" in picked.criterion, (
+        "the deciding rule on a full tie is the symbol name, and the page now says so"
     )
-    # the same silent last resort decides the carry day and the wait-rule day
+    # the same last resort decides the carry day and the wait-rule day -- the other way round,
+    # and each of those criteria now says THAT
     carry = tp._pick_carry(tp.Census(
         last_day=date(2026, 7, 30), trades_by_symbol={"AAA": 7, "ZZZ": 7}, risks_paise=(1,),
         bias_rules={}, wait_rule_days=(), tie_days=(), recent_pocs={}, winners=(), gaps=(),
         stops=(), carries=((date(2026, 7, 30), "AAA", "x"), (date(2026, 7, 30), "ZZZ", "x")),
     ))
     assert carry.symbol == "ZZZ", "here the last resort runs the other way -- `max`, not `min`"
+    assert "then to the last one alphabetically" in carry.criterion
+    wait = tp._pick_wait(tp.Census(
+        last_day=date(2026, 7, 30), trades_by_symbol={"AAA": 7, "ZZZ": 7}, risks_paise=(1,),
+        bias_rules={}, wait_rule_days=((date(2026, 7, 30), "AAA", "entered", True),
+                                       (date(2026, 7, 30), "ZZZ", "entered", True)),
+        tie_days=(), recent_pocs={}, winners=(), gaps=(), stops=(), carries=(),
+    ))
+    assert wait.symbol == "ZZZ" and "then the last one alphabetically" in wait.criterion
 
 
 # --- 3b. PINS a finding: the rounding day's uniqueness claim, and the key that really decided it ---
 
 
-def test_the_rounding_days_FURTHEST_APART_claim_is_not_unique_and_a_hidden_key_breaks_the_tie() -> None:
-    """REVIEW_12 finding Q14, pinned.
+def test_the_rounding_days_tie_and_the_key_that_breaks_it_are_both_STATED() -> None:
+    """REVIEW_12 finding Q14 -- FLIPPED 06-Aug-2026, and RED on the pre-fix source.
 
-    Page 3f prints *"this is the one with the widest gap between the two row counts, and on it
-    the POC itself moves"* and, below the table, *"This is the one where the two row counts are
-    furthest apart"* -- both definite descriptions. On the shipped run they are not unique: this
-    session's independent recount of the span's last calendar year finds **two** candidates at
-    the maximum separation of 4 rows, BOTH with a moving POC -- ZYDUSLIFE 2026-03-11 and
-    BAJFINANCE 2026-04-10. What separated them is `executed`: ZYDUSLIFE took no trade that day.
-    That key is in `pick_rounding_day`'s docstring and on no page the trader reads.
-
-    The fixture reproduces exactly that shape. If the criterion is ever widened to state the key,
-    or the ordering changed, this turns red.
+    It pinned the defect: page 3f called its day *"the one with the widest gap between the two
+    row counts"* twice, a definite description that is not unique on this run -- the recount
+    finds TWO candidates at the maximum separation of 4 rows, both with a moving POC (ZYDUSLIFE
+    2026-03-11 and BAJFINANCE 2026-04-10) -- and the key that really separated them (`executed`:
+    ZYDUSLIFE took no trade) lived only in a docstring. The ordering is unchanged and is still
+    asserted below; what is fixed is that the criterion now COUNTS the tie, NAMES the rival and
+    states the key.
     """
     def candidate(day: date, symbol: str, executed: bool) -> tp.RoundingCandidate:
         return tp.RoundingCandidate(
@@ -174,57 +201,83 @@ def test_the_rounding_days_FURTHEST_APART_claim_is_not_unique_and_a_hidden_key_b
     older_traded = candidate(date(2026, 1, 5), "BAJFINANCE", executed=True)
     newer_untraded = candidate(date(2026, 6, 30), "ZYDUSLIFE", executed=False)
     assert tp.pick_rounding_day((older_traded, newer_untraded)).symbol == "BAJFINANCE", (
-        "the deciding key is whether the day traded -- which no criterion on the page states"
+        "the deciding key is whether the day traded"
     )
+
+    # THE FIX: the criterion no longer claims uniqueness, and it names both the rival and the key
+    words = tp._rounding_rivals((no_trade, traded), traded)
+    assert "2 days tie on both of those" in words
+    assert "ZYDUSLIFE" in words and "it also TOOK A TRADE" in words
+    page = PACK.read_text(encoding="utf-8")
+    assert "this is the one with the widest gap between the two row counts" not in page
+    assert "the one where the two row counts are furthest apart" not in page
 
 
 # --- 4. PINS a finding: the bias-rule table's population is unstated --------------------------------
 
 
-def test_the_bias_rule_table_sums_to_a_population_the_page_never_names() -> None:
-    """REVIEW_12 finding Q2, pinned, read off the COMMITTED artefacts.
+def test_the_bias_rule_tables_population_is_now_STATED_and_reconciles() -> None:
+    """REVIEW_12 finding Q2 -- FLIPPED 06-Aug-2026, and RED on the pre-fix source.
 
-    The table is headed *"Which of your bias rules decided the days the machine judged"*, but
-    its rows sum to neither of the two counts page 5 prints. Three of its own rows are labelled
-    *not judged*, some rule-labelled rows were refused after the bias was computed, and the
-    stock-days refused as non-standard sessions carry no rule at all and appear in no row. No
-    total is printed, so none of that is visible to the reader.
+    It pinned the defect: the table was headed *"Which of your bias rules decided the days the
+    machine judged"* while its rows summed to neither of the two counts page 5 prints, and no
+    total was printed, so a reader had nothing to check. The counts are unchanged -- and they
+    still do not equal either figure, which is the point -- but the page now prints the sum and
+    reconciles it in both directions, so the arithmetic is the reader's to verify.
     """
     figures = _companion()["figures"]
-    rules = figures["counts"]["bias_rules"]
+    counts = figures["counts"]
+    rules = counts["bias_rules"]
     limits = figures["limits"]
     total = sum(rules.values())
 
-    assert total != limits["usable"], "if these ever agree, the heading has become true"
-    assert total != limits["walked"], "and it is not the walk either"
-    assert limits["walked"] - total > 0, (
-        "walked stock-days that carry no bias rule at all and so appear in no row"
+    assert counts["bias_rules_total"] == total
+    assert total != limits["usable"] and total != limits["walked"], (
+        "the table's population is genuinely neither, which is why it has to be stated"
     )
+    assert counts["bias_rules_walked_without_a_rule"] == limits["walked"] - total > 0
+    assert counts["bias_rules_ruled_then_refused"] == total - limits["usable"] > 0
+
     page = PACK.read_text(encoding="utf-8")
-    assert "Which of your bias rules decided the days the machine judged" in page
-    assert f"| {total:,} |" not in page, "the table prints no total for the reader to check"
-    assert "not judged" in page, "three rows are explicitly outside the heading's own population"
+    assert "Which of your bias rules decided the days the machine judged" not in page, (
+        "the heading no longer claims a population the table is not"
+    )
+    assert "What the machine found on each stock-day it looked at" in page
+    assert f"Those rows add up to {total:,}" in page, "the total is printed for the reader"
+    assert f"{limits['walked'] - total:,} of them carry no rule at all" in page
+    assert f"{total - limits['usable']:,} more had a bias but were refused afterwards" in page
+    assert "not judged" in page, "three rows are explicitly outside the judged population"
 
 
 # --- 5. PINS a finding: page 1 compares two rates over different denominators -----------------------
 
 
-def test_page_ones_two_win_rates_are_taken_over_different_denominators() -> None:
-    """REVIEW_12 finding Q5, pinned.
+def test_page_ones_two_win_rates_are_now_ONE_denominator_with_the_flats_stated() -> None:
+    """REVIEW_12 finding Q5 -- FLIPPED 06-Aug-2026, and RED on the pre-fix source.
 
-    *"it would need to win 34.60% of its trades just to end level. It won 31.53% of them"* -- the
-    break-even rate is a fraction of the trades that made or lost money (the flat ones are in
-    neither average and `_break_even_win_rate` says so), while the delivered rate is a fraction
-    of ALL trades. The gap is immaterial on this run, and it is a real mismatch: pinned so that
-    it stays immaterial rather than silently growing.
+    It pinned the defect: *"it would need to win 34.60% ... It won 31.53% of them"* compared a
+    break-even rate taken over the trades that made or lost money with a delivered rate taken
+    over ALL of them. Both figures are unchanged and both are still printed; what is fixed is
+    that the comparison is now made on ONE denominator, the flat trades are counted out loud,
+    and the all-trades rate is stated separately as the other reading.
     """
     arithmetic = _companion()["figures"]["arithmetic"]
     winners, losers, flat = arithmetic["winners"], arithmetic["losers"], arithmetic["flat"]
     delivered = Fraction(arithmetic["delivered_win_rate"])
+    matched = Fraction(arithmetic["delivered_win_rate_over_decided_trades"])
     assert flat > 0, "with no flat trades the two denominators coincide and there is nothing here"
     assert delivered == Fraction(winners, winners + losers + flat)
-    matched = Fraction(winners, winners + losers)
+    assert matched == Fraction(winners, winners + losers) == Fraction(
+        winners, arithmetic["decided_trades"]
+    )
     assert matched != delivered, "the denominators differ by exactly the flat trades"
     assert abs(matched - delivered) < Fraction(1, 1000), (
         "and the difference is under a tenth of a percentage point on this run"
     )
+
+    page = PACK.read_text(encoding="utf-8")
+    assert f"({winners:,} of {winners + losers:,})" in page, (
+        "the comparison names the population the two averages are built from"
+    )
+    assert f"{flat:,} trades ended exactly level and are in neither" in page
+    assert f"Over all {winners + losers + flat:,} trades the win rate is" in page

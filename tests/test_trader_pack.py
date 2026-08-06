@@ -29,17 +29,23 @@ from pathlib import Path
 import pytest
 
 from acumen import poc as poc_engine
+from acumen import points_view as pv
 from acumen import portfolio as pf
 from acumen import trader_pack as tp
 from acumen.config import load_config
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MODULE = REPO_ROOT / "src" / "acumen" / "trader_pack.py"
+POINTS_MODULE = REPO_ROOT / "src" / "acumen" / "points_view.py"
 PACK = REPO_ROOT / "docs" / "validation" / "trader_pack.md"
 COMPANION = REPO_ROOT / "docs" / "validation" / "trader_pack.json"
+POINTS_TABLE = REPO_ROOT / "docs" / "reports" / "points_by_symbol.md"
 
 #: A rupee amount as it is printed: ``Rs 1,234.56``, or a POC's honest ``Rs 918.555``.
 MONEY = re.compile(r"-?Rs [0-9][0-9,]*\.[0-9]{2,3}")
+#: A POINTS figure as page 7 prints it -- a signed decimal with no currency, in a table cell or
+#: in a sentence. Anchored on the cell/word boundaries so it cannot swallow a date or a rupee.
+POINTS = re.compile(r"(?<![0-9Rs.])[-+][0-9][0-9,]*\.[0-9]{2}(?![0-9])")
 #: A paisa-shaped decimal and an Indian/Western grouped digit run -- what a hand-typed figure
 #: looks like when someone writes one into prose without the formatter.
 PAISA_TEXT = re.compile(r"[0-9][0-9,]*\.[0-9]{2,3}(?![0-9])")
@@ -69,21 +75,7 @@ def test_the_pack_generator_carries_no_hand_typed_money_literal() -> None:
     answer is literally *"risk per trade = 1,000 rupees."* That exemption is checked, not
     assumed: an offending string has to BE one of his quotes.
     """
-    source = MODULE.read_text(encoding="utf-8")
     quoted = " || ".join(quote for _tag, quote, _fixes in tp.TRADER_WORDS)
-
-    assert not re.search(r"Rs\s*-?[0-9]", source), (
-        "a rupee amount typed into the generator, instead of formatted from a value"
-    )
-
-    for text in _string_constants(source):
-        if QUANTUM.match(text):
-            continue
-        for pattern, what in ((PAISA_TEXT, "a paisa-shaped decimal"),
-                              (GROUPED_TEXT, "a grouped digit run")):
-            for hit in pattern.findall(text):
-                assert hit in quoted, f"{what} typed into the pack's prose: {hit!r} in {text!r}"
-
     config = load_config(include_env=False)
     forbidden = {
         config.require_risk_per_trade_paise(),
@@ -92,16 +84,36 @@ def test_the_pack_generator_carries_no_hand_typed_money_literal() -> None:
         config.initial_capital_paise(),
         int(config.initial_capital),
     }
-    literals = {
-        node.value
-        for node in ast.walk(ast.parse(source))
-        if isinstance(node, ast.Constant) and isinstance(node.value, int)
-        and not isinstance(node.value, bool)
-    }
-    assert not (literals & forbidden), (
-        f"CONTEXT 3.5 money magnitudes hardcoded in the pack generator: "
-        f"{sorted(literals & forbidden)}"
-    )
+
+    # Both halves of the generator: the pack's own module and the POINTS module page 7 is built
+    # from. A points figure is a price and would read as one on the page, so it is held to the
+    # same standard as a rupee (the Round-4 extension of B301).
+    for module in (MODULE, POINTS_MODULE):
+        source = module.read_text(encoding="utf-8")
+        assert not re.search(r"Rs\s*-?[0-9]", source), (
+            f"a rupee amount typed into {module.name}, instead of formatted from a value"
+        )
+
+        for text in _string_constants(source):
+            if QUANTUM.match(text):
+                continue
+            for pattern, what in ((PAISA_TEXT, "a paisa-shaped decimal"),
+                                  (GROUPED_TEXT, "a grouped digit run")):
+                for hit in pattern.findall(text):
+                    assert hit in quoted, (
+                        f"{what} typed into {module.name}'s prose: {hit!r} in {text!r}"
+                    )
+
+        literals = {
+            node.value
+            for node in ast.walk(ast.parse(source))
+            if isinstance(node, ast.Constant) and isinstance(node.value, int)
+            and not isinstance(node.value, bool)
+        }
+        assert not (literals & forbidden), (
+            f"CONTEXT 3.5 money magnitudes hardcoded in {module.name}: "
+            f"{sorted(literals & forbidden)}"
+        )
 
 
 def _rendered(value: str) -> set[str]:
@@ -141,6 +153,71 @@ def test_every_rupee_on_the_committed_page_is_a_figure_the_companion_carries() -
     assert not unaccounted, f"rupee figures on the page that no value produced: {unaccounted}"
 
 
+def test_every_POINTS_figure_on_the_committed_page_is_one_the_companion_carries() -> None:
+    """The same tripwire, extended to page 7 (Round 4).
+
+    A point is a price, and a price typed into prose is exactly what the money half of this
+    tripwire exists to catch. Page 7 prints its figures through `_Emit.pt`, which records each
+    one in the companion's own `points` channel with its exact paise value beside it; anything
+    on the page that did not come through the emitter fails here.
+    """
+    payload = json.loads(COMPANION.read_text(encoding="utf-8"))
+    recorded = {token["text"]: token["value"] for token in payload["tokens"]["points"]}
+    assert recorded, "the companion records no points at all"
+
+    for text, value in recorded.items():
+        exact = Fraction(value)
+        assert text in {pv.format_points(exact), pv.format_points(exact, signed=False)}, (
+            f"the companion's own record disagrees with itself: {value} rendered as {text}"
+        )
+
+    on_page = set(POINTS.findall(PACK.read_text(encoding="utf-8")))
+    assert on_page, "the pack prints no points at all"
+    unaccounted = sorted(on_page - set(recorded))
+    assert not unaccounted, f"points figures on the page that no value produced: {unaccounted}"
+
+
+def test_the_points_ranking_can_never_be_printed_without_its_caveat() -> None:
+    """The architect made the multiple-comparisons caveat MANDATORY on any per-stock ranking.
+
+    Asserted at the RENDERED OUTPUT on BOTH documents that carry a ranking -- the pack's page 7
+    and the full companion table -- so a renderer that dropped it would go red rather than ship
+    a league table of 204 stocks with nothing beside it.
+    """
+    companion = json.loads(COMPANION.read_text(encoding="utf-8"))
+    figures = companion["figures"]["points"]
+    caveat = figures["caveat"]
+    assert caveat == pv.MULTIPLE_COMPARISONS_CAVEAT.format(
+        symbols=f"{figures['symbols']:,}", by_chance=f"{pv.by_chance(figures['symbols']):,}"
+    )
+    for page in (PACK, POINTS_TABLE):
+        text = page.read_text(encoding="utf-8")
+        assert caveat in text, f"the ranking is printed without its caveat in {page.name}"
+        assert "never as proof." in text
+    # ...and the cost line, which is the other half of reading a points table honestly
+    pack = PACK.read_text(encoding="utf-8")
+    assert "costs scale with SIZE, which this view deliberately ignores" in pack
+    assert f"all {figures['symbols']:,} stocks are in `{pv.COMPANION_PATH}`" in pack
+
+
+def test_the_full_points_table_carries_every_stock_the_ranking_ranks() -> None:
+    """Page 7 shows both ends; the companion shows all of them, and it is the same ranking."""
+    figures = json.loads(COMPANION.read_text(encoding="utf-8"))["figures"]["points"]
+    rows = figures["by_symbol"]
+    assert len(rows) == figures["symbols"]
+    assert [one["symbol"] for one in rows] == sorted(
+        (one["symbol"] for one in rows),
+        key=lambda symbol: (-next(r["points_paise"] for r in rows if r["symbol"] == symbol),
+                            symbol),
+    ), "the companion's order is the ranking's order"
+    assert sum(one["points_paise"] for one in rows) == figures["points_paise"]
+    assert sum(one["trades"] for one in rows) == figures["trades"]
+
+    table = POINTS_TABLE.read_text(encoding="utf-8")
+    for one in rows:
+        assert f"| {one['symbol']} |" in table, f"{one['symbol']} is ranked but not published"
+
+
 def test_the_companion_carries_the_run_the_pack_was_built_from() -> None:
     """A figure is only as good as its provenance: the companion names the exact ledger."""
     payload = json.loads(COMPANION.read_text(encoding="utf-8"))
@@ -166,7 +243,8 @@ def test_the_pack_asks_the_two_things_it_exists_to_ask() -> None:
                     "## 3. Six days you can open on your own chart",
                     "## 4. The years",
                     "## 5. What the machine did NOT do",
-                    "## 6. What we need from you"):
+                    "## 6. What we need from you",
+                    "## 7. Every stock, in points"):
         assert heading in page, heading
     # ...and it recommends nothing: the three paths are stated, none is preferred.
     for path in ("**Retire it.**", "**Change it.**",
@@ -335,6 +413,95 @@ def test_a_day_with_no_rounding_disagreement_is_never_offered_as_one() -> None:
         poc_half_up=Fraction(95_000), executed=True, window_volume=1,
     )
     assert same.separation == 0 and not same.poc_moves
+
+
+def test_the_gap_criterion_STATES_what_it_checked_and_names_the_other_stocks() -> None:
+    """REVIEW_12 finding Q1, closed: the named branch printed a superlative the ledger does not
+    support ("the LAST gap entry of the whole ten years") and nothing tested it.
+
+    It now says only what the census can show -- that the day is the last DAY any stock gapped
+    in -- and it counts and NAMES the others that gapped in beside it, with their entry times.
+    """
+    symbol, day_text = tp.NAMED_GAP
+    named_day = date.fromisoformat(day_text)
+    census = _census(
+        gaps=((named_day, symbol), (named_day, "OTHER")),
+        gap_clocks={(named_day, symbol): "12:30", (named_day, "OTHER"): "12:45"},
+    )
+    picked = tp._pick_gap(census)
+    assert (picked.symbol, picked.day) == (symbol, named_day) and picked.named
+    assert "LAST gap entry of the whole ten years" not in picked.criterion
+    assert "LAST DAY of the ten years that any stock gapped in" in picked.criterion
+    assert "2 stocks gapped in on it" in picked.criterion
+    assert "OTHER at 12:45" in picked.criterion and "this one at 12:30" in picked.criterion
+
+    # ...and a day that is NOT the last gap-entry day does not claim to be one
+    later = _census(
+        gaps=((named_day, symbol), (date(2026, 7, 30), "ZZZ")),
+        gap_clocks={(named_day, symbol): "12:30", (date(2026, 7, 30), "ZZZ"): "10:00"},
+    )
+    other = tp._pick_gap(later)
+    assert (other.symbol, other.day) == (symbol, named_day)
+    assert "LAST DAY" not in other.criterion
+    assert "the day the ledger records for it" in other.criterion
+
+
+def test_the_rounding_criterion_STATES_the_key_that_broke_the_tie() -> None:
+    """REVIEW_12 finding Q14, closed: two days tied on both stated keys and the key that really
+    chose between them (the day TRADED) was in a docstring and on no page."""
+    def candidate(day: date, symbol: str, executed: bool) -> tp.RoundingCandidate:
+        return tp.RoundingCandidate(
+            symbol=symbol, day=day, tick_paise=10, top_paise=92_535, bottom_paise=91_230,
+            ticks_half_even=130, ticks_half_up=131, rows_half_even=26, rows_half_up=22,
+            tpr_half_even=5, tpr_half_up=6, poc_half_even=Fraction(91_855),
+            poc_half_up=Fraction(91_860), executed=executed, window_volume=1,
+        )
+
+    tied = (candidate(date(2026, 3, 11), "ZYDUSLIFE", executed=False),
+            candidate(date(2026, 4, 10), "BAJFINANCE", executed=True))
+    probe = tp.pick_rounding_day(tied)
+    assert probe.symbol == "BAJFINANCE"
+    words = tp._rounding_rivals(tied, probe)
+    assert "2 days tie on both of those" in words
+    assert "ZYDUSLIFE on Wednesday 11 March 2026" in words
+    assert "it also TOOK A TRADE" in words
+    # a genuinely unique day says so instead of inventing a rival
+    assert tp._rounding_rivals((tied[1],), tied[1]) == ", and it is the only such day"
+
+
+def test_the_first_break_helper_is_the_ENGINES_predicate_and_adds_the_stamp() -> None:
+    """REVIEW_12 finding Q6: the Rule-3 walk asserted which side broke first without printing
+    the observable. The page's helper must decide exactly as `acumen.bias` does, or it prints a
+    number that belongs to a different rule."""
+    from datetime import datetime
+
+    from acumen import bias as bias_engine
+    from acumen.aggregate import Bar
+
+    previous = bias_engine.Candle(open=73_800, high=74_150, low=73_450, close=73_865)
+
+    def minute(at: int, high: int, low: int) -> Bar:
+        return Bar(stamp=datetime(2026, 6, 9, 9, at), open_paise=high, high_paise=high,
+                   low_paise=low, close_paise=low, volume=1)
+
+    #: 09:15 breaks the HIGH (74,190 > 74,150); the low never breaks before it.
+    bars = (minute(15, 74_190, 73_900), minute(16, 74_000, 73_400))
+    stamp, level, side = tp.first_break(bars, previous)
+    assert (stamp.hour, stamp.minute) == (9, 15) and level == 74_190
+    assert side == tp.HIGH_FIRST
+    engine = bias_engine._first_break(
+        [bias_engine.Candle(open=bar.open_paise, high=bar.high_paise, low=bar.low_paise,
+                            close=bar.close_paise) for bar in bars],
+        previous.high, previous.low,
+    )
+    assert engine is not None and engine[0] == bias_engine._HIGH_FIRST
+
+    # the low first, and the same-minute tie, both agree with the engine too
+    low_first = (minute(15, 74_000, 73_400), minute(16, 74_190, 73_300))
+    assert tp.first_break(low_first, previous)[2] == tp.LOW_FIRST
+    both = (minute(15, 74_190, 73_400),)
+    assert tp.first_break(both, previous)[2] == tp.BOTH_AT_ONCE
+    assert tp.first_break((minute(15, 74_000, 73_500),), previous) is None
 
 
 # --- the plain-English layer --------------------------------------------------------------------
