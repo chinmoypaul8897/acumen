@@ -1,6 +1,6 @@
 # CONTEXT.md — ACUMEN INTELLIGENCE · Master Specification
 
-**Version 1.7 · 3 August 2026 · THIS FILE IS LAW.**
+**Version 1.8 · 6 August 2026 · THIS FILE IS LAW.**
 Every build/review session reads this before touching code. Nothing here may be changed by any Claude Code session — spec changes flow only through the architect (the Cowork chat), arrive as a new version of this file, and are logged in §10. If reality and this file disagree, STOP and write it to QUESTIONS.md.
 
 ## Table of contents
@@ -293,8 +293,9 @@ Corrupt days are refused, never repaired.
 
 | Fixture | Source | Asserts |
 |---|---|---|
-| F1 TCS bullish Entry-1 | trader's PDF worked example, POC per Q-15 ruling | **POC 2032** (the PDF's illustrative 2030 is provably inconsistent with the trader's own later gap rule — see Q-15; 2032 preserves all four trader numbers and teaches the boundary: low == POC → traded AT the POC → NORMAL branch), entry 2037, SL 2032 (risk 5), TP 2052 |
-| F2 TCS bullish Entry-2 | PDF example, POC per Q-15 | initial state WAIT-BELOW (reference above POC 2032) → close below arms → re-cross close 2037 → entry 2037/SL 2032/TP 2052 |
+| F1 TCS bullish Entry-1 | trader's PDF worked example, POC per his Round-4 Q44 diagram-answer | **POC 2030** — the PDF's own illustrative POC, restored: his Round-4 answer says the example day is a GAP day, so §3.4's gap branch is the branch it teaches. Entry 2037; **SL = the previous 15-min candle's close** (the F4 "prior close 2028" shape) **= 2025, risk 12**; TP 2073. Q-15's POC-2032 reading is OVERTURNED by the trader's own word (QUESTIONS.md ROUND-4 RECEIPTS, 06-Aug-2026; §10 precedence: later answers correct earlier text) |
+| F2 TCS bullish Entry-2 | PDF example, POC per his Round-4 Q44 diagram-answer | initial state WAIT-BELOW (reference above POC 2030) → close below at 2027 arms → re-cross close 2037 → entry 2037; the gap branch again, so **SL = the previous 15-min candle's close = 2027, risk 10**, TP 2067 |
+| F1/F2 at POC 2032 — the low == POC boundary (**ILLUSTRATION, not a golden**) | the same F1 and F2 candles, evaluated at POC 2032 | kept and labelled as an illustration: with POC 2032 the entry candle's low TOUCHES the POC, `low > POC` is FALSE, so the NORMAL branch gives SL = the entry candle's low = 2032 (risk 5) and TP 2052. It teaches the boundary the Q-15 ruling identified and it is no longer CONTEXT §8's F1/F2 |
 | F3 TCS bearish Entry-1 | PDF example + R1-Q1/Q2 corrections | entry 1980, SL 1988 (candle HIGH, risk 8), **TP 1956** (not 2004) |
 | F4 Gap entry SL | R2-Q33 worked numbers | prior close 2028 → gap candle low 2034, close 2042 → entry 2042, SL **2028**, TP 2084 |
 | F5 Rule-3 tie day | R2-Q31 + Round-3 Q38/Q39 | P: O2010 H2050 L2000 C2040; same-minute double break; C.close 2020 → BULLISH — for RED, GREEN and DOJI decisive candles alike (color irrelevant; three sub-fixtures) |
@@ -332,6 +333,7 @@ Precedence if conflict is ever found: trader's R2 answers > R1 answers > PDF tex
 
 | Version | Date | Change |
 |---|---|---|
+| 1.8 | 06-Aug-2026 | Round 4: Q44 confirms the gap rule as implemented and corrects the PDF example's parametrization (no engine change, no re-run); Q43 superseded — capital flags retired, per-stock points view adopted |
 | 1.7 | 03-Aug-2026 | Q-22: Q-17 made universal (Rule-3 scan + trade_evidence bound); population corrected to 51; v1.5→v1.6 supersedes marker; 21 Rule-3 days re-answered, 0 biases changed (measured) |
 | 1.6 | 03-Aug-2026 | Q-21(a): gate 2 enumeration completed with the open test; measured cost 47 days / coverage 93.9317%; Q-21(b) bias-evidence gating and Q-21 malformed-bar refusal recorded as law |
 | 1.5 | 02-Aug-2026 | Q-18 re-seal: era rebuilt and reconciled to ZERO unexplained (docs/recovery/q18_reconciliation.md is the delta record); §4.6 rewritten with the re-sealed numbers (435,641 / 409,252 = 93.9425%; APLAPOLLO in, NESTLEIND out of quarantine; BSE volume-only caveat); Q-17 candle-level drop and Q-19 7-day 404-sealing guard made law; E5 rebuild-universe clarification; daily store extended to 2026-07-30 |
