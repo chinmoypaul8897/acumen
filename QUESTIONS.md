@@ -3717,3 +3717,39 @@ REVIEW_9B_FINAL. Whether that discharges chunk 11, or whether chunk 11 is deferr
 is the architect's to say; **this pack does not depend on it either way** -- it is a plain-English
 document built from the ledger, and it reads no UI. Requested here under plan.md §5 class C.
 
+---
+
+## ARCHITECT'S RULING (06-Aug-2026) · chunk 11 · recorded VERBATIM by the chunk-12 QC REVIEW session
+
+The chunk-12 VALIDATION-PACK session raised, under plan.md §5 class C and NON-BLOCKING, the one
+thing the 06-Aug plan amendments did not say: plan.md §3 lists chunk 12's dependencies as **9 AND
+11**, STATUS.md's chunk-11 line was `todo`, and the amendment named chunk 10 while staying silent
+on 11 (see PLAN AMENDMENTS 06-Aug-2026, closing block, immediately above). That session did not
+read the silence either way; it wrote down what was true on the machine and left the reading to
+the architect. This is his reading, recorded here word for word:
+
+> "chunk 11 (web report UI) joins chunks 13-15 ON HOLD pending the trader's decision; its
+> content scope is satisfied by the twice-reviewed static report for the chunk-12 gate. plan.md's
+> chunk-12 dependency on 11 is met by that reading. Architect."
+
+**What it settles.** Three things, and nothing else.
+
+* **Chunk 11 is ON HOLD**, in the same state and for the same reason as chunks 13, 14 and 15: it
+  waits on the trader's decision, which is the decision the chunk-12 pack exists to inform. It is
+  NOT cancelled and NOT failed; its card stands exactly as plan.md v1.1 writes it.
+* **Its content scope is discharged for the chunk-12 gate** by
+  `docs/reports/chunk9b_backtest_report.md` -- the equity, drawdown, per-year, per-symbol and
+  disclosure content chunk 11's card lists -- which has been reviewed TWICE
+  (REVIEW_9B_REPORT, then REVIEW_9B_FINAL over the final edits) and prose-fixed since.
+* **Chunk 12's plan.md §3 dependency on 11 is MET** by that reading, so the chunk-12 QC review
+  proceeds and its verdict stands on its own.
+
+**What it does NOT say.** It does not retire chunk 11's card, does not absorb it the way the same
+day's amendment absorbs chunk 10, and does not decide whether a web UI is ever built -- that is
+part of what the trader's answer decides. plan.md is architect-owned and is NOT edited here
+(plan.md §5 class C: chunk movement is recorded in PROGRESS.md and STATUS.md; a plan version bump
+is the architect's own act).
+
+**EXECUTED by the chunk-12 QC REVIEW session (06-Aug-2026):** this record; STATUS.md's chunk-11
+line moves from `todo` to `ON HOLD` carrying the ruling; and `docs/reviews/REVIEW_12.md` opens
+with the ruling verbatim as its PART 0. The class-C item the build session raised is **CLOSED**.
