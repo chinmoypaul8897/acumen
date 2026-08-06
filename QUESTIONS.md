@@ -3462,7 +3462,7 @@ already been carried out correctly by hand.
 
 ---
 
-## Q-23 · chunk 9B REPORT · class A · **OPEN -- STOP** · blocks ONE figure: CONTEXT 7-E13's buy&hold benchmark
+## Q-23 · chunk 9B REPORT · class A · **RULED 06-Aug-2026 — the ruling is recorded below; the report's section 10 does NOT yet publish it (the one open edit)** · was blocking ONE figure: CONTEXT 7-E13's buy&hold benchmark
 
 **Question.** CONTEXT 7-E13 defines the benchmark as *"equal-weight portfolio of the traded
 universe, bought at first trade date's close, held to period end (engineering default, disclosed
@@ -3519,3 +3519,59 @@ on the adjusted side only, and that asymmetry is the architect's to accept or re
 **WHAT IS STOPPED:** exactly one figure. The report is complete and publishable in every other
 respect; section 10 prints the measurement and the question instead of an answer. Nothing in the
 run, the ledger, the metrics or any other section depends on this.
+
+---
+
+**ARCHITECT'S RULING (relayed to the chunk-9B REPORT REVIEW session, 2026-08-06), verbatim:**
+
+> "ARCHITECT'S RULING (06-Aug-2026), Q-23: the buy&hold benchmark is the SHARE-COUNT-ADJUSTED construction (491.90% as generated) — buy-and-hold holds UNITS, which multiply through bonuses/splits; fixed-unit raw closes falsify wealth at every event. Dividends excluded and stated. Both figures remain printed; the adjusted one is THE benchmark. Architect."
+
+**STATE AT THE MOMENT OF RECORDING (the REVIEW session, 06-Aug-2026).** The ruling arrived
+AFTER `docs/reports/chunk9b_backtest_report.md` was generated and committed. This session
+reviews; it does not fix. What the ruling means for the artefact, verified rather than assumed:
+
+* **The FIGURE the ruling names is right and reproduces.** Re-derived independently, importing
+  nothing from `src/acumen` (`docs/evidence/review9b_benchmark_recompute.{py,md}`): 134 of the
+  204 symbols carry a close on the first trade date 2016-10-03 and are IN the benchmark, 70 are
+  excluded and named; equal weight, fractional units, no rebalancing; the adjusted reading
+  brings each first close into the last close's scale through the run's own factor table.
+  **RAW Rs 398,922.17 = 298.92%; SHARE-COUNT ADJUSTED Rs 591,899.89 = 491.90%** — both to the
+  paisa, both matching what section 10 prints. The construction is also the RIGHT one for a
+  held portfolio: dividing the first close by the pending factors is arithmetically identical
+  to multiplying the holder's units by their reciprocal, and **25 of the 134 symbols are read
+  as a LOSS by the raw reading while the units actually held say a gain** (NESTLEIND 0.230x raw
+  vs 4.593x adjusted; BEL 0.302x vs 9.979x; IOC 0.232x vs 2.435x). That is the falsification the
+  ruling names, measured.
+
+* **THE ONE OPEN EDIT.** The generator does NOT publish the ruling. `src/acumen/report_9b.py`
+  still carries `BENCHMARK_STOP` (the Q-23 STOP text) and renders section 10 under the heading
+  *"Buy & hold -- BOTH readings, and neither published"*, and decision **B275** records
+  *"NEITHER is published"*. Both readings ARE printed, which the ruling requires; what is
+  missing is the label. Owed, and owed to the generator rather than to the file: retitle the
+  section, mark the adjusted row as THE benchmark, replace the STOP quote with this ruling,
+  and re-point B275. No number moves.
+
+* **ONE THING THE RULING'S OWN WORDS AND THE GENERATED NUMBER DO NOT AGREE ABOUT, put to the
+  architect rather than decided (CLAUDE.md rule 1).** The ruling says *"Dividends excluded and
+  stated."* The 491.90% as generated does NOT exclude every dividend. Section 10 counts
+  **433 "share-count factors"**; the run's own factor table says those 433 non-unit in-span
+  factors are **77 bonus + 35 split + 13 rights = 125 genuine share-count events, plus 308
+  SPECIAL DIVIDENDS** (CONTEXT 4.2's above-2% classification, which carries a factor). A
+  special dividend does not multiply a holder's units — it is cash the price drops by — and
+  applying its factor on the adjusted side only partially adds those dividends back. Measured:
+  share-count events alone give **Rs 566,668.64 = 466.67%**; the 308 special dividends carry the
+  figure to **491.90%**, i.e. **25.23 percentage points, 5.13% of the published benchmark**.
+  Q-23 disclosed this asymmetry when it was raised (*"that asymmetry is the architect's to
+  accept or reject with the rest"*); the ruling's *"as generated"* clause reads as accepting it,
+  and this session therefore treats **491.90% as the ruled figure and changes nothing**. What is
+  owed is the *"and stated"* half: section 10 currently says *"Both readings are PRICE returns.
+  Ordinary dividends carry k = 1 ... and are not added back on either side"*, which is true of
+  ORDINARY dividends and not true of the 308 special ones. The disclosure edit rides with the
+  publication edit above. If the architect intended share-count events ONLY, the figure is
+  466.67% and one line of the generator changes; that is the architect's call, not this
+  session's.
+
+* **Nothing else in the report depends on this.** Verified: the benchmark is computed in
+  `benchmark_pair`, consumed by `_section_benchmark`, and reaches no metric, no ledger row and
+  no other section.
+
