@@ -657,6 +657,59 @@ def test_the_benchmark_applies_SHARE_COUNT_events_ONLY_and_excludes_every_cash_d
     assert pair.adjusted.total_return > pair.share_count.total_return, (
         "the special dividend is credited by the mixed reading and by nothing else"
     )
+    # AAA is the only symbol and it HAS a first-day close, so the mixed row's in-benchmark
+    # tally is the table-wide one here; the test below separates them.
+    assert pair.in_benchmark_events_applied == 2
+    assert pair.in_benchmark_excluded_by_kind == {"dividend": 1}
+    assert pair.in_benchmark_excluded_events == 1
+
+
+def test_the_MIXED_rows_tally_is_scoped_to_the_members_the_mixed_row_is_BUILT_from() -> None:
+    """The architect's edit of 06-Aug-2026: the mixed row prices its OWN members.
+
+    ``pf.buy_and_hold`` buys at the first trade date's close, so a symbol with no close on that
+    date is in NEITHER portfolio -- and a factor on such a symbol moves no rupee of either. The
+    share-count sentence was scoped to the benchmark's members by REVIEW_9B_FINAL finding Q2; the
+    sentence beneath it, which prices the MIXED reading, was still counting the whole factor
+    table. It now counts both and labels which is which.
+
+    Here BBB has no first-day close. Both symbols carry a bonus and a special dividend, so the
+    table-wide tally is 4 factors (2 share-count + 2 dividends) and the benchmark's own members
+    account for exactly half of that.
+    """
+    first, last = date(2020, 1, 1), date(2020, 12, 31)
+    store = _FakeDaily({
+        "AAA": {first: 100_000, last: 100_000},
+        "BBB": {date(2020, 7, 1): 100_000, last: 100_000},   # no close on the first day
+    })
+    entries = [
+        {"ex_date": "2020-06-01", "k": "1/2", "kind": "bonus", "classification": ""},
+        {"ex_date": "2020-09-01", "k": "24/25", "kind": "dividend", "classification": "special"},
+    ]
+    manifest = {"factor_table": {"per_symbol": {"AAA": {"in_span": list(entries)},
+                                                "BBB": {"in_span": list(entries)}}}}
+    pair = r9.benchmark_pair(store, manifest, symbols=["AAA", "BBB"], first_day=first,
+                             last_day=last, initial_capital_paise=CAPITAL)
+
+    assert tuple(pair.share_count.symbols) == ("AAA",), "only AAA is IN either portfolio"
+    assert pair.events_applied == 4 and pair.excluded_by_kind == {"dividend": 2}
+    assert pair.in_benchmark_events_applied == 2, "BBB's two factors are on nobody's rupees"
+    assert pair.in_benchmark_excluded_by_kind == {"dividend": 1}
+    assert pair.in_benchmark_share_count_events == 1
+
+    lines: list[str] = []
+    r9._section_benchmark(
+        lines.append, benchmark=pair,
+        columns={"All": pf.metrics((), label="All", initial_capital_paise=CAPITAL, days=())},
+    )
+    priced = next(line for line in lines if "The one stated line the ruling asks for" in line)
+    assert "built from the SAME 1 members" in priced
+    assert "it applies **2** non-unit factors on those members, which is the 1 share-count " \
+        "events above plus **1** the benchmark leaves out (by event kind: dividend 1)" in priced
+    assert "Over the WHOLE factor table the same tally is 4 factors -- 2 share-count plus 2 " \
+        "excluded (by event kind: dividend 2)" in priced, (
+        "the table-wide pair stays on the page, stated beside the scoped one and labelled"
+    )
 
 
 def test_section_10_PUBLISHES_the_ruled_benchmark_and_LABELS_the_two_readings_beside_it(

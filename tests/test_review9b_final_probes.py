@@ -187,17 +187,28 @@ def test_the_benchmark_factor_TALLY_counts_ONLY_the_symbols_the_benchmark_HOLDS(
 
     Here BBB has no close on the first day. Its bonus is counted by the UNIVERSE tally, which is
     kept and labelled, and applied to nothing: the benchmark's own value is AAA's alone.
+
+    **EXTENDED by the chunk-12 VALIDATION-PACK session (06-Aug-2026)**, under the architect's
+    edit of the same date: the sentence BENEATH this one prices the MIXED reading and was still
+    counting the whole factor table while the row it prices is built from the benchmark's own
+    members. Nothing here was removed or weakened -- a special dividend is added to each symbol
+    so the two scopes can differ at all, every original assertion still holds unchanged, and the
+    new ones read the mixed row's line off the RENDERED page for the same reason the original
+    ones do.
     """
     first, last = date(2020, 1, 1), date(2020, 12, 31)
     store = _FakeDaily({
         "AAA": {first: 100_000, last: 100_000},
         "BBB": {date(2020, 7, 1): 100_000, last: 100_000},   # no close on the first day
     })
+    special = {"k": "24/25", "kind": "dividend", "classification": "special"}
     manifest = {"factor_table": {"per_symbol": {
         "AAA": {"in_span": [{"ex_date": "2020-06-01", "k": "1/2", "kind": "bonus",
-                             "classification": ""}]},
+                             "classification": ""},
+                            dict(special, ex_date="2020-09-01")]},
         "BBB": {"in_span": [{"ex_date": "2020-08-01", "k": "1/2", "kind": "bonus",
-                             "classification": ""}]},
+                             "classification": ""},
+                            dict(special, ex_date="2020-10-01")]},
     }}}
     pair = r9.benchmark_pair(store, manifest, symbols=["AAA", "BBB"], first_day=first,
                              last_day=last, initial_capital_paise=CAPITAL)
@@ -223,6 +234,21 @@ def test_the_benchmark_factor_TALLY_counts_ONLY_the_symbols_the_benchmark_HOLDS(
     assert "Over the WHOLE walked universe the same tally is 2 factors across 2 symbols" in applied, (
         "the wider tally stays on the page, stated separately and labelled as what it is"
     )
+
+    # ...and the SAME scoping on the sentence beneath it, which prices the MIXED row (the
+    # architect's edit, 06-Aug-2026). Each symbol carries a bonus and a special dividend, so
+    # the table holds 4 non-unit factors and the benchmark's one member accounts for 2 of them.
+    assert pair.events_applied == 4 and pair.excluded_by_kind == {"dividend": 2}
+    assert pair.in_benchmark_events_applied == 2, "BBB's pair moves no rupee of the mixed row"
+    assert pair.in_benchmark_excluded_by_kind == {"dividend": 1}
+    priced = next(line for line in lines if "The one stated line the ruling asks for" in line)
+    assert "built from the SAME 1 members" in priced, "the mixed row holds the same members"
+    assert "it applies **2** non-unit factors on those members" in priced, (
+        "the priced tally is the mixed row's own, not the factor table's"
+    )
+    assert "the 1 share-count events above plus **1** the benchmark leaves out" in priced
+    assert "Over the WHOLE factor table the same tally is 4 factors -- 2 share-count plus 2 " \
+        "excluded" in priced, "the table-wide pair is kept, stated beside it and labelled"
 
 
 def test_a_ZERO_LENGTH_holding_is_where_the_two_concurrency_conventions_diverge() -> None:

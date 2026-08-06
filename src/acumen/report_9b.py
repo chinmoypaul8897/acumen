@@ -649,12 +649,24 @@ class BenchmarkPair:
     in_benchmark_share_count_symbols: int = 0
     in_benchmark_share_count_events: int = 0
     excluded_by_kind: dict[str, int] = field(default_factory=dict)
+    #: The MIXED row's own two tallies, restricted the same way -- every non-unit factor, and
+    #: the excluded kinds inside it, on the symbols the benchmark is BUILT from. The mixed row
+    #: is a portfolio of those members and no others, so the sentence that prices it prints
+    #: THESE and states the table-wide pair beside them (the architect's edit, 06-Aug-2026).
+    #: Defaulted for the same reason as the pair above.
+    in_benchmark_events_applied: int = 0
+    in_benchmark_excluded_by_kind: dict[str, int] = field(default_factory=dict)
     ruling: str = BENCHMARK_RULING
 
     @property
     def excluded_events(self) -> int:
         """Non-unit factors THE benchmark does not apply -- the cash distributions."""
         return sum(self.excluded_by_kind.values())
+
+    @property
+    def in_benchmark_excluded_events(self) -> int:
+        """The same, counted over the benchmark's own members."""
+        return sum(self.in_benchmark_excluded_by_kind.values())
 
 
 def benchmark_pair(
@@ -685,8 +697,9 @@ def benchmark_pair(
     per_symbol = manifest["factor_table"]["per_symbol"]
     adjusted_symbols = share_count_symbols = 0
     events = share_events = 0
-    in_bench_symbols = in_bench_events = 0
+    in_bench_symbols = in_bench_events = in_bench_applied = 0
     excluded: Counter = Counter()
+    in_bench_excluded: Counter = Counter()
     for symbol in symbols:
         frame = daily_store.daily(symbol, first_day, last_day)
         series = {row.trade_date: int(row.close_paise) for row in frame.itertuples()}
@@ -696,6 +709,7 @@ def benchmark_pair(
         factor = Fraction(1)
         share_factor = Fraction(1)
         applied = share_applied = 0
+        mine: Counter = Counter()
         for entry in per_symbol.get(symbol, {}).get("in_span", ()):
             ex = date.fromisoformat(entry["ex_date"])
             k = Fraction(entry["k"])
@@ -707,7 +721,8 @@ def benchmark_pair(
                 share_factor *= k
                 share_applied += 1
             else:
-                excluded[str(entry.get("kind"))] += 1
+                mine[str(entry.get("kind"))] += 1
+        excluded.update(mine)
         if applied:
             adjusted_symbols += 1
             events += applied
@@ -715,11 +730,16 @@ def benchmark_pair(
             share_count_symbols += 1
             share_events += share_applied
         first_close = series.get(first_day)
-        if first_close is not None and share_applied:
+        if first_close is not None:
             # IN the benchmark: E13 buys at the first trade date's close, so a symbol without one
             # is excluded by `pf.buy_and_hold` and its factors move no rupee of the portfolio.
-            in_bench_symbols += 1
-            in_bench_events += share_applied
+            # The MIXED row holds exactly these members too, which is why its own sentence counts
+            # here and states the table-wide tally beside it.
+            in_bench_applied += applied
+            in_bench_excluded.update(mine)
+            if share_applied:
+                in_bench_symbols += 1
+                in_bench_events += share_applied
         if first_close is None:
             adjusted_closes[symbol] = series
             share_closes[symbol] = series
@@ -745,6 +765,8 @@ def benchmark_pair(
         in_benchmark_share_count_symbols=in_bench_symbols,
         in_benchmark_share_count_events=in_bench_events,
         excluded_by_kind=dict(sorted(excluded.items())),
+        in_benchmark_events_applied=in_bench_applied,
+        in_benchmark_excluded_by_kind=dict(sorted(in_bench_excluded.items())),
     )
 
 
@@ -2113,11 +2135,20 @@ def _section_benchmark(add, *, benchmark: BenchmarkPair, columns, **_) -> None:
         f"{_num(benchmark.share_count_symbols)} symbols -- that figure is stated here because it "
         "is the one the factor table reports, and the difference is factors on symbols with no "
         "close on the first trade date, which E13 excludes and section 10 names above.")
-    add(f"* **The one stated line the ruling asks for, on the mixed reading.** The mixed row "
-        f"applies all {_num(benchmark.events_applied)} non-unit factors in the table, which is "
-        f"the {_num(benchmark.share_count_events)} share-count events plus "
-        f"**{_num(benchmark.excluded_events)}** the benchmark leaves out ("
-        + _by_kind(benchmark.excluded_by_kind) + "). CONTEXT 4.2 gives a dividend at or above "
+    add(f"* **The one stated line the ruling asks for, on the mixed reading.** The mixed row is "
+        f"built from the SAME {_num(len(benchmark.share_count.symbols))} members, so its tally "
+        f"is scoped to them: it applies **{_num(benchmark.in_benchmark_events_applied)}** "
+        f"non-unit factors on those members, which is the "
+        f"{_num(benchmark.in_benchmark_share_count_events)} share-count events above plus "
+        f"**{_num(benchmark.in_benchmark_excluded_events)}** the benchmark leaves out ("
+        + _by_kind(benchmark.in_benchmark_excluded_by_kind) + "). Over the WHOLE factor table "
+        f"the same tally is {_num(benchmark.events_applied)} factors -- "
+        f"{_num(benchmark.share_count_events)} share-count plus "
+        f"{_num(benchmark.excluded_events)} excluded ("
+        + _by_kind(benchmark.excluded_by_kind) + ") -- stated here beside the benchmark's own "
+        "and labelled as what it is, exactly like the share-count pair above: the difference is "
+        "factors on symbols with no close on the first trade date, which move no rupee of "
+        "either portfolio. CONTEXT 4.2 gives a dividend at or above "
         "2% of the cum close a factor of `1 - D/P_cum` and everything below it `k = 1`, so the "
         "mixed row credits the special distributions back into the benchmark while the ordinary "
         "ones stay out -- divided at a boundary the CA engine owns rather than an economic one. "
