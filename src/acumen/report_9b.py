@@ -1368,19 +1368,19 @@ def _section_what_this_is(add, *, run: RunData, capital_paise: int, register=Non
         "membership is a documented upgrade (OPEN-5).")
     add("")
     gate1p = _gate1p_share(register or {})
+    narrower = ("is not computable from the register this run read" if gate1p is None
+                else f"is {_pct(gate1p, 4)} over the settled universe")
     add("**The data era is 93.9317% USABLE, not 100% -- and that figure is ALL THREE GATES, not "
         "the price gate alone.** 93.9317% is CONTEXT 4.6 v1.6's coverage figure: the settled "
         "symbols' usable stored symbol-days over the WHOLE lake's stored days, so a day refused "
         "for having no candles, for failing the volume reconciliation, for failing price "
         "containment or for candle integrity is outside it equally. The narrower quantity "
         "section 9's `price-proven` column carries -- gate 1P alone, a day whose 1-minute prices "
-        "reconcile against the exchange's own bhavcopy -- is "
-        f"{'not computable from the register read here' if gate1p is None else _pct(gate1p, 4)} "
-        "over the settled universe. The two are different measurements of different "
-        "denominators, and averaging the section-9 column will never reach the headline. Refused "
-        f"days are counted, never traded: section 3a partitions all {_num(run.walked)} walked "
-        "days and section 9 carries each symbol's own coverage beside its figures; the residual "
-        "is disclosed in the register, not chased.")
+        f"reconcile against the exchange's own bhavcopy -- {narrower}. The two are different "
+        "measurements over different denominators, and averaging the section-9 column will never "
+        "reach the headline. Refused days are counted, never traded: section 3a partitions all "
+        f"{_num(run.walked)} walked days and section 9 carries each symbol's own coverage beside "
+        "its figures; the residual is disclosed in the register, not chased.")
     add("")
     add(f"**Q44 is unconfirmed.** The manifest carries, verbatim: *\"PENDING TRADER CONFIRMATION "
         "OF Q44 (gap-rule example, POC 2032)\"*. If his answer surprises, CONTEXT 3.4 changes, "
@@ -2047,11 +2047,11 @@ def _section_benchmark(add, *, benchmark: BenchmarkPair, columns, **_) -> None:
     add(f"* **The one stated line the ruling asks for, on the mixed reading.** The mixed row "
         f"applies all {_num(benchmark.events_applied)} non-unit factors in the table, which is "
         f"the {_num(benchmark.share_count_events)} share-count events plus "
-        f"**{_num(benchmark.excluded_events)}** that are not share-count events at all ("
+        f"**{_num(benchmark.excluded_events)}** the benchmark leaves out ("
         + _by_kind(benchmark.excluded_by_kind) + "). CONTEXT 4.2 gives a dividend at or above "
         "2% of the cum close a factor of `1 - D/P_cum` and everything below it `k = 1`, so the "
         "mixed row credits the special distributions back into the benchmark while the ordinary "
-        "ones stay out -- a split at a threshold the CA engine owns, not an economic boundary. "
+        "ones stay out -- divided at a boundary the CA engine owns rather than an economic one. "
         f"It is worth **{_pct(benchmark.adjusted.total_return - benchmark.share_count.total_return)}** "
         f"of opening capital, i.e. "
         f"{_pct(_share_of(benchmark.adjusted.total_return - benchmark.share_count.total_return, benchmark.adjusted.total_return))} "
