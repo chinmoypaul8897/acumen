@@ -37,7 +37,7 @@ import hashlib
 import json
 from collections import Counter
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from fractions import Fraction
 from pathlib import Path
@@ -91,16 +91,30 @@ Q17_OUTAGE_NOTE: str = (
     "counted rather than removing the day"
 )
 
-#: The one thing CONTEXT 7-E13 does not say about its own benchmark, raised as a question rather
-#: than decided (CLAUDE.md rule 1). Printed beside both readings.
-BENCHMARK_STOP: str = (
-    "QUESTIONS.md Q-23 (class A, OPEN, raised by this session): CONTEXT 7-E13 defines the "
-    "benchmark as an equal-weight PORTFOLIO of the traded universe 'bought at first trade date's "
-    "close, held to period end' but does not say which price domain its closes are in. Over ten "
-    "years that is not a detail: a holder's SHARE COUNT follows every split and bonus, and 107 "
-    "such events sit inside this span. Both readings are MEASURED below and NEITHER is published "
-    "as the benchmark until the architect rules"
+#: The one thing CONTEXT 7-E13 does not say about its own benchmark -- the PRICE DOMAIN of its
+#: closes -- was raised as QUESTIONS.md Q-23 under CLAUDE.md rule 1 and is now RULED. The ruling
+#: and its same-day refinement are quoted VERBATIM beside the readings they decide, which is how
+#: every architect ruling travels in this repo. The figures inside the quote are the architect's
+#: own words about this run; every figure the section PRINTS is computed from the run beneath it.
+BENCHMARK_RULING: str = (
+    "ARCHITECT'S RULING (06-Aug-2026), QUESTIONS.md Q-23: the buy&hold benchmark is the "
+    "SHARE-COUNT-ADJUSTED construction -- buy-and-hold holds UNITS, which multiply through "
+    "bonuses/splits; fixed-unit raw closes falsify wealth at every event. Dividends excluded and "
+    "stated. Both figures remain printed; the adjusted one is THE benchmark. ARCHITECT'S "
+    "REFINEMENT (06-Aug-2026), Q-23 'and stated': the benchmark applies SHARE-COUNT EVENTS ONLY "
+    "(125 factors) = 466.67% -- all cash distributions excluded uniformly, ordinary and special "
+    "alike; the mixed 491.90% (special dividends credited) remains printed with one stated line. "
+    "Uniform exclusion is the principle; the threshold-mixed figure was an artifact of the CA "
+    "engine's 2% rule, not an economic choice. Q-23 CLOSED"
 )
+
+#: The event kinds that multiply a HOLDER'S UNITS, and therefore the only ones THE benchmark
+#: applies (the Q-23 refinement). Everything else in the factor table is a cash distribution or
+#: a price event a unit holder does not participate in: CONTEXT 4.2 gives an ordinary dividend
+#: ``k = 1`` and a special dividend ``k = 1 - D/P_cum``, and the refinement excludes both
+#: UNIFORMLY rather than at the 2% threshold, which is the CA engine's boundary and not an
+#: economic one.
+SHARE_COUNT_KINDS: tuple[str, ...] = ("bonus", "split", "rights")
 
 
 # --- reading the run ---------------------------------------------------------------------------
@@ -599,15 +613,31 @@ def _window_totals(rows: Iterable[Mapping]) -> dict[str, int]:
 
 @dataclass(frozen=True)
 class BenchmarkPair:
-    """CONTEXT 7-E13's benchmark computed in BOTH price domains, and neither published."""
+    """CONTEXT 7-E13's benchmark as the Q-23 ruling defines it, and the readings printed beside it.
+
+    ``share_count`` is THE benchmark: the first close brought into the last close's scale through
+    the run's own BONUS / SPLIT / RIGHTS factors alone. ``adjusted`` is the same construction with
+    every non-unit factor applied, which additionally credits the special dividends CONTEXT 4.2
+    gives a factor -- the figure the ruling named before its refinement, kept printed and labelled.
+    ``raw`` is the unadjusted close-to-close reading, kept for contrast.
+    """
 
     raw: pf.Benchmark
     adjusted: pf.Benchmark
+    share_count: pf.Benchmark
     first_day: date
     last_day: date
     adjusted_symbols: int
     events_applied: int
-    stop: str = BENCHMARK_STOP
+    share_count_symbols: int
+    share_count_events: int
+    excluded_by_kind: dict[str, int] = field(default_factory=dict)
+    ruling: str = BENCHMARK_RULING
+
+    @property
+    def excluded_events(self) -> int:
+        """Non-unit factors THE benchmark does not apply -- the cash distributions."""
+        return sum(self.excluded_by_kind.values())
 
 
 def benchmark_pair(
@@ -619,21 +649,26 @@ def benchmark_pair(
     last_day: date,
     initial_capital_paise: int,
 ) -> BenchmarkPair:
-    """Buy & hold, measured on RAW closes and on share-count-ADJUSTED closes.
+    """Buy & hold: THE benchmark, plus the mixed and raw readings printed beside it.
 
     E13 fixes the construction (equal weight, bought at the first trade date's close, held to the
     period end) and is silent on the domain. A ten-year hold cannot be silent about it: a 1:1
     bonus halves the quoted price and doubles the holder's shares, so the raw reading understates
-    that symbol by exactly the factor, while the adjusted reading brings the first close into the
-    last close's scale through the run's OWN factor table -- the same ``P x pending factors`` the
-    bias engine applies (CONTEXT 3.2 / 7-E11). Both are computed; the report publishes neither
-    as "the benchmark" while Q-23 is open.
+    that symbol by exactly the factor. The Q-23 ruling settles it -- a held portfolio's UNITS are
+    what multiply -- and its refinement settles which factors move units: the
+    :data:`SHARE_COUNT_KINDS` only, with every cash distribution excluded UNIFORMLY.
+
+    All three readings scale the first close by the run's OWN factor table, which is the same
+    ``P x pending factors`` the bias engine applies (CONTEXT 3.2 / 7-E11) and never a second
+    source. They differ only in WHICH of that table's factors they apply.
     """
     raw_closes: dict[str, dict[date, int]] = {}
     adjusted_closes: dict[str, dict[date, int]] = {}
+    share_closes: dict[str, dict[date, int]] = {}
     per_symbol = manifest["factor_table"]["per_symbol"]
-    adjusted_symbols = 0
-    events = 0
+    adjusted_symbols = share_count_symbols = 0
+    events = share_events = 0
+    excluded: Counter = Counter()
     for symbol in symbols:
         frame = daily_store.daily(symbol, first_day, last_day)
         series = {row.trade_date: int(row.close_paise) for row in frame.itertuples()}
@@ -641,32 +676,50 @@ def benchmark_pair(
             continue
         raw_closes[symbol] = series
         factor = Fraction(1)
-        applied = 0
+        share_factor = Fraction(1)
+        applied = share_applied = 0
         for entry in per_symbol.get(symbol, {}).get("in_span", ()):
             ex = date.fromisoformat(entry["ex_date"])
             k = Fraction(entry["k"])
-            if first_day < ex <= last_day and k != 1:
-                factor *= k
-                applied += 1
+            if not (first_day < ex <= last_day and k != 1):
+                continue
+            factor *= k
+            applied += 1
+            if entry.get("kind") in SHARE_COUNT_KINDS:
+                share_factor *= k
+                share_applied += 1
+            else:
+                excluded[str(entry.get("kind"))] += 1
         if applied:
             adjusted_symbols += 1
             events += applied
+        if share_applied:
+            share_count_symbols += 1
+            share_events += share_applied
         first_close = series.get(first_day)
         if first_close is None:
             adjusted_closes[symbol] = series
+            share_closes[symbol] = series
             continue
         scaled = dict(series)
         scaled[first_day] = int(Fraction(first_close) * factor)
         adjusted_closes[symbol] = scaled
+        share_scaled = dict(series)
+        share_scaled[first_day] = int(Fraction(first_close) * share_factor)
+        share_closes[symbol] = share_scaled
+    hold = dict(first_day=first_day, last_day=last_day,
+                initial_capital_paise=initial_capital_paise)
     return BenchmarkPair(
-        raw=pf.buy_and_hold(raw_closes, first_day=first_day, last_day=last_day,
-                            initial_capital_paise=initial_capital_paise),
-        adjusted=pf.buy_and_hold(adjusted_closes, first_day=first_day, last_day=last_day,
-                                 initial_capital_paise=initial_capital_paise),
+        raw=pf.buy_and_hold(raw_closes, **hold),
+        adjusted=pf.buy_and_hold(adjusted_closes, **hold),
+        share_count=pf.buy_and_hold(share_closes, **hold),
         first_day=first_day,
         last_day=last_day,
         adjusted_symbols=adjusted_symbols,
         events_applied=events,
+        share_count_symbols=share_count_symbols,
+        share_count_events=share_events,
+        excluded_by_kind=dict(sorted(excluded.items())),
     )
 
 
@@ -729,6 +782,11 @@ class RefusalClass:
     evidence: str
     trades_found: int
     net_paise: int
+    #: How many of this class's ``rows`` the crashed run actually walked -- the DENOMINATOR the
+    #: trade count was measured over. REVIEW_9B_REPORT finding Q6: only 103 of 204 shards
+    #: survive, so a reader who divides ``trades_found`` by ``rows`` divides by the wrong base.
+    days_measured: int = 0
+    priced: bool = False
 
 
 def price_refusals(run: RunData, crashed: CrashedCheck) -> tuple[RefusalClass, ...]:
@@ -750,10 +808,12 @@ def price_refusals(run: RunData, crashed: CrashedCheck) -> tuple[RefusalClass, .
     for reason, rows in sorted(run.reasons.items(), key=lambda kv: (-kv[1], kv[0])):
         cause = evidence_for.get(reason)
         lost = crashed.lost_trades.get(cause, ()) if cause else ()
+        measured = crashed.by_cause.get(cause, 0) if cause else 0
         if cause:
             evidence = (
-                f"the crashed run's 103 retained shards walked these days under the pre-ruling "
-                f"code; {len(lost)} of them executed a trade there"
+                f"{crashed.shards} of the crashed run's shards survive, and they walked "
+                f"{measured} of these {rows} days under the pre-ruling code; {len(lost)} of "
+                f"those {measured} executed a trade there"
             )
         else:
             evidence = "none -- the crashed run refused these days for the same reason"
@@ -765,9 +825,116 @@ def price_refusals(run: RunData, crashed: CrashedCheck) -> tuple[RefusalClass, .
                 evidence=evidence,
                 trades_found=len(lost),
                 net_paise=sum(r["net_pnl_paise"] for r in lost),
+                days_measured=measured,
+                priced=cause is not None,
             )
         )
     return tuple(out)
+
+
+# --- REVIEW_9B_REPORT Q5 and Q7: two quantities that were not well defined --------------------
+
+
+@dataclass(frozen=True)
+class LargestTies:
+    """The trades that TIE at a column's largest win (or largest loss), and what they are worth.
+
+    A fixed-R strategy manufactures ties by construction: a target pays ``qty x 3 x risk`` and a
+    stop pays ``-qty x risk``, so thousands of trades land on the same rupee figure and the row
+    order alone decides which of them a single-trade percentage is taken from. The rupee extreme
+    is a fact; ``net / notional`` over one arbitrary member of the tied set is not. This carries
+    the whole tied set instead: how many there are, and the RANGE of the percentage across them
+    (REVIEW_9B_REPORT finding Q5).
+    """
+
+    extreme_paise: int | None
+    ties: int
+    min_pct_of_notional: Fraction | None
+    max_pct_of_notional: Fraction | None
+    min_notional_paise: int | None
+    max_notional_paise: int | None
+
+    @property
+    def is_empty(self) -> bool:
+        return self.extreme_paise is None
+
+
+EMPTY_TIES: LargestTies = LargestTies(None, 0, None, None, None, None)
+
+
+def largest_ties(rows: Sequence[bt.LedgerRow], *, winners: bool) -> LargestTies:
+    """Every executed trade that ties at the largest win (``winners``) or largest loss. PURE."""
+    trades = pf.executed(rows)
+    pot = [
+        row for row in trades
+        if (row.net_pnl_paise > 0 if winners else row.net_pnl_paise < 0)
+    ]
+    if not pot:
+        return EMPTY_TIES
+    extreme = max(row.net_pnl_paise for row in pot) if winners else min(
+        row.net_pnl_paise for row in pot
+    )
+    tied = [row for row in pot if row.net_pnl_paise == extreme]
+    priced = [row for row in tied if row.notional_paise]
+    ratios = sorted(Fraction(row.net_pnl_paise, row.notional_paise) for row in priced)
+    notionals = sorted(row.notional_paise for row in priced)
+    return LargestTies(
+        extreme_paise=extreme,
+        ties=len(tied),
+        min_pct_of_notional=ratios[0] if ratios else None,
+        max_pct_of_notional=ratios[-1] if ratios else None,
+        min_notional_paise=notionals[0] if notionals else None,
+        max_notional_paise=notionals[-1] if notionals else None,
+    )
+
+
+def _column_ties(run: RunData) -> dict[str, tuple[LargestTies, LargestTies]]:
+    """(largest-win ties, largest-loss ties) for each of E13's three columns."""
+    return {
+        label: (largest_ties(rows, winners=True), largest_ties(rows, winners=False))
+        for label, rows in (("All", run.executed),
+                            ("Long", pf.for_side(run.executed, sig.LONG)),
+                            ("Short", pf.for_side(run.executed, sig.SHORT)))
+    }
+
+
+def concurrency_closing_first(rows: Sequence[bt.LedgerRow]) -> pf.ConcurrencyPeak:
+    """Max concurrency under the OTHER convention: a position is closed AT its exit mark. PURE.
+
+    :func:`acumen.portfolio.disclosures` processes an OPEN before a CLOSE at the same stamp, so a
+    position closing at T is still counted as open at T -- the pessimistic reading, and the only
+    one that cannot understate what the trader's capital would have had to carry. The 15-minute
+    equity path uses the other convention, because a trade's marks END at its exit candle.
+
+    Both are defensible and they do not agree, so the report prints BOTH and the definitions
+    block names the one the headline figure uses (REVIEW_9B_REPORT finding Q7). This is the same
+    sweep as ``disclosures``' with the event order reversed at a shared stamp, and nothing else.
+    """
+    events: list[tuple[datetime, int, int, str]] = []
+    for row in pf.executed(rows):
+        if row.entry_close_stamp is None:
+            continue
+        exit_stamp = row.exit_close_stamp or row.entry_close_stamp
+        events.append((exit_stamp, 0, -row.notional_paise, row.symbol))
+        events.append((row.entry_close_stamp, 1, row.notional_paise, row.symbol))
+    events.sort(key=lambda event: (event[0], event[1]))
+
+    live: dict[str, int] = {}
+    positions = notional = 0
+    best = pf.ConcurrencyPeak(0, 0, None)
+    for stamp, kind, delta, symbol in events:
+        if kind == 1:
+            positions += 1
+            live[symbol] = live.get(symbol, 0) + 1
+        else:
+            positions -= 1
+            live[symbol] = live.get(symbol, 0) - 1
+            if live[symbol] <= 0:
+                live.pop(symbol, None)
+        notional += delta
+        if kind == 1 and positions > best.positions:
+            best = pf.ConcurrencyPeak(positions, notional, stamp, tuple(sorted(live)))
+    return best
 
 
 # --- assembly -------------------------------------------------------------------------------------
@@ -858,6 +1025,8 @@ def build_everything(
         paths_reconciling=reconciling_paths,
         refusals=price_refusals(run, crashed),
         daily_counts=_daily_count_distribution(series),
+        ties=_column_ties(run),
+        path_concurrency=concurrency_closing_first(run.executed),
     )
 
 
@@ -988,6 +1157,14 @@ def _num(value: int) -> str:
     return f"{value:,}"
 
 
+def _join(names: Sequence[str]) -> str:
+    """`a`, `a and b`, `a, b and c` -- so a per-column sentence reads like one."""
+    names = list(names)
+    if len(names) <= 1:
+        return "".join(names)
+    return ", ".join(names[:-1]) + " and " + names[-1]
+
+
 def _decimal(value: Decimal | None, places: int = 4) -> str:
     if value is None:
         return "undefined"
@@ -1086,6 +1263,8 @@ def render_markdown(
     paths_reconciling: int,
     refusals: Sequence[RefusalClass],
     daily_counts: Sequence[tuple[int, int]],
+    ties: Mapping[str, tuple[LargestTies, LargestTies]],
+    path_concurrency: pf.ConcurrencyPeak,
 ) -> str:
     """The whole report. PURE -- every input above was read by :func:`build_everything`."""
     lines: list[str] = []
@@ -1097,7 +1276,8 @@ def render_markdown(
         register=register, benchmark=benchmark, crosses_zero=crosses_zero,
         paths_built=paths_built,
         path_marks=path_marks, paths_reconciling=paths_reconciling, refusals=refusals,
-        daily_counts=daily_counts, config=config,
+        daily_counts=daily_counts, config=config, ties=ties,
+        path_concurrency=path_concurrency,
     )
     for section in (
         _section_head, _section_what_this_is, _section_the_run, _section_reconciliation,
@@ -1126,7 +1306,22 @@ def _section_head(add, *, run: RunData, **_) -> None:
     add("")
 
 
-def _section_what_this_is(add, *, run: RunData, capital_paise: int, **_) -> None:
+def _gate1p_share(register: Mapping[str, bt.ResidualEntry]) -> Fraction | None:
+    """Gate 1P ALONE, over the settled universe: proven days / days with an oracle to prove them.
+
+    Section 9's ``price-proven`` column is this quantity per symbol; section 1's headline figure
+    is a different one (all three gates, over the whole lake). REVIEW_9B_REPORT finding Q4: one
+    word was carrying both, so a reader who averaged the column could never reach the headline.
+    Computed from the register the report already read rather than typed beside it.
+    """
+    settled = [entry for entry in register.values() if entry.status == "settled"]
+    total = sum(entry.gate1p_total for entry in settled)
+    if total <= 0:
+        return None
+    return Fraction(sum(entry.gate1p_pass for entry in settled), total)
+
+
+def _section_what_this_is(add, *, run: RunData, capital_paise: int, register=None, **_) -> None:
     add("## 1. What this is -- and the seven things it is not")
     add("")
     add("This is the result of the strategy the trader specified, applied without discretion to "
@@ -1172,11 +1367,20 @@ def _section_what_this_is(add, *, run: RunData, capital_paise: int, **_) -> None
         "an engineering default disclosed rather than a trader instruction. Point-in-time "
         "membership is a documented upgrade (OPEN-5).")
     add("")
-    add("**The data era is 93.9317% price-proven, not 100%.** The gates refuse a day whose "
-        "1-minute prices cannot be reconciled against the exchange's own bhavcopy, and refused "
-        "days are counted, never traded. Section 3a partitions all "
-        f"{_num(run.walked)} walked days and section 9 carries each symbol's own coverage beside "
-        "its figures; the residual is disclosed in the register, not chased.")
+    gate1p = _gate1p_share(register or {})
+    add("**The data era is 93.9317% USABLE, not 100% -- and that figure is ALL THREE GATES, not "
+        "the price gate alone.** 93.9317% is CONTEXT 4.6 v1.6's coverage figure: the settled "
+        "symbols' usable stored symbol-days over the WHOLE lake's stored days, so a day refused "
+        "for having no candles, for failing the volume reconciliation, for failing price "
+        "containment or for candle integrity is outside it equally. The narrower quantity "
+        "section 9's `price-proven` column carries -- gate 1P alone, a day whose 1-minute prices "
+        "reconcile against the exchange's own bhavcopy -- is "
+        f"{'not computable from the register read here' if gate1p is None else _pct(gate1p, 4)} "
+        "over the settled universe. The two are different measurements of different "
+        "denominators, and averaging the section-9 column will never reach the headline. Refused "
+        f"days are counted, never traded: section 3a partitions all {_num(run.walked)} walked "
+        "days and section 9 carries each symbol's own coverage beside its figures; the residual "
+        "is disclosed in the register, not chased.")
     add("")
     add(f"**Q44 is unconfirmed.** The manifest carries, verbatim: *\"PENDING TRADER CONFIRMATION "
         "OF Q44 (gap-rule example, POC 2032)\"*. If his answer surprises, CONTEXT 3.4 changes, "
@@ -1387,9 +1591,55 @@ def _section_definitions(add, *, run: RunData, capital_paise: int, columns, **_)
         "carries the Rs 100 round trip. They bracket a trade's GROSS PnL, not its net.")
     add("* **Notional.** `qty x entry price`. A trade's own percentage return is "
         "`net / notional`, which is the only percentage a single trade has.")
+    add("* **Concurrency, and which convention the headline uses.** A position OPENS at its "
+        "entry candle's close and CLOSES at its exit candle's close. When one trade opens at the "
+        "same 15-minute stamp another closes, section 11's `max concurrent positions` counts the "
+        "OPEN first -- so a position closing at T is still counted as open at T. That is the "
+        "pessimistic reading and the only one that cannot understate what the trader's capital "
+        "would have had to carry. The 15-minute equity path uses the other convention, because a "
+        "trade's marks END at its exit candle, and it therefore reports a smaller maximum. Both "
+        "are printed in section 11 rather than one being chosen silently.")
     add("* **Rupees.** All money is exact integer paise internally and is printed to the paisa. "
         "No float is produced anywhere in the computation (CONTEXT 7-E11).")
     add("")
+
+
+def _partial_years(days: Sequence[date]) -> frozenset[str]:
+    """Which calendar years the RUN'S SPAN does not cover end to end. PURE.
+
+    Only the first and the last year of the index can be partial: every year between them is
+    walked in full by construction. A year is partial when the span starts after 1 January or
+    ends before 31 December of it -- measured from the index, never a list of years typed here.
+    Section 8 carries this caveat in prose; REVIEW_9B_REPORT finding Q3 is that section 5, which
+    is the section a reader reads FIRST, named a partial year as the best year without it.
+    """
+    if not days:
+        return frozenset()
+    out: set[str] = set()
+    if days[0] > date(days[0].year, 1, 1):
+        out.add(str(days[0].year))
+    if days[-1] < date(days[-1].year, 12, 31):
+        out.add(str(days[-1].year))
+    return frozenset(out)
+
+
+def _year_extreme_cell(row: YearRow, years: Sequence[YearRow], partial: frozenset[str],
+                       *, best: bool) -> str:
+    """One of section 5's best/worst-year cells, with the partial-year marker INLINE."""
+    cell = f"{row.year}: {_money(row.metrics.net_pnl_paise)}"
+    if row.year not in partial:
+        return cell
+    full = [year for year in years if year.year not in partial]
+    pick = (max(full, key=lambda y: y.metrics.net_pnl_paise) if best
+            else min(full, key=lambda y: y.metrics.net_pnl_paise)) if full else None
+    word = "best" if best else "worst"
+    cell += (f" -- **a PARTIAL year**, {_num(row.metrics.trading_days)} walked days "
+             f"({_day(row.metrics.first_day)} .. {_day(row.metrics.last_day)}), neither "
+             "annualized nor comparable to a full one")
+    if pick is not None:
+        cell += (f"; the {word} FULL year is {pick.year} at "
+                 f"{_money(pick.metrics.net_pnl_paise)}")
+    return cell
 
 
 def _section_headline(add, *, run: RunData, columns, curve, years, capital_paise: int,
@@ -1397,6 +1647,7 @@ def _section_headline(add, *, run: RunData, columns, curve, years, capital_paise
     m = columns["All"]
     best = max(years, key=lambda y: y.metrics.net_pnl_paise)
     worst = min(years, key=lambda y: y.metrics.net_pnl_paise)
+    partial = _partial_years(run.days)
     add("## 5. The headline")
     add("")
     add("| | |")
@@ -1411,8 +1662,8 @@ def _section_headline(add, *, run: RunData, columns, curve, years, capital_paise
         f"{_path_excursion(m.intraday_max_drawdown, observations=m.intraday_observations, recovery_word='recovered')} |")
     add(f"| CAGR | {_cagr(m)} |")
     add(f"| Return on initial capital | {_pct(m.return_on_initial_capital)} |")
-    add(f"| Best year | {best.year}: {_money(best.metrics.net_pnl_paise)} |")
-    add(f"| Worst year | {worst.year}: {_money(worst.metrics.net_pnl_paise)} |")
+    add(f"| Best year | {_year_extreme_cell(best, years, partial, best=True)} |")
+    add(f"| Worst year | {_year_extreme_cell(worst, years, partial, best=False)} |")
     add(f"| Final equity | {_money(m.final_equity_paise)} on "
         f"{_money(m.initial_capital_paise)} of capital |")
     add("")
@@ -1447,7 +1698,40 @@ def _cagr(metrics: pf.Metrics) -> str:
     return _pct(metrics.cagr)
 
 
-def _section_e13(add, *, columns: Mapping[str, pf.Metrics], crosses_zero, **_) -> None:
+#: What the tie rows say when the tied set was not supplied to the renderer. The same shape as
+#: :data:`acumen.portfolio.INTRADAY_PATH_NOT_SUPPLIED`: a quantity that is not available says so
+#: rather than printing an arbitrary member of the set it could not see.
+TIES_NOT_SUPPLIED: str = (
+    "not supplied -- the tied set is measured over the ledger's own executed rows and was not "
+    "passed to this renderer"
+)
+
+
+def _ties_cell(ties: Mapping[str, tuple[LargestTies, LargestTies]] | None, label: str,
+               *, winners: bool) -> str:
+    """The percentage a largest-win / largest-loss row can actually justify (finding Q5).
+
+    Under ties the single-trade percentage is decided by the ledger's row order, so what is
+    printed is the RANGE across every trade that ties at that rupee figure, with the size of the
+    tied set beside it. One trade at the extreme still prints one percentage, and says so.
+    """
+    if ties is None or label not in ties:
+        return TIES_NOT_SUPPLIED
+    tied = ties[label][0 if winners else 1]
+    if tied.is_empty:
+        return "-"
+    if tied.min_pct_of_notional is None:
+        return f"no notional recorded on the {_num(tied.ties)} trade(s) at this figure"
+    if tied.ties == 1:
+        return f"{_pct(tied.min_pct_of_notional, 4)} -- one trade at this figure, no tie"
+    return (
+        f"{_pct(tied.min_pct_of_notional, 4)} .. {_pct(tied.max_pct_of_notional, 4)} "
+        f"across the {_num(tied.ties)} trades tied at {_money(tied.extreme_paise)} "
+        f"(notionals {_money(tied.min_notional_paise)} .. {_money(tied.max_notional_paise)})"
+    )
+
+
+def _section_e13(add, *, columns: Mapping[str, pf.Metrics], crosses_zero, ties=None, **_) -> None:
     order = ("All", "Long", "Short")
     add("## 6. CONTEXT 7-E13, in full -- All / Long / Short")
     add("")
@@ -1473,11 +1757,13 @@ def _section_e13(add, *, columns: Mapping[str, pf.Metrics], crosses_zero, **_) -
         ("Avg loss", lambda m: _money(m.avg_loss_paise)),
         ("Avg profit / avg loss", lambda m: _ratio(m.avg_profit_over_avg_loss)),
         ("Largest win", lambda m: _money(m.largest_win_paise)),
-        ("Largest win, % of its own notional", lambda m: _pct(m.largest_win_pct_of_notional)),
+        ("Largest win, % of notional -- RANGE across the tied trades",
+         lambda m: _ties_cell(ties, m.label, winners=True)),
         ("Largest win, % of gross profit",
          lambda m: _pct(m.largest_win_pct_of_gross_profit, 5)),
         ("Largest loss", lambda m: _money(m.largest_loss_paise)),
-        ("Largest loss, % of its own notional", lambda m: _pct(m.largest_loss_pct_of_notional)),
+        ("Largest loss, % of notional -- RANGE across the tied trades",
+         lambda m: _ties_cell(ties, m.label, winners=False)),
         ("Largest loss, % of gross loss",
          lambda m: _pct(m.largest_loss_pct_of_gross_loss, 5)),
         ("Return on initial capital", lambda m: _pct(m.return_on_initial_capital)),
@@ -1502,6 +1788,14 @@ def _section_e13(add, *, columns: Mapping[str, pf.Metrics], crosses_zero, **_) -
         "that is what one basis and one population buys, and a reader can check it on any column "
         "with a calculator.")
     add("")
+    add("**Why the two percent-of-notional rows carry a RANGE.** A fixed-R book manufactures "
+        "TIES: the target pays `qty x 3 x risk` and the stop pays `-qty x risk`, so thousands of "
+        "trades land on exactly the same rupee figure while their notionals differ by three "
+        "orders of magnitude. A single trade's `net / notional` at the extreme would then be "
+        "decided by the ledger's row order and by nothing on this page, so what is printed is "
+        "the range over EVERY trade tied at that figure, with the size of the tied set beside "
+        "it. The rupee extremes above them are exact and unaffected.")
+    add("")
     add("### 6a. Outliers, on both branches")
     add("")
     add("The architect's GO ruling, condition (3): one format on both branches, so a run with no "
@@ -1520,10 +1814,40 @@ def _section_e13(add, *, columns: Mapping[str, pf.Metrics], crosses_zero, **_) -
         add(f"* Below the lower fence: {_num(out.below_count)} worth "
             f"{_money(out.below_net_paise)} = {_pct(out.share_of_gross_loss)} of gross loss.")
         add("")
+    quiet = [name for name in order if columns[name].outliers.count == 0]
+    biting = [name for name in order if columns[name].outliers.count]
     add("A fixed-R strategy bounds its own trades -- a stop pays `-qty x risk` and a target pays "
-        "`qty x 3 x risk`, so before costs every trade lands in a narrow band and the fences sit "
-        "outside it. An outlier count is therefore a statement about the SIZING rule as much as "
-        "about the market.")
+        "`qty x 3 x risk`, so before costs every trade lands in a narrow band. Whether the "
+        "Tukey fences sit OUTSIDE that band is then a property of the distribution and not of "
+        "the sizing rule, and it does not hold on every column here, so the claim is made per "
+        "column rather than in general (REVIEW_9B_REPORT finding Q1).")
+    add("")
+    if quiet:
+        add(f"* **{_join(quiet)}**: the fences do sit outside the band -- "
+            + "; ".join(
+                f"{name} spans [{_money(columns[name].outliers.lower_fence_paise)}, "
+                f"{_money(columns[name].outliers.upper_fence_paise)}] and contains every one of "
+                f"its {_num(columns[name].outliers.population)} trades"
+                for name in quiet
+            ) + ".")
+    for name in biting:
+        out = columns[name].outliers
+        largest_win = columns[name].largest_win_paise
+        pierced = (" -- BELOW this column's largest win of " + _money(largest_win) + " --"
+                   if out.upper_fence_paise < largest_win else " --")
+        add(f"* **{name}**: the fences do NOT. Q3 sits at {_money(out.q3_paise)} and the IQR is "
+            f"{_money(out.iqr_paise)}, which puts the upper fence at "
+            f"{_money(out.upper_fence_paise)}{pierced} so "
+            f"**{_num(out.count)}** of its {_num(out.population)} trades are outliers, worth "
+            f"{_money(out.net_paise)}: {_num(out.above_count)} above the upper fence "
+            f"({_pct(out.share_of_gross_profit)} of this column's gross profit) and "
+            f"{_num(out.below_count)} below the lower one "
+            f"({_pct(out.share_of_gross_loss)} of its gross loss). A column whose losers "
+            "outnumber its winners far enough pulls Q3 down below the target payout, and the "
+            "upper fence comes down with it.")
+    add("")
+    add("An outlier count is therefore a statement about the SIZING rule and about the "
+        "DISTRIBUTION the sizing rule met, and the two do not always agree.")
     add("")
 
 
@@ -1677,7 +2001,7 @@ def _section_symbols(add, *, symbols: Mapping[str, pf.Metrics], register, run: R
 
 def _section_benchmark(add, *, benchmark: BenchmarkPair, columns, **_) -> None:
     m = columns["All"]
-    add("## 10. Buy & hold -- BOTH readings, and neither published")
+    add("## 10. Buy & hold -- THE benchmark, and the two readings printed beside it")
     add("")
     add("CONTEXT 7-E13 defines the benchmark as an *equal-weight portfolio of the traded "
         "universe, bought at first trade date's close, held to period end*. It fixes the "
@@ -1686,20 +2010,28 @@ def _section_benchmark(add, *, benchmark: BenchmarkPair, columns, **_) -> None:
         "1:1 bonus halves the quoted price while doubling the shares held and the raw reading "
         "understates that symbol by exactly the factor.")
     add("")
-    add("**This report does not decide it.** Under CLAUDE.md's STOP rule the silence is a "
-        "class-A question, raised as **Q-23**, and both readings are MEASURED here so the "
-        "architect can rule with the numbers in hand rather than in the abstract.")
+    add("**The architect has ruled it (QUESTIONS.md Q-23, 06-Aug-2026, CLOSED).** THE BENCHMARK "
+        "is the SHARE-COUNT reading: buy-and-hold holds UNITS, and units multiply through "
+        "bonuses, splits and rights issues and through nothing else. Cash distributions are "
+        "excluded UNIFORMLY -- ordinary and special alike -- so the benchmark is a price-and-"
+        "units return on the same terms as the strategy's own PnL, which never receives a "
+        "distribution either.")
     add("")
-    add(f"> {benchmark.stop}.")
+    add(f"> {benchmark.ruling}.")
     add("")
     add("| Reading | Start value | End value | Total return |")
     add("|---|---:|---:|---:|")
-    add(f"| RAW closes, exactly as stored | {_money(benchmark.raw.start_value_paise)} | "
-        f"{_money(benchmark.raw.end_value_paise)} | {_pct(benchmark.raw.total_return)} |")
-    add(f"| Share-count ADJUSTED, through the run's own factor table | "
-        f"{_money(benchmark.adjusted.start_value_paise)} | "
+    add(f"| **THE BENCHMARK -- share-count events only (bonus / split / rights)** | "
+        f"{_money(benchmark.share_count.start_value_paise)} | "
+        f"**{_money(benchmark.share_count.end_value_paise)}** | "
+        f"**{_pct(benchmark.share_count.total_return)}** |")
+    add(f"| Mixed -- share-count events AND the special dividends CONTEXT 4.2 gives a factor "
+        f"(NOT the benchmark) | {_money(benchmark.adjusted.start_value_paise)} | "
         f"{_money(benchmark.adjusted.end_value_paise)} | "
         f"{_pct(benchmark.adjusted.total_return)} |")
+    add(f"| RAW closes, exactly as stored -- no adjustment of any kind (NOT the benchmark) | "
+        f"{_money(benchmark.raw.start_value_paise)} | "
+        f"{_money(benchmark.raw.end_value_paise)} | {_pct(benchmark.raw.total_return)} |")
     add(f"| The strategy, over the same window | {_money(m.initial_capital_paise)} | "
         f"{_money(m.final_equity_paise)} | {_pct(m.return_on_initial_capital)} |")
     add("")
@@ -1707,19 +2039,48 @@ def _section_benchmark(add, *, benchmark: BenchmarkPair, columns, **_) -> None:
         f"executed trade -- and held to **{benchmark.last_day.isoformat()}**.")
     add(f"* Symbols in the benchmark: **{_num(len(benchmark.raw.symbols))}**. "
         f"{benchmark.raw.note}.")
-    add(f"* The adjustment touches **{_num(benchmark.adjusted_symbols)}** symbols and applies "
-        f"**{_num(benchmark.events_applied)}** share-count factors, each one taken from the "
-        "factor table THIS RUN wired -- the same `P x pending factors` the bias engine applies "
-        "(CONTEXT 3.2 / 7-E11), never a second source.")
-    add("* Both readings are PRICE returns. Ordinary dividends carry `k = 1` under CONTEXT 4.2's "
-        "2% threshold and are not added back on either side, which matches the strategy's own "
-        "PnL: it never receives a dividend either.")
+    add(f"* **What THE BENCHMARK applies: {_num(benchmark.share_count_events)} share-count "
+        f"factors across {_num(benchmark.share_count_symbols)} symbols** -- every bonus, split "
+        "and rights factor inside the hold window and nothing else, each one taken from the "
+        "factor table THIS RUN wired, which is the same `P x pending factors` the bias engine "
+        "applies (CONTEXT 3.2 / 7-E11) and never a second source.")
+    add(f"* **The one stated line the ruling asks for, on the mixed reading.** The mixed row "
+        f"applies all {_num(benchmark.events_applied)} non-unit factors in the table, which is "
+        f"the {_num(benchmark.share_count_events)} share-count events plus "
+        f"**{_num(benchmark.excluded_events)}** that are not share-count events at all ("
+        + _by_kind(benchmark.excluded_by_kind) + "). CONTEXT 4.2 gives a dividend at or above "
+        "2% of the cum close a factor of `1 - D/P_cum` and everything below it `k = 1`, so the "
+        "mixed row credits the special distributions back into the benchmark while the ordinary "
+        "ones stay out -- a split at a threshold the CA engine owns, not an economic boundary. "
+        f"It is worth **{_pct(benchmark.adjusted.total_return - benchmark.share_count.total_return)}** "
+        f"of opening capital, i.e. "
+        f"{_pct(_share_of(benchmark.adjusted.total_return - benchmark.share_count.total_return, benchmark.adjusted.total_return))} "
+        "of its own figure. It is printed because it is the figure the ruling first named and "
+        "because a reader should be able to see the size of the difference; it is NOT the "
+        "benchmark.")
+    add("* **Dividends, uniformly.** THE BENCHMARK adds back no distribution of any kind, "
+        "neither the ordinary ones CONTEXT 4.2 leaves at `k = 1` nor the special ones it gives "
+        "a factor. That is the Q-23 refinement's principle -- uniform exclusion -- and it is "
+        "also what makes the comparison fair: the strategy's own PnL never receives a dividend.")
     add("")
+
+
+def _by_kind(counts: Mapping[str, int]) -> str:
+    if not counts:
+        return "none"
+    return "by event kind: " + ", ".join(f"{kind} {_num(n)}" for kind, n in sorted(counts.items()))
+
+
+def _share_of(part: Fraction | None, whole: Fraction | None) -> Fraction | None:
+    if part is None or not whole:
+        return None
+    return part / whole
 
 
 def _section_take_all(add, *, disclosures: pf.Disclosures, capital_flag_report, daily_counts,
                       refusals: Sequence[RefusalClass], run: RunData, capital_paise: int,
-                      crashed: CrashedCheck, **_) -> None:
+                      crashed: CrashedCheck, path_concurrency: pf.ConcurrencyPeak | None = None,
+                      **_) -> None:
     add("## 11. The take-all disclosures (CONTEXT 3.5, Round-3 Q40 option d)")
     add("")
     add("The trader's own answer requires these, and they are the price of the no-limits "
@@ -1729,9 +2090,14 @@ def _section_take_all(add, *, disclosures: pf.Disclosures, capital_flag_report, 
     peak_notional = disclosures.peak_simultaneous_notional
     add("| Disclosure | Value |")
     add("|---|---|")
-    add(f"| Max concurrent positions | **{_num(peak_positions.positions)}**, first reached "
-        f"{_stamp(peak_positions.at)}, carrying {_money(peak_positions.notional_paise)} of "
-        "notional |")
+    add(f"| Max concurrent positions (a close at the same stamp counted as still OPEN) | "
+        f"**{_num(peak_positions.positions)}**, first reached {_stamp(peak_positions.at)}, "
+        f"carrying {_money(peak_positions.notional_paise)} of notional |")
+    if path_concurrency is not None:
+        add(f"| Max concurrent positions (the 15-minute path's convention: closed AT its exit "
+            f"mark) | **{_num(path_concurrency.positions)}**, first reached "
+            f"{_stamp(path_concurrency.at)}, carrying "
+            f"{_money(path_concurrency.notional_paise)} of notional |")
     add(f"| Peak simultaneous notional | **{_money(peak_notional.notional_paise)}** at "
         f"{_stamp(peak_notional.at)}, across {_num(peak_notional.positions)} positions |")
     add(f"| That peak against the Rs 1,00,000 capital | "
@@ -1740,6 +2106,14 @@ def _section_take_all(add, *, disclosures: pf.Disclosures, capital_flag_report, 
     add(f"| Most trades in one day | {_num(disclosures.max_daily_trades)} |")
     add(f"| Executed trades | {_num(disclosures.total_executed)} |")
     add("")
+    if path_concurrency is not None:
+        add("**The two concurrency rows are two CONVENTIONS, not a disagreement.** They differ "
+            "only in what happens when one trade opens at the same 15-minute stamp another "
+            "closes: the first row counts the closing position as still open (the pessimistic "
+            "reading, and the one every other figure on this page is consistent with), the "
+            "second closes it at its exit mark, which is where its 15-minute marks actually "
+            "stop. Section 4 defines both; neither is a correction of the other.")
+        add("")
     add("**This is the disclosure that matters most on this page.** A portfolio that at its peak "
         f"held {_num(peak_notional.positions)} positions worth "
         f"{_money(peak_notional.notional_paise)} against Rs 1,00,000 of capital is not a "
@@ -1773,14 +2147,23 @@ def _section_take_all(add, *, disclosures: pf.Disclosures, capital_flag_report, 
         "reason this one does; pricing those would need a re-simulation that deliberately "
         "disables a gate, which this report does not do and does not estimate around.")
     add("")
-    add("| Refusal reason | Days | Share of the walk | Trades those days carried, measured | "
-        "Their net PnL | Evidence |")
-    add("|---|---:|---:|---:|---:|---|")
+    add("| Refusal reason | Days | Share of the walk | Days with a counterfactual | "
+        "Trades they carried | Their net PnL | Evidence |")
+    add("|---|---:|---:|---:|---:|---:|---|")
     for item in refusals:
-        measured = "-" if "none" in item.evidence else _num(item.trades_found)
-        net = "-" if "none" in item.evidence else _money(item.net_paise)
-        add(f"| {item.reason} | {_num(item.rows)} | {_pct(item.share_of_walk, 3)} | {measured} | "
-            f"{net} | {item.evidence} |")
+        base = _num(item.days_measured) if item.priced else "-"
+        measured = _num(item.trades_found) if item.priced else "-"
+        net = _money(item.net_paise) if item.priced else "-"
+        add(f"| {item.reason} | {_num(item.rows)} | {_pct(item.share_of_walk, 3)} | {base} | "
+            f"{measured} | {net} | {item.evidence} |")
+    add("")
+    add("**The trade counts have their own denominator, and it is the fourth column, not the "
+        f"second.** Only {_num(crashed.shards)} of {_num(len(run.symbols))} shards survived the "
+        "crash, so the counterfactual exists for a SUBSET of each priced class's days. A reader "
+        "who divides a trade count by the `Days` column is dividing by days no evidence was ever "
+        "read for; the measured base is the `Days with a counterfactual` column beside it "
+        "(REVIEW_9B_REPORT finding Q6). Nothing here is scaled up from that subset to the whole "
+        "class, and this report does not estimate what the unwalked remainder would have been.")
     add("")
     add("**Read the priced rows carefully.** They are what the refused days DID produce under a "
         "superseded reading of the spec, not what they would be worth today. The gate-2 "
@@ -2000,8 +2383,9 @@ def _section_traceability(add, *, run: RunData, **_) -> None:
         "aggregation the signal engine used | QUESTIONS.md Q-16(b) |")
     add("| Per-symbol coverage | the disclosed-residual register, read before any per-symbol "
         "statistic | CONTEXT 4.6 |")
-    add("| The benchmark's closes | the raw daily store; the adjustment factors from THIS run's "
-        "own factor table | CONTEXT 7-E13 / 4.2 |")
+    add("| The benchmark's closes | the raw daily store; the SHARE-COUNT factors (bonus / split "
+        "/ rights) from THIS run's own factor table | CONTEXT 7-E13 / 4.2, QUESTIONS.md Q-23 "
+        "(ruled and refined 06-Aug-2026, CLOSED) |")
     add("| The refusal pricing | the crashed run's retained shards, named per class | "
         "REVIEW_9B_FIXES R10 |")
     add("| The rare-shape witnesses | the ledger's own flags, recounted against the manifest's "
@@ -2009,25 +2393,31 @@ def _section_traceability(add, *, run: RunData, **_) -> None:
     add("")
     add("**Nothing on this page is estimated, modelled or extrapolated.** Where a number could "
         "not be measured it is absent and says why: the capital-infeasibility flags (Q43 "
-        "pending), the benchmark's price domain (Q-23 open, both readings shown), the "
-        "foregone trades on refusal classes with no counterfactual (section 11b), and the "
-        "per-symbol 15-minute paths (section 9).")
+        "pending), the foregone trades on refusal classes with no counterfactual (section 11b), "
+        "and the per-symbol 15-minute paths (section 9). The benchmark's price domain is no "
+        "longer among them: Q-23 is RULED and CLOSED, section 10 publishes the benchmark the "
+        "ruling names, and the two other readings are printed beside it and labelled as not "
+        "being it.")
     add("")
     add(f"Ledger sha256 `{run.ledger_sha256}`; manifest sha256 `{run.manifest_sha256}`.")
 
 
 __all__ = [
-    "BENCHMARK_STOP",
+    "BENCHMARK_RULING",
+    "SHARE_COUNT_KINDS",
     "BenchmarkPair",
     "Check",
     "CrashedCheck",
+    "LargestTies",
     "RefusalClass",
     "RunData",
     "Witnesses",
     "YearRow",
     "benchmark_pair",
     "build_everything",
+    "concurrency_closing_first",
     "crashed_cross_check",
+    "largest_ties",
     "main",
     "per_year",
     "pilot_cross_check",

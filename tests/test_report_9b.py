@@ -351,8 +351,13 @@ def test_a_bonus_moves_the_benchmark_by_exactly_the_factor_and_BOTH_readings_are
                              initial_capital_paise=1_000_000)
     assert pair.raw.total_return == Fraction(0), "raw sees a flat price"
     assert pair.adjusted.total_return == Fraction(1), "adjusted sees the doubling it really was"
+    assert pair.share_count.total_return == Fraction(1), "a bonus IS a share-count event"
     assert pair.adjusted_symbols == 1 and pair.events_applied == 1
-    assert "Q-23" in pair.stop, "the silence is raised, not decided"
+    assert pair.share_count_symbols == 1 and pair.share_count_events == 1
+    assert pair.excluded_by_kind == {}, "nothing but the bonus is in this table"
+    assert "Q-23" in pair.ruling and "Q-23 CLOSED" in pair.ruling, (
+        "the ruling travels with the measurement it decides"
+    )
 
 
 def test_an_ordinary_dividend_moves_NEITHER_reading() -> None:
@@ -366,7 +371,9 @@ def test_an_ordinary_dividend_moves_NEITHER_reading() -> None:
     pair = r9.benchmark_pair(store, manifest, symbols=["AAA"], first_day=first, last_day=last,
                              initial_capital_paise=1_000_000)
     assert pair.raw.total_return == pair.adjusted.total_return == Fraction(1, 5)
+    assert pair.share_count.total_return == Fraction(1, 5)
     assert pair.events_applied == 0, "a k of 1 is not an adjustment and is not counted as one"
+    assert pair.share_count_events == 0 and pair.excluded_by_kind == {}
 
 
 def test_a_factor_outside_the_hold_window_is_NOT_applied() -> None:
@@ -381,8 +388,9 @@ def test_a_factor_outside_the_hold_window_is_NOT_applied() -> None:
     }}}
     pair = r9.benchmark_pair(store, manifest, symbols=["AAA"], first_day=first, last_day=last,
                              initial_capital_paise=1_000_000)
-    assert pair.events_applied == 0
+    assert pair.events_applied == 0 and pair.share_count_events == 0
     assert pair.raw.total_return == pair.adjusted.total_return == Fraction(0)
+    assert pair.share_count.total_return == Fraction(0)
 
 
 # --- the disclosures ------------------------------------------------------------------------------
@@ -442,6 +450,8 @@ def render(tmp_path: Path, rows=None):
         paths_reconciling=0,
         refusals=r9.price_refusals(run, crashed),
         daily_counts=r9._daily_count_distribution(series),
+        ties=r9._column_ties(run),
+        path_concurrency=r9.concurrency_closing_first(run.executed),
     )
 
 
@@ -604,3 +614,373 @@ def test_the_report_names_the_rare_shape_witnesses_rather_than_only_counting_the
     assert "BBB 2020-01-06" in text, "the gap-entry witness is NAMED"
     assert "2021-02-24" in text and "outage" in text.lower()
     assert "REVIEW_7" in text and "REVIEW_8" in text
+
+
+# --- the Q-23 ruling, PUBLISHED (REVIEW_9B_REPORT PART 0 + finding Q2) ------------------------
+
+
+def _benchmark_manifest(entries) -> dict:
+    return {"factor_table": {"per_symbol": {"AAA": {"in_span": list(entries)}}}}
+
+
+def test_the_benchmark_applies_SHARE_COUNT_events_ONLY_and_excludes_every_cash_distribution(
+) -> None:
+    """The architect's Q-23 refinement, as arithmetic.
+
+    A 1:1 bonus (k = 1/2) moves a HOLDER'S UNITS and is applied. A special dividend above CONTEXT
+    4.2's 2% threshold carries a factor (k = 24/25) but moves no units -- it is cash the price
+    drops by -- and THE benchmark excludes it, uniformly with the ordinary dividends below the
+    threshold that carry k = 1 and were never applied by anything.
+
+    The mixed reading, which applies both, is kept and must differ: that difference is the whole
+    of finding Q2, and on the real run it is +25.23 pp of the figure the ruling first named.
+    """
+    first, last = date(2020, 1, 1), date(2020, 12, 31)
+    store = _FakeDaily({"AAA": {first: 100_000, last: 100_000}})
+    manifest = _benchmark_manifest([
+        {"ex_date": "2020-06-01", "k": "1/2", "kind": "bonus", "classification": ""},
+        {"ex_date": "2020-09-01", "k": "24/25", "kind": "dividend", "classification": "special"},
+        {"ex_date": "2020-10-01", "k": "1", "kind": "dividend", "classification": "ordinary"},
+    ])
+    pair = r9.benchmark_pair(store, manifest, symbols=["AAA"], first_day=first, last_day=last,
+                             initial_capital_paise=CAPITAL)
+
+    # THE benchmark: the bonus alone. 100,000 x 1/2 = 50,000 -> the holder doubled.
+    assert pair.share_count.total_return == Fraction(1)
+    assert pair.share_count_events == 1 and pair.share_count_symbols == 1
+    # the mixed reading: 1/2 x 24/25 = 12/25, so the dividend factor is inside its multiple
+    assert pair.adjusted.total_return == Fraction(25, 12) - 1
+    assert pair.events_applied == 2
+    assert pair.excluded_by_kind == {"dividend": 1} and pair.excluded_events == 1
+    assert pair.adjusted.total_return > pair.share_count.total_return, (
+        "the special dividend is credited by the mixed reading and by nothing else"
+    )
+
+
+def test_section_10_PUBLISHES_the_ruled_benchmark_and_LABELS_the_two_readings_beside_it(
+) -> None:
+    """REVIEW_9B_REPORT's one owed edit: the ruling is the label, and no number moved to get it.
+
+    Every figure in the table must still be the one `benchmark_pair` computed -- the point of the
+    edit is which row is called THE benchmark, not what any row says.
+    """
+    first, last = date(2020, 1, 1), date(2020, 12, 31)
+    store = _FakeDaily({"AAA": {first: 100_000, last: 100_000}})
+    manifest = _benchmark_manifest([
+        {"ex_date": "2020-06-01", "k": "1/2", "kind": "bonus", "classification": ""},
+        {"ex_date": "2020-09-01", "k": "24/25", "kind": "dividend", "classification": "special"},
+    ])
+    benchmark = r9.benchmark_pair(store, manifest, symbols=["AAA"], first_day=first,
+                                  last_day=last, initial_capital_paise=CAPITAL)
+    columns = {"All": pf.metrics((), label="All", initial_capital_paise=CAPITAL,
+                                 days=(first, last))}
+    lines: list[str] = []
+    r9._section_benchmark(lines.append, benchmark=benchmark, columns=columns)
+    text = "\n".join(lines)
+
+    assert "neither published" not in text, "the STOP heading is gone"
+    assert "This report does not decide it" not in text
+    assert "Q-23 CLOSED" in text and "ARCHITECT'S REFINEMENT" in text
+    assert "**THE BENCHMARK -- share-count events only (bonus / split / rights)**" in text
+    assert text.count("(NOT the benchmark)") == 2, "the other two readings are labelled as such"
+
+    benchmark_row = next(line for line in text.splitlines() if "THE BENCHMARK --" in line)
+    mixed_row = next(line for line in text.splitlines() if "Mixed --" in line)
+    raw_row = next(line for line in text.splitlines() if "RAW closes" in line)
+    assert pf.format_pct(benchmark.share_count.total_return) in benchmark_row
+    assert pf.format_pct(benchmark.adjusted.total_return) in mixed_row
+    assert pf.format_pct(benchmark.raw.total_return) in raw_row
+    # ...and the "and stated" half: what is inside each reading, by kind and by count
+    assert "1 share-count factors across 1 symbols" in text
+    assert "by event kind: dividend 1" in text
+
+
+def test_the_traceability_section_no_longer_calls_Q_23_open(tmp_path: Path) -> None:
+    """Section 13 listed the benchmark's domain among the things that could not be measured."""
+    text = render(tmp_path)
+    assert "Q-23 open" not in text
+    assert "Q-23 is RULED and CLOSED" in text
+
+
+# --- REVIEW_9B_REPORT Q1: the outlier claim, scoped to the columns it holds for ----------------
+
+
+def _fixed_r_columns(long_bites: bool) -> dict[str, pf.Metrics]:
+    """Long: 70 stops / 10 flat / 20 targets -- Q3 low enough that the upper fence bites.
+
+    Short: every trade a target, so its quartiles collapse onto the band and no fence bites.
+    """
+    day = date(2020, 1, 6)
+    longs = ([trade(day, "AAA", LONG, 10, 100_000, -100_000) for _ in range(70)]
+             + [trade(day, "AAA", LONG, 10, 100_000, COST) for _ in range(10)]
+             + [trade(day, "AAA", LONG, 10, 100_000, 300_000) for _ in range(20)])
+    if not long_bites:
+        longs = [trade(day, "AAA", LONG, 10, 100_000, 300_000) for _ in range(20)]
+    shorts = [trade(day, "BBB", SHORT, 10, 100_000, 300_000) for _ in range(20)]
+    rows = tuple(longs + shorts)
+    return {
+        "All": pf.metrics(rows, label="All", initial_capital_paise=CAPITAL, days=(day,)),
+        "Long": pf.metrics(tuple(longs), label="Long", initial_capital_paise=CAPITAL,
+                           days=(day,)),
+        "Short": pf.metrics(tuple(shorts), label="Short", initial_capital_paise=CAPITAL,
+                            days=(day,)),
+    }
+
+
+def test_the_outlier_claim_is_SCOPED_to_the_columns_where_the_fences_really_sit_outside(
+) -> None:
+    """REVIEW_9B_REPORT finding Q1: the blanket sentence is refuted by its own Long column.
+
+    Whether the Tukey fences bracket a fixed-R band is a property of the DISTRIBUTION. Section 6a
+    used to assert it across all three columns; here the Long column's fence sits below its own
+    largest win and 20 of its trades are outliers, and the section must say so per column.
+    """
+    columns = _fixed_r_columns(long_bites=True)
+    assert columns["Long"].outliers.count > 0 and columns["Short"].outliers.count == 0
+    text = _render_e13(columns)
+
+    assert "the fences sit outside it" not in text, "the refuted blanket claim is gone"
+    assert "the fences do NOT" in text and "the fences do sit outside the band" in text
+    biting = next(line for line in text.splitlines() if "the fences do NOT" in line)
+    assert "**Long**" in biting
+    assert f"**{columns['Long'].outliers.count:,}**" in biting
+    assert pf.format_paise(columns["Long"].outliers.upper_fence_paise) in biting
+    assert "BELOW this column's largest win" in biting
+
+    quiet = next(line for line in text.splitlines() if "the fences do sit outside" in line)
+    assert quiet.startswith("* **All and Short**"), quiet
+    assert "Long spans" not in quiet, "the column the fences bite on is not in the clean bullet"
+
+
+def test_the_outlier_claim_still_holds_UNSCOPED_when_no_column_has_an_outlier() -> None:
+    """The control. A run whose fences really do bracket every column must not print a caveat."""
+    columns = _fixed_r_columns(long_bites=False)
+    assert all(column.outliers.count == 0 for column in columns.values())
+    text = _render_e13(columns)
+    assert "the fences do NOT" not in text
+    assert "All, Long and Short" in text, "all three are named in the one positive bullet"
+
+
+def _render_e13(columns) -> str:
+    lines: list[str] = []
+    r9._section_e13(lines.append, columns=columns,
+                    crosses_zero={name: False for name in columns})
+    return "\n".join(lines)
+
+
+# --- REVIEW_9B_REPORT Q3: a PARTIAL year named as the best year -------------------------------
+
+
+def test_section_5_marks_a_PARTIAL_best_year_and_names_the_best_FULL_year_beside_it(
+    tmp_path: Path,
+) -> None:
+    """Section 8 carries the caveat; section 5 is the section a reader reads FIRST and did not.
+
+    The span here opens in June 2020 and closes in June 2022, so 2020 and 2022 are partial and
+    2021 is not -- measured from the day index, never from a list of years typed in the source.
+    2020 carries the least-negative net, so it is the "best year", and the cell must say what it
+    is and name 2021 beside it.
+    """
+    rows = (
+        trade(date(2020, 6, 1), "AAA", LONG, 10, 100_000, -COST),          # net -20,000 paise
+        trade(date(2021, 3, 2), "AAA", LONG, 10, 100_000, -200_000),
+        trade(date(2022, 6, 30), "AAA", SHORT, 10, 100_000, -300_000),
+    )
+    run = r9.read_run(write_run(tmp_path, rows))
+    assert r9._partial_years(run.days) == frozenset({"2020", "2022"})
+
+    years = r9.per_year(run.executed, run.days, initial_capital_paise=CAPITAL, gap_by_year={})
+    series = pf.daily_pnl(run.executed, days=run.days)
+    lines: list[str] = []
+    r9._section_headline(
+        lines.append, run=run,
+        columns=r9._side_split_over_walked_days(run, (), capital_paise=CAPITAL),
+        curve=pf.equity_curve(series, CAPITAL), years=years, capital_paise=CAPITAL,
+        paths_built=0, path_marks=0, paths_reconciling=0,
+    )
+    text = "\n".join(lines)
+
+    best = next(line for line in text.splitlines() if line.startswith("| Best year"))
+    assert "2020:" in best and "**a PARTIAL year**" in best
+    assert "the best FULL year is 2021" in best
+    assert "walked days" in best and "2020-06-01 .. 2020-06-01" in best
+
+    worst = next(line for line in text.splitlines() if line.startswith("| Worst year"))
+    assert "2022:" in worst and "**a PARTIAL year**" in worst
+    assert "the worst FULL year is 2021" in worst
+
+
+def test_a_year_the_span_covers_end_to_end_carries_NO_partial_marker(tmp_path: Path) -> None:
+    """The control: the marker must follow the index, not decorate every extreme row."""
+    rows = (
+        trade(date(2021, 1, 1), "AAA", LONG, 10, 100_000, 300_000),
+        trade(date(2021, 12, 31), "AAA", SHORT, 10, 100_000, -300_000),
+    )
+    run = r9.read_run(write_run(tmp_path, rows))
+    assert r9._partial_years(run.days) == frozenset()
+    years = r9.per_year(run.executed, run.days, initial_capital_paise=CAPITAL, gap_by_year={})
+    cell = r9._year_extreme_cell(years[0], years, frozenset(), best=True)
+    assert "PARTIAL" not in cell and "FULL year" not in cell
+
+
+# --- REVIEW_9B_REPORT Q4: one word, two different quantities ----------------------------------
+
+
+def test_section_1_separates_the_ALL_THREE_GATES_figure_from_gate_1P_ALONE(
+    tmp_path: Path,
+) -> None:
+    """A reader who averages section 9's per-symbol column can never reach section 1's headline.
+
+    The gate-1P share is computed from the register the report already read, over the SETTLED
+    symbols only -- a quarantined symbol is not part of the settled universe and must not drag
+    the figure down.
+    """
+    run = r9.read_run(write_run(tmp_path, sample_rows()))
+    register = {
+        "AAA": bt.ResidualEntry(symbol="AAA", status="settled", gate1p_pass=90,
+                                gate1p_total=100, gate1p_no_oracle=0, residual_reason=""),
+        "BBB": bt.ResidualEntry(symbol="BBB", status="settled", gate1p_pass=80,
+                                gate1p_total=100, gate1p_no_oracle=0, residual_reason=""),
+        "CCC": bt.ResidualEntry(symbol="CCC", status="quarantined", gate1p_pass=0,
+                                gate1p_total=100, gate1p_no_oracle=0, residual_reason=""),
+    }
+    assert r9._gate1p_share(register) == Fraction(170, 200)
+
+    lines: list[str] = []
+    r9._section_what_this_is(lines.append, run=run, capital_paise=CAPITAL, register=register)
+    text = "\n".join(lines)
+    assert "ALL THREE GATES, not the price gate alone" in text
+    assert "85.0000%" in text, "gate 1P alone, over the settled universe, printed beside it"
+    assert "93.9317% USABLE" in text
+    assert "56.6667%" not in text, (
+        "the quarantined symbol's 0/100 must not be inside the settled-universe ratio"
+    )
+
+
+# --- REVIEW_9B_REPORT Q5: a percentage that ties cannot decide --------------------------------
+
+
+def test_the_largest_win_percentage_is_a_RANGE_over_every_TIED_trade(tmp_path: Path) -> None:
+    """A fixed-R book manufactures ties, and the ledger's row order was picking the winner.
+
+    Three trades tie at the same net on notionals a hundredfold apart. The single-trade
+    percentage could have been any of three answers; the range and the tie count could not.
+    """
+    day = date(2020, 1, 6)
+    rows = (
+        trade(day, "AAA", LONG, 1, 100_000, 300_000),        # notional Rs 1,000
+        trade(day, "BBB", LONG, 10, 100_000, 300_000),       # notional Rs 10,000
+        trade(day, "CCC", LONG, 100, 100_000, 300_000),      # notional Rs 100,000
+        trade(day, "DDD", LONG, 10, 100_000, 100_000),       # a smaller winner, not tied
+    )
+    ties = r9.largest_ties(rows, winners=True)
+    assert ties.ties == 3 and ties.extreme_paise == 300_000 - COST
+    assert ties.min_pct_of_notional == Fraction(290_000, 10_000_000)
+    assert ties.max_pct_of_notional == Fraction(290_000, 100_000)
+
+    cell = r9._ties_cell({"All": (ties, r9.EMPTY_TIES)}, "All", winners=True)
+    assert "across the 3 trades tied at" in cell
+    assert pf.format_pct(ties.min_pct_of_notional, 4) in cell
+    assert pf.format_pct(ties.max_pct_of_notional, 4) in cell
+
+    # one trade at the extreme still prints one percentage, and says there is no tie
+    alone = r9.largest_ties((rows[0], rows[3]), winners=True)
+    assert alone.ties == 1
+    assert "no tie" in r9._ties_cell({"All": (alone, r9.EMPTY_TIES)}, "All", winners=True)
+    # and a column with no winner at all prints a dash rather than a number
+    assert r9._ties_cell({"All": (r9.EMPTY_TIES, r9.EMPTY_TIES)}, "All", winners=True) == "-"
+    assert r9._ties_cell(None, "All", winners=True) == r9.TIES_NOT_SUPPLIED
+
+
+def test_the_E13_table_carries_the_tie_RANGE_rows_and_not_a_single_trade_percentage(
+    tmp_path: Path,
+) -> None:
+    text = render(tmp_path)
+    assert "Largest win, % of its own notional" not in text
+    assert "Largest win, % of notional -- RANGE across the tied trades" in text
+    assert "Largest loss, % of notional -- RANGE across the tied trades" in text
+    assert "Why the two percent-of-notional rows carry a RANGE" in text
+
+
+# --- REVIEW_9B_REPORT Q6: the base the refusal pricing was measured over ----------------------
+
+
+def test_the_priced_refusal_rows_carry_the_BASE_they_were_measured_over(tmp_path: Path) -> None:
+    """13 of 210 is not the measurement; 13 of 105 is. Only 103 of 204 shards survived."""
+    before = list(sample_rows())
+    after = list(sample_rows())
+    after[1] = refused(D[0], "BBB", "gate 2 (candle integrity)")
+    run_dir = write_run(tmp_path / "new", after, label="new")
+    crashed_dir = write_run(tmp_path / "old", before, label="old")
+    run = r9.read_run(run_dir)
+    crashed = r9.crashed_cross_check(run_dir, crashed_dir)
+    priced = {item.reason: item for item in r9.price_refusals(run, crashed)}
+
+    gate2 = priced["gate 2 (candle integrity)"]
+    assert gate2.priced and gate2.days_measured == crashed.by_cause[r9._CAUSES[1]] == 1
+    assert gate2.trades_found == 1
+    assert f"walked {gate2.days_measured} of these {gate2.rows} days" in gate2.evidence
+
+    gate1 = priced["gate 1 (volume reconciliation)"]
+    assert not gate1.priced and gate1.days_measured == 0
+
+    lines: list[str] = []
+    r9._section_take_all(lines.append, disclosures=pf.disclosures(run.executed),
+                         capital_flag_report=pf.capital_flags(run.executed,
+                                                              capital_reference_paise=None,
+                                                              margin_basis=None),
+                         daily_counts=(), refusals=r9.price_refusals(run, crashed), run=run,
+                         capital_paise=CAPITAL, crashed=crashed)
+    text = "\n".join(lines)
+    assert "Days with a counterfactual" in text
+    assert "the measured base is the `Days with a counterfactual` column" in text
+
+
+# --- REVIEW_9B_REPORT Q7: two concurrency conventions, both printed and both defined ----------
+
+
+def test_the_two_concurrency_conventions_DISAGREE_and_both_are_printed(tmp_path: Path) -> None:
+    """One trade closes at exactly the stamp the next opens: the whole question, minimally.
+
+    `pf.disclosures` counts the closing position as still open, so it sees TWO at 13:00. The
+    15-minute path closes it at its exit mark and sees ONE. Both are right about their own
+    convention; a report that prints one without naming it is not.
+    """
+    day = date(2020, 1, 6)
+    rows = (
+        trade(day, "AAA", LONG, 10, 100_000, 300_000, hour=12, exit_hour=13),
+        trade(day, "BBB", LONG, 10, 100_000, 300_000, hour=13, exit_hour=14),
+    )
+    assert pf.disclosures(rows).max_concurrent_positions.positions == 2
+    closing_first = r9.concurrency_closing_first(rows)
+    assert closing_first.positions == 1, "the exit mark ends the position"
+
+    text = render(tmp_path)
+    assert "a close at the same stamp counted as still OPEN" in text
+    assert "the 15-minute path's convention: closed AT its exit mark" in text
+    assert "**Concurrency, and which convention the headline uses.**" in text
+    assert text.index("**Concurrency, and which convention") < text.index("## 5. The headline"), (
+        "the convention is defined in the definitions block, above the tables"
+    )
+
+
+def test_build_everything_supplies_the_tied_sets_and_the_second_convention() -> None:
+    """Structural, like the walked-day-split pin: both are I/O-side and cannot be unit-driven.
+
+    A renderer that keeps its defaults would print `TIES_NOT_SUPPLIED` and drop the second
+    concurrency row, with every other test still green -- the same shape of hole REVIEW_9B_REPORT
+    found at `_side_split_over_walked_days`' call site.
+    """
+    import ast
+
+    source = (Path(__file__).resolve().parents[1] / "src" / "acumen" / "report_9b.py").read_text(
+        encoding="utf-8"
+    )
+    fn = next(node for node in ast.parse(source).body
+              if isinstance(node, ast.FunctionDef) and node.name == "build_everything")
+    called = {
+        (node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", ""))
+        for node in ast.walk(fn) if isinstance(node, ast.Call)
+    }
+    assert "_column_ties" in called, "the tied sets are not measured for the E13 table"
+    assert "concurrency_closing_first" in called, "the second concurrency convention is not built"
