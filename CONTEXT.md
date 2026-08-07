@@ -1,6 +1,6 @@
 # CONTEXT.md — ACUMEN INTELLIGENCE · Master Specification
 
-**Version 1.8 · 6 August 2026 · THIS FILE IS LAW.**
+**Version 1.9 · 7 August 2026 · THIS FILE IS LAW.**
 Every build/review session reads this before touching code. Nothing here may be changed by any Claude Code session — spec changes flow only through the architect (the Cowork chat), arrive as a new version of this file, and are logged in §10. If reality and this file disagree, STOP and write it to QUESTIONS.md.
 
 ## Table of contents
@@ -132,7 +132,7 @@ Only in the direction of the day's bias (R1-Q24): bullish day → longs only; be
 - Backtest instrument: **cash equity prices** (R2-Q35 agreed).
 - PnL per trade: `(exit − entry) × qty − 100` (long; mirrored short).
 - No partial exits, no trailing (R1-Q27). No leverage/notional cap specified by trader — v1 does not cap notional but the report MUST disclose max notional used vs capital (§7, OPEN-6).
-- **Portfolio semantics (Round-3 Q40, TRADER-FINAL — option d, "no limits, show me the honest numbers"):** the backtest takes ALL signals across all stocks concurrently, each sized by the fixed-₹-risk rule, NO capital/concurrency constraint. One equity curve: `capital + cumulative PnL` in trade-close order. The report MUST disclose: max concurrent positions, max aggregate notional vs ₹1L, distribution of daily concurrent-trade counts, AND per-trade flags marking the trades his capital could not actually have taken (notional > ₹1L cash; > ₹5L typical-MIS tiers). OPEN-6 and OPEN-7 resolved by this answer.
+- **Portfolio semantics (Round-3 Q40, TRADER-FINAL — option d, "no limits, show me the honest numbers"):** the backtest takes ALL signals across all stocks concurrently, each sized by the fixed-₹-risk rule, NO capital/concurrency constraint. One equity curve: `capital + cumulative PnL` in trade-close order. The report MUST disclose: max concurrent positions, max aggregate notional vs ₹1L, distribution of daily concurrent-trade counts. **(Round-4 supersession, 06-Aug-2026): the per-trade capital-infeasibility flags Q40-d requested were RETIRED by the trader in Round 4 — he superseded his own Q43 question in favour of the per-stock POINTS view (size-independent, post-hoc from the ledger); the flag machinery remains built and switched off, config keys null, labelled 'retired by trader, Round 4'.** OPEN-6 and OPEN-7 resolved by this answer.
 
 ---
 
@@ -333,6 +333,7 @@ Precedence if conflict is ever found: trader's R2 answers > R1 answers > PDF tex
 
 | Version | Date | Change |
 |---|---|---|
+| 1.9 | 07-Aug-2026 | §3.5 aligned with Round 4: capital flags retired (Q43 superseded by the trader), points view adopted; the trader's Round-4 texts recorded verbatim in QUESTIONS.md |
 | 1.8 | 06-Aug-2026 | Round 4: Q44 confirms the gap rule as implemented and corrects the PDF example's parametrization (no engine change, no re-run); Q43 superseded — capital flags retired, per-stock points view adopted |
 | 1.7 | 03-Aug-2026 | Q-22: Q-17 made universal (Rule-3 scan + trade_evidence bound); population corrected to 51; v1.5→v1.6 supersedes marker; 21 Rule-3 days re-answered, 0 biases changed (measured) |
 | 1.6 | 03-Aug-2026 | Q-21(a): gate 2 enumeration completed with the open test; measured cost 47 days / coverage 93.9317%; Q-21(b) bias-evidence gating and Q-21 malformed-bar refusal recorded as law |
