@@ -417,6 +417,28 @@
       "bias_rules_total": 493680,
       "bias_rules_walked_without_a_rule": 1632,
       "bias_rules_ruled_then_refused": 87192,
+      "bias_rules_not_judged_rows": {
+        "no-data": 73841,
+        "minutes-ungated": 210,
+        "suppressed": 30
+      },
+      "bias_rules_not_judged": 74081,
+      "bias_rules_then_refused": 13111,
+      "bias_rules_judged_inside_the_not_judged_rows": 2,
+      "bias_rules_judged_inside_the_not_judged_rows_days": [
+        [
+          "2024-02-14",
+          "FORCEMOT",
+          "no-trade-armed-but-no-qualifying-close",
+          false
+        ],
+        [
+          "2024-02-15",
+          "FORCEMOT",
+          "no-trade-armed-but-no-qualifying-close",
+          false
+        ]
+      ],
       "rounding_candidates_in_window": 51,
       "rounding_candidates_where_the_poc_moves": 13
     },
@@ -568,12 +590,18 @@
         "retire it",
         "change it",
         "take it live knowing the arithmetic"
-      ]
+      ],
+      "gap_trades": 2068,
+      "gap_trades_long": 850,
+      "gap_trades_short": 1218,
+      "gap_stop_violations": 0
     },
     "points": {
       "symbols": 204,
       "trades": 188345,
       "winners": 61406,
+      "flat": 988,
+      "symbols_with_a_flat": 171,
       "win_rate": "61406/188345",
       "points_paise": 7209643,
       "avg_points_paise": "7209643/188345",
@@ -4796,8 +4824,24 @@
         "text": "1,632"
       },
       {
-        "value": "87192",
-        "text": "87,192"
+        "value": "74081",
+        "text": "74,081"
+      },
+      {
+        "value": "3",
+        "text": "3"
+      },
+      {
+        "value": "13111",
+        "text": "13,111"
+      },
+      {
+        "value": "2",
+        "text": "2"
+      },
+      {
+        "value": "13113",
+        "text": "13,113"
       },
       {
         "value": "3530",
@@ -4866,6 +4910,18 @@
       {
         "value": "88824",
         "text": "88,824"
+      },
+      {
+        "value": "2068",
+        "text": "2,068"
+      },
+      {
+        "value": "850",
+        "text": "850"
+      },
+      {
+        "value": "1218",
+        "text": "1,218"
       },
       {
         "value": "10",
@@ -5022,6 +5078,14 @@
       {
         "value": "960",
         "text": "960"
+      },
+      {
+        "value": "171",
+        "text": "171"
+      },
+      {
+        "value": "61406",
+        "text": "61,406"
       }
     ],
     "points": [

@@ -472,7 +472,7 @@ On this particular day the trade comes out the same either way, so nothing here 
 | Rule | Days |
 |---|---:|
 | Rule 1 -- a breakout on the close | 285,574 |
-| no stored one-minute data for the stock that day -- not judged | 73,841 |
+| no DAILY candle for the bias pair (the two days before) -- not judged | 73,841 |
 | Inside bar -- yesterday's bias kept | 64,819 |
 | Rule 2 -- a single sweep | 62,385 |
 | Rule 3 -- both sides swept, decided on the one-minute candles | 6,724 |
@@ -482,7 +482,15 @@ On this particular day the trade comes out the same either way, so nothing here 
 | a demerger sat inside the pair, so no bias could be computed -- not judged | 30 |
 | Rule 3, but no one-minute candle broke either side -- bias kept | 5 |
 
-**Those rows add up to 493,680, and here is the rest of the arithmetic so you can check it.** The machine walked 495,312 stock-days in all. 1,632 of them carry no rule at all -- they are days the market was not open in the normal way (a Muhurat session, say), thrown out before any bias was computed. Of the ones that do carry a rule, three of the rows above say *not judged*: a bias could not be settled there, so no trade was possible. And 87,192 more had a bias but were refused afterwards on a data check, which is why the table is bigger than the 406,488 stock-days the machine actually judged and could have traded.
+**Those rows add up to 493,680, and here is the rest of the arithmetic so you can check it.** The machine walked 495,312 stock-days in all. 1,632 of them carry no rule at all -- they are days the market was not open in the normal way (a Muhurat session, say), thrown out before any bias was computed. That leaves the 493,680 in the table, and they go three ways.
+
+* **406,488** the machine judged -- a bias was settled and the day could have traded. That is the figure used everywhere else in this pack.
+* **74,081** sit in the 3 rows above that say *not judged*, and those rows add up on their own: 73,841 + 210 + 30 = 74,081.
+* **13,111** settled a bias and were then refused on a data check, before the day could be traded.
+
+Add them back and you get the table: 406,488 + 74,081 + 13,111 = 493,680.
+
+**One qualification, because those two groups overlap by 2 days.** A day with no daily candle for the bias pair normally cannot be judged -- but if the machine was already carrying a bias from an earlier day, your rules say it keeps that bias, and such a day can still trade on it. That happened on 2 days, all of them FORCEMOT, at the edge of a long hole in that one stock's daily history (Wednesday 14 February 2024 to Thursday 15 February 2024), and none of them ended up taking a trade. Those days are counted in the first group as judged AND in the second as a *not judged* row, which is why the third figure reads 13,111 where the number of days that settled a bias and were then refused is 13,113. Said out loud rather than left inside the arithmetic.
 
 The days above were chosen by what happened on them rather than by which rule decided them, so they do not cover every rule: Rule 2 -- a single sweep is not among them. Said out loud rather than left to be noticed.
 
@@ -555,6 +563,8 @@ That sentence is the one this run was stamped with while the question was open. 
 > PENDING TRADER CONFIRMATION OF Q44 (gap-rule example, POC 2032)
 
 -- and that pending note is now closed by your answer, with the rule unchanged.
+
+Your Round-4 gap rule was checked against every gap trade the run took -- 2,068 of them, 850 long and 1,218 short -- and the stop sat on the correct side of the POC in every single one.
 
 ### And two things to confirm
 
@@ -633,6 +643,8 @@ Across all 204 stocks the trades moved **+72,096.43 points** in total over 188,3
 | DIXON | 960 | 31.04% | **-1,531.00** | -1.59 | 2,347.50 | +270.00 | -190.00 |
 
 **What the columns mean.** *Points* is the sum of every trade's move on that stock. *Points a trade* is that divided by the number of trades. *Worst points drawdown* is the deepest fall in the running total of those points, walked in date order -- the run of losses you would have sat through on that stock alone. *Best* and *worst trade* are its single largest move each way. None of them knows how many shares were taken, and none of them has had a cost subtracted.
+
+**And the same count page 1 makes, made here too: 988 trades ended exactly level in points** -- the exit was the entry, to the paisa -- across 171 of the 204 stocks. *Trades positive in points* counts a trade only when it moved in your favour, and its denominator is every trade on that stock, so those 988 are in the bottom of the fraction and in neither the positive nor the negative side of it. The same is true of the 32.60% above: it is 61,406 positive out of all 188,345 trades, 988 of them level. Page 1 states its own count of level trades for the same reason; this page is bigger, so the number is bigger.
 
 ---
 
