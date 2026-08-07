@@ -14,6 +14,18 @@ an untouched line that happens to share a word. This test also asserts, in the o
 that each correction is actually PRESENT in the regenerated report: a freeze that passed on a
 report where the edits never landed would be measuring nothing.
 
+**WHAT "NO NUMBER MOVED" MEANS HERE, stated so it cannot be over-read** (REVIEW_12_2 finding
+C6). This freeze is over the numeric tokens of sections 1 through 9 MINUS the excluded lines,
+which is precisely the report's METRICS. Sessions that regenerate the report have summarised it
+as "the report moves N lines and no number", and that sentence is true of metrics and only of
+metrics: the excluded lines and section 10 are where ruling references, version strings and
+dates live, and those DO move whenever a ruling lands. REVIEW_12_2 measured the whole file
+independently across the Round-4 span -- 3,511 -> 3,527 numeric tokens, 3 leaving and 19
+arriving, every one of them a Round-4 reference (`Round 4`, `06-Aug-2026`, `v1.8`, `POC 2030`,
+`3.4`, the quoted `POC 2032` stamp) and not one a metric. So the summary sentence is sound in
+substance and loose in scope. The rigorous statement is this test, and the scope it holds over
+is the one named in this paragraph.
+
 Offline: it reads two files inside the repository and no store.
 """
 

@@ -6,10 +6,26 @@ other five PINNED a finding, written to turn red the moment the finding was fixe
 
 **FIVE OF THEM ARE NOW FLIPPED (06-Aug-2026).** The architect ordered REVIEW_12's sentence fixes
 in the Round-4 execution session, so each of those five probes was run FIRST against the pre-fix
-source and was RED on its own assertion, and now asserts the CORRECTED property in both
-directions -- the repo's established discipline (REVIEW_9A/9B probes that pinned a defect and
-were later flipped). A flipped probe is not a weakened one: every original assertion about what
-the code DOES is kept, and what changed is the claim about what the page SAYS.
+source and was RED there, and now asserts the CORRECTED property in both directions -- the
+repo's established discipline (REVIEW_9A/9B probes that pinned a defect and were later flipped).
+A flipped probe is not a weakened one: every original assertion about what the code DOES is
+kept, and what changed is the claim about what the page SAYS.
+
+**How red they were, exactly** (REVIEW_12_2 finding C5, which measured it against
+``git archive 15a72b6``). All five FAIL on the pre-fix source, and the session that flipped them
+said each "FAILED on its own assertion". That is true of TWO of them -- the ones whose
+page-text assertion is what the interpreter reaches first. The other three die EARLIER, before
+their page-text assertion runs: one on ``AttributeError`` for a helper the fix introduced
+(``trader_pack._rounding_rivals``) and two on ``KeyError`` for companion fields the fix added
+(``bias_rules_total``, ``delivered_win_rate_over_decided_trades``). All five do carry page-text
+assertions, so the discipline holds in substance; the claim's wording overreached, and this note
+is the correction rather than a re-run of the proof. Recorded because the whole point of
+red-then-green is that the ASSERTION discriminates, not merely that the test was not green.
+
+**A sixth is flipped on 07-Aug-2026** by the REVIEW_12_2 fix session:
+``test_the_bias_rule_tables_population_is_now_STATED_and_reconciles`` pinned the very sentence
+REVIEW_12_2 finding Q1 found to be wrong, so leaving it as written would have held the error in
+place. It now asserts the CORRECTED three-way reconciliation, in both directions.
 
 Offline: the artefact probes read committed files in the repository and no store.
 """
@@ -217,13 +233,22 @@ def test_the_rounding_days_tie_and_the_key_that_breaks_it_are_both_STATED() -> N
 
 
 def test_the_bias_rule_tables_population_is_now_STATED_and_reconciles() -> None:
-    """REVIEW_12 finding Q2 -- FLIPPED 06-Aug-2026, and RED on the pre-fix source.
+    """REVIEW_12 finding Q2 -- FLIPPED 06-Aug-2026, then RE-FLIPPED 07-Aug-2026.
 
     It pinned the defect: the table was headed *"Which of your bias rules decided the days the
     machine judged"* while its rows summed to neither of the two counts page 5 prints, and no
     total was printed, so a reader had nothing to check. The counts are unchanged -- and they
     still do not equal either figure, which is the point -- but the page now prints the sum and
-    reconciles it in both directions, so the arithmetic is the reader's to verify.
+    reconciles it, so the arithmetic is the reader's to verify.
+
+    **RE-FLIPPED for REVIEW_12_2 finding Q1.** The 06-Aug version of this probe asserted the
+    reconciling sentence VERBATIM -- *"N more had a bias but were refused afterwards"* -- and
+    that sentence was wrong: it presented `ruled - usable` as a population standing BESIDE the
+    three *not judged* rows when in fact it CONTAINS them, so a reader following the paragraph
+    literally subtracted those rows twice and missed the stated answer by their whole size. The
+    probe checked that a figure was printed and nothing about whether the arithmetic closed, so
+    it would have held the error in place. It now asserts the three-way split that does close,
+    in both directions: the wrong sentence must be GONE, and the sum must be exact.
     """
     figures = _companion()["figures"]
     counts = figures["counts"]
@@ -238,6 +263,9 @@ def test_the_bias_rule_tables_population_is_now_STATED_and_reconciles() -> None:
     assert counts["bias_rules_walked_without_a_rule"] == limits["walked"] - total > 0
     assert counts["bias_rules_ruled_then_refused"] == total - limits["usable"] > 0
 
+    # THE PAGE FIRST -- what the trader actually receives, and the assertion that has to be the
+    # one discriminating (REVIEW_12_2 finding C5: a probe that dies on a KeyError for a field
+    # the fix added has not tested the fix).
     page = PACK.read_text(encoding="utf-8")
     assert "Which of your bias rules decided the days the machine judged" not in page, (
         "the heading no longer claims a population the table is not"
@@ -245,8 +273,21 @@ def test_the_bias_rule_tables_population_is_now_STATED_and_reconciles() -> None:
     assert "What the machine found on each stock-day it looked at" in page
     assert f"Those rows add up to {total:,}" in page, "the total is printed for the reader"
     assert f"{limits['walked'] - total:,} of them carry no rule at all" in page
-    assert f"{total - limits['usable']:,} more had a bias but were refused afterwards" in page
+    assert f"{total - limits['usable']:,} more had a bias but were refused afterwards" not in page, (
+        "the sentence REVIEW_12_2 Q1 found to be wrong is GONE from the trader's page"
+    )
     assert "not judged" in page, "three rows are explicitly outside the judged population"
+
+    # the three-way split, and it CLOSES -- the property the old assertion never checked
+    not_judged = counts["bias_rules_not_judged"]
+    then_refused = counts["bias_rules_then_refused"]
+    assert sum(counts["bias_rules_not_judged_rows"].values()) == not_judged > 0
+    assert limits["usable"] + not_judged + then_refused == total, (
+        "the reconciliation the trader is invited to check has to add up"
+    )
+    assert (f"{limits['usable']:,} + {not_judged:,} + {then_refused:,} = {total:,}") in page, (
+        "and the split that does close is printed, so the reader can add it up"
+    )
 
 
 # --- 5. PINS a finding: page 1 compares two rates over different denominators -----------------------

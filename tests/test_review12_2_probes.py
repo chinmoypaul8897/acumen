@@ -3,9 +3,16 @@
 Probes the builder did not write, kept in the repo per `personas/quant_reviewer.md` step 4 and
 `personas/code_reviewer.md` step 4. Two CLOSE a coverage gap the execution session recorded
 honestly and left open (B306); one asserts, as a PROPERTY over a swept grid, the constraint the
-trader's own Round-4 words put on the gap stop; and one PINS a finding, so the fix the architect
-may order turns it red rather than passing silently (the repo's established discipline --
-REVIEW_9A/9B/12 probes that pinned a defect and were later FLIPPED).
+trader's own Round-4 words put on the gap stop; and one PINNED a finding, so the fix the
+architect ordered turned it red rather than passing silently (the repo's established discipline
+-- REVIEW_9A/9B/12 probes that pinned a defect and were later FLIPPED).
+
+**That pin is now FLIPPED (07-Aug-2026).** The architect ordered the Q1 correction, so
+`test_the_bias_tables_stated_arithmetic_now_CLOSES` -- which went red the moment page 5's
+paragraph was rewritten, exactly as it was built to -- asserts the corrected reconciliation
+instead, in both directions: the defective sentence must be GONE, the three-way sum must close,
+and the overlap that would otherwise be absorbed by the arithmetic must be stated on the page.
+Nothing else in this file moved; the other 51 probes are the reviewer's, untouched.
 
 Offline: the artefact probe reads two committed files in the repository and no store.
 
@@ -179,26 +186,33 @@ def test_a_gap_stop_is_never_beyond_the_poc_on_either_side(poc_rupees: float) ->
 # --- 4. PINS a finding: the bias-table reconciliation the page invites the trader to check --------
 
 
-def test_the_bias_tables_stated_arithmetic_does_NOT_close() -> None:
-    """REVIEW_12_2 finding Q1, PINNED.
+def test_the_bias_tables_stated_arithmetic_now_CLOSES() -> None:
+    """REVIEW_12_2 finding Q1 -- PINNED 07-Aug-2026, then FLIPPED the same day by the fix.
 
-    Page 5's reconciliation paragraph says, of the bias-rule table: *"Those rows add up to
-    493,680, and here is the rest of the arithmetic so you can check it"*, then names three of
-    its own rows as *not judged*, and then says *"And 87,192 MORE had a bias but were refused
-    afterwards on a data check"*.
-
-    Followed literally -- which is exactly what the reader is invited to do -- that is
+    **What it pinned.** Page 5's reconciliation paragraph said, of the bias-rule table: *"Those
+    rows add up to 493,680, and here is the rest of the arithmetic so you can check it"*, then
+    named three of its own rows as *not judged*, and then said *"And 87,192 MORE had a bias but
+    were refused afterwards on a data check"*. Followed literally -- which is exactly what the
+    reader is invited to do -- that is
 
         493,680  -  74,081 (the three 'not judged' rows)  -  87,192  =  332,407
 
-    and the page states the answer is 406,488. The error is 74,081, precisely the not-judged
+    against the 406,488 the page states. The error was 74,081, precisely the not-judged
     population, subtracted twice: the 87,192 is `ruled - usable`, which CONTAINS the three
-    not-judged rows rather than standing beside them, and 74,081 of those 87,192 days did not
-    have a bias at all. The figure that genuinely *"had a bias but was refused afterwards"* is
-    **13,111**.
+    not-judged rows rather than standing beside them, and 74,081 of those 87,192 days had no
+    bias at all.
 
-    This probe reproduces the arithmetic from the COMMITTED companion, so it is the trader's own
-    document being checked and not a re-run. When the sentence is corrected it turns red.
+    **What replaced it**, and what this probe now asserts in the other direction: the page
+    splits the table three ways and prints the sum, `usable + not_judged + then_refused ==
+    ruled`. The old sentence is gone. The two populations OVERLAP -- a day with no daily candle
+    for the bias pair is still tradeable when a bias is being carried, and 2 such days were
+    judged -- so the third figure is 13,111 where the population it describes is 13,113, and the
+    page states that overlap rather than leaving it inside the arithmetic. Both are checked
+    here, because a reconciliation that closes by quietly absorbing a discrepancy is the same
+    defect wearing a different sentence.
+
+    Read from the COMMITTED companion and the COMMITTED page, so it is the trader's own document
+    being checked and not a re-run.
     """
     figures = json.loads(COMPANION.read_text(encoding="utf-8"))["figures"]
     counts, limits = figures["counts"], figures["limits"]
@@ -216,21 +230,42 @@ def test_the_bias_tables_stated_arithmetic_does_NOT_close() -> None:
     not_judged = sum(count for _, count in not_judged_rows)
     assert not_judged == 74_081, "the three not-judged rows, read off the committed table"
     assert counts["bias_rules_ruled_then_refused"] == ruled - usable == 87_192
+    then_refused, overlap = 13_111, 2
 
-    # the page's own three-step arithmetic, followed literally
-    assert ruled - not_judged - (ruled - usable) != usable, (
-        "if this ever passes, the reconciliation has been fixed and this probe must flip"
-    )
-    assert usable - (ruled - not_judged - (ruled - usable)) == not_judged, (
-        "and the error is exactly the not-judged population, counted twice"
-    )
-
+    # THE PAGE FIRST, and on purpose. REVIEW_12_2 finding C5 is that three of the five probes
+    # the last session flipped died on a KeyError for a field the fix ADDED, before their
+    # page-text assertion ever ran -- so what discriminated was the shape of the companion and
+    # not the claim. These four assertions are the claim, they run before any new companion key
+    # is touched, and they are what turns red on the pre-fix document.
     page = PACK.read_text(encoding="utf-8")
-    assert f"{ruled - usable:,} more had a bias but were refused afterwards" in page, (
-        "the defective sentence is the one shipped to the trader"
+    assert f"{ruled - usable:,} more had a bias but were refused afterwards" not in page, (
+        "the defective sentence is gone from the document the trader receives"
     )
-    assert f"{ruled - usable - not_judged:,}" not in page, (
-        "and the figure that is actually true of 'had a bias, then refused' is on no page"
+    assert f"{usable:,} + {not_judged:,} + {then_refused:,} = {ruled:,}" in page, (
+        "the sum is printed, so the reader can add it up rather than take it on trust"
+    )
+    assert " + ".join(f"{count:,}" for _, count in not_judged_rows) in page, (
+        "and the three not-judged rows are added up on the page too, stated once"
+    )
+    assert f"{then_refused + overlap:,}" in page, (
+        "the page names the larger population as well, in the overlap clause"
+    )
+
+    # THE FIX, in the companion: the split closes exactly
+    assert counts["bias_rules_not_judged"] == not_judged, (
+        "the companion's figure is the one the page's own table prints"
+    )
+    assert counts["bias_rules_then_refused"] == then_refused
+    assert usable + not_judged + then_refused == ruled, (
+        "the arithmetic the page invites the reader to check has to close"
+    )
+
+    # ...and it closes HONESTLY: the overlap is disclosed, not absorbed
+    assert counts["bias_rules_judged_inside_the_not_judged_rows"] == overlap
+    assert len(counts["bias_rules_judged_inside_the_not_judged_rows_days"]) == overlap
+    assert then_refused + overlap == 13_113, (
+        "the population 'had a bias, then refused' is larger than the printed residual by "
+        "exactly the days counted in both buckets"
     )
 
 
