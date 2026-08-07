@@ -1,0 +1,79 @@
+{
+  "bias_rules": {
+    "inside-bar-carry": 64819,
+    "minutes-ungated": 210,
+    "no-data": 73841,
+    "rule-1-breakout": 285574,
+    "rule-2-sweep": 62385,
+    "rule-3-no-1min-carry": 30,
+    "rule-3-no-break-carry": 5,
+    "rule-3-outside-bar": 6724,
+    "rule-3-tie": 62,
+    "suppressed": 30
+  },
+  "bias_rules_total": 493680,
+  "boundary_daily_store": {
+    "around": "2024-02-14",
+    "around_has_a_daily_row": true,
+    "first": "2019-08-19",
+    "gaps_over_five_days": 1,
+    "largest_gap": {
+      "first_row_after": "2024-02-14",
+      "last_row_before": "2023-10-25",
+      "span_days": 112
+    },
+    "last": "2026-07-30",
+    "pair_days_have_a_daily_row": {
+      "2024-02-10": false,
+      "2024-02-11": false,
+      "2024-02-12": false,
+      "2024-02-13": false
+    },
+    "rows": 1648,
+    "symbol": "FORCEMOT"
+  },
+  "flat_trade_symbols": 171,
+  "flat_trades_in_points": 988,
+  "gap_long": 850,
+  "gap_short": 1218,
+  "gap_stop_violation_rows": [],
+  "gap_stop_violations": 0,
+  "gap_trades": 2068,
+  "had_a_bias_then_refused_population": 13113,
+  "not_judged_rows": {
+    "minutes-ungated": 210,
+    "no-data": 73841,
+    "suppressed": 30
+  },
+  "not_judged_total": 74081,
+  "overlap_judged_inside_the_not_judged_rows": 2,
+  "overlap_rows": [
+    {
+      "bias": "bearish",
+      "bias_rule": "no-data",
+      "day": "2024-02-14",
+      "minute_count": 360,
+      "outcome": "no-trade-armed-but-no-qualifying-close",
+      "status": "evaluated",
+      "symbol": "FORCEMOT"
+    },
+    {
+      "bias": "bearish",
+      "bias_rule": "no-data",
+      "day": "2024-02-15",
+      "minute_count": 368,
+      "outcome": "no-trade-armed-but-no-qualifying-close",
+      "status": "evaluated",
+      "symbol": "FORCEMOT"
+    }
+  ],
+  "page5_third_figure": 13111,
+  "points_view_flats": 988,
+  "points_view_symbols_with_a_flat": 171,
+  "points_view_trades": 188345,
+  "refused": 88824,
+  "ruled_then_refused": 87192,
+  "usable": 406488,
+  "walked": 495312,
+  "walked_without_a_rule": 1632
+}
