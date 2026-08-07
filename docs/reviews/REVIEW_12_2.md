@@ -148,14 +148,15 @@ claims (`8cbabed9…` 51,627 B / 639 lines; `208b142e…`; `312bc9e0…` 218 lin
 87,756 B / 899 lines). Regenerated independently to scratch paths: `trader_pack.md`,
 `trader_pack.json` and `points_by_symbol.md` are **IDENTICAL**, diffs empty.
 
-**The report's regeneration is the one item this review did NOT complete, and it is reported as
-not done rather than assumed.** `acumen.report_9b.main()` was invoked against the same run and ran
-for over an hour without writing its output; the session ended with it still running. What IS
-verified about the report: its committed sha256, byte count and line count match the claim
-exactly, the numeric freeze holds (item 11), and every numeric token in the whole file was
-compared against the pre-span report with only Round-4 references moving. So the report's
-CONTENT is verified; its REPRODUCIBILITY is not, and the next session should confirm it. C4 is
-part of why this was awkward: the module has no entry point.
+**The report too — completed after the review was first written, and folded in here.**
+`acumen.report_9b.main()` had to be invoked by importing it (C4: the module has no entry point)
+and took just over two hours against the same run. It wrote 87,756 chars and the diff against the
+committed file is **EMPTY**; sha256 `529a04a887d2b69a…`. **All four artifacts byte-reproduce.**
+
+This paragraph replaces an earlier one in this document that reported the report's reproduction as
+NOT DONE, which was true when the review was committed (`f88d125`) and is recorded in that commit,
+in PROGRESS.md and in STATUS.md. It is corrected here rather than quietly dropped. **It changes no
+finding and no verdict** — reproducibility was never what Q1 or C1 turned on.
 
 **11 · The numeric freeze.** `2,457 → 2,449` tokens; **exactly 8 left and 0 arrived**, and they
 are exactly `43, 43, 44, 44, 2032, 3.4, 31, -2026` — every one a Q43/Q44/GO-ruling reference, not
