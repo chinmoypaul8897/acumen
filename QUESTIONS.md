@@ -3885,6 +3885,35 @@ architect as Q-24 and Q-25.
   for the source of the gap stop's VALUE: R2-Q33 is, and remains, that source.** No action asked
   for beyond the architect's assent to this characterization. Raised by the REVIEW session,
   07-Aug-2026.
+* **Q-26 (class A, NON-BLOCKING) -- the FORCEMOT boundary case is on the trader's page but NOT
+  in the technical report, and the architect's wording may have wanted it there.** His fix
+  direction for REVIEW_12_2 Q2 reads: *"the no-data row relabelled ... with one clause noting
+  the boundary case the reviewer found (2 FORCEMOT days judged at the edge of a 112-day
+  daily-store hole; detail in the technical report)"*. Page 5 now carries the clause. The DETAIL
+  was **not** added to `docs/reports/chunk9b_backtest_report.md`, and the reason is that the same
+  prompt says *"No number in any headline moves"*, REVIEW_12_2's own fix list says *"no number in
+  the pack, the companion, the points table or the report moves under any of it"*, and the same
+  session is asked to prove the report byte-REPRODUCES -- which it now does, unchanged. Writing
+  "2", "112" and two dates into the report would have moved numeric tokens inside the frozen
+  region of sections 1..9, forced new freeze exclusions and made that reproduction meaningless.
+  So the pack's clause is self-contained and points at nothing it cannot deliver. **If the
+  architect does want the detail published in the technical report, it is a report edit with a
+  freeze-exclusion consequence and should be directed explicitly**, in the same way the three
+  Round-4 exclusions were (B310). The measurement itself is committed and complete:
+  `docs/evidence/chunk12_fix_review12_2_measurements.{py,json}` holds both days with their
+  outcomes and FORCEMOT's daily-store span (1,648 rows 2019-08-19..2026-07-30; exactly one gap
+  over five days, 2023-10-25 -> 2024-02-14, 112 calendar days). Raised by the FIX session,
+  07-Aug-2026.
+* **Q-27 (class B, NON-BLOCKING) -- the CONTEXT v1.9 erratum's section-10 row has two cells in a
+  three-column table.** The architect supplied it as *"| 1.9 (erratum, 07-Aug-2026) | §9 OPEN-6
+  aligned with the Round-4 flags retirement |"*, and it is written VERBATIM, because this repo's
+  standing rule is that a session does not reword supplied text to make it fit (the same rule
+  that governs the trader's quotations). Section 10's table is `| Version | Date | Change |`, so
+  as rendered the change text lands in the DATE column and the Change column is empty; the
+  version cell carries the date, so no information is lost and nothing is wrong. If the architect
+  meant a three-cell row, one supplied line replaces it. Recorded rather than fixed, since
+  CONTEXT.md is law and this session may not choose its wording. Raised by the FIX session,
+  07-Aug-2026.
 
 ### THE ARCHITECT'S RULINGS, WORD FOR WORD
 
@@ -3991,3 +4020,22 @@ answer is awaited; the stale text is in a committed config file and in this bloc
 itself. Found by the chunk-12 ROUND-4 REVIEW session, 07-Aug-2026; recorded as a finding in
 docs/reviews/REVIEW_12_2.md and owed to the next session, which is a builder session and may edit
 `config.yaml`. A review session fixes nothing.
+
+**NOW EXECUTED, 07-Aug-2026, by the chunk-12 REVIEW_12_2 FIX session** (append-only, like the
+correction above it). `config.yaml`'s two keys are edited and now read `# null -- retired by
+trader, Round 4`; the block comment above them is retitled *"Q40-d CAPITAL-INFEASIBILITY FLAGS
+-- RETIRED BY TRADER, ROUND 4 (CONTEXT v1.9 3.5)"* and rewritten so that no sentence in the file
+says an answer is awaited; the `initial_capital` comment's clause *"it is the trader's pending
+Q43 answer"* becomes *"which is retired by trader, Round 4"*. The keys' VALUES are untouched and
+both are still null, which is what the ruling asked for and what the retired state is. One
+occurrence of the word *pending* remains on purpose and says why in the file: it names the RUN's
+own frozen manifest, which carries the earlier wording byte-exact under decision B305 and is
+quoted by the report and the pack as that run's record of the law it ran under.
+
+**The earlier claim was premature and is acknowledged as such rather than tidied away.** The
+fourth bullet of the EXECUTED list above was written in the same session that intended the edit
+and did not make it, and it stood in this file for a day describing a tree that did not match
+it. What the record should have said on 06-Aug-2026 is that the ruling's config half was
+OUTSTANDING. It is the reviewer, not the record, that caught it -- which is the failure mode the
+whole recording discipline exists to prevent, and the reason the correction is appended twice
+(once by the review, once by the fix) instead of the bullet being edited to become true.

@@ -23,23 +23,30 @@ cost_per_trade: 100  # CONTEXT 3.5 / R1-Q23
 # Starting capital in INR -- CONTEXT 3.5 ("Capital: 1,00,000 (R1-Q21a)"). It is the base of
 # the equity curve (`capital + cumulative PnL`, Round-3 Q40-d) and the denominator of "return
 # on initial capital", of CAGR and of the E13 buy&hold benchmark. It is NOT the Q40-d flag
-# figure -- that one is `capital_reference` below and it is the trader's pending Q43 answer.
+# figure -- that one is `capital_reference` below, which is retired by trader, Round 4.
 # Wired here, like its two siblings above, rather than typed into the portfolio module: a
 # money constant hidden in an engine module is invisible to the operator and to the
 # architect's spec sync (REVIEW_9A finding C1; the module now carries no default at all).
 initial_capital: 100000  # CONTEXT 3.5 / R1-Q21a
 
-# Q40-d CAPITAL-INFEASIBILITY FLAGS (CONTEXT 3.5's disclosure list). Both keys are OPTIONAL
-# and both are NULL until the trader answers Q43 (which capital figure the flags must use)
-# and Q44. While they are null the backtest computes NO flag and every output says
-# "capital-infeasibility flags NOT computed -- the trader's Q43 answer is pending". There is
-# no default: a flag computed against a guessed figure would mark real trades infeasible on
-# this repo's authority rather than his. When the answers arrive: capital_reference is the
-# cash figure in INR and margin_basis is the MIS tier as a multiple of it (CONTEXT 3.5's own
-# example is 1,00,000 cash vs a 5,00,000 tier, i.e. margin_basis 5). The flags are then
-# computed POST-HOC from the ledger -- never inside the run.
-capital_reference:   # null -- trader Q43 pending
-margin_basis:        # null -- trader Q43 pending
+# Q40-d CAPITAL-INFEASIBILITY FLAGS -- RETIRED BY TRADER, ROUND 4 (CONTEXT v1.9 3.5). Both keys
+# are OPTIONAL and both STAY NULL: the trader superseded his own Q43 question (which capital
+# figure the flags must use) and asked instead for the per-stock POINTS view, which is
+# size-independent and needs no capital figure at all. While they are null the backtest computes
+# NO flag and every output says "capital-infeasibility flags RETIRED by the trader (Round 4)".
+# That is the retired state, and it is the state this file is in. There is no default: a flag
+# computed against a guessed figure would mark real trades infeasible on this repo's authority
+# rather than his. The machinery is left built and switched off, so a future trader answer would
+# revive it without a rebuild -- capital_reference would be the cash figure in INR and
+# margin_basis the MIS tier as a multiple of it (CONTEXT 3.5's own example is 1,00,000 cash vs a
+# 5,00,000 tier, i.e. margin_basis 5), and the flags would be computed POST-HOC from the ledger,
+# never inside the run.
+#
+# The RUN's own frozen manifest still carries the earlier "pending" wording, byte-exact and on
+# purpose (decision B305): it is that run's record of the law it ran under, and the documents
+# quote it as such with the closure stated beside it.
+capital_reference:   # null -- retired by trader, Round 4
+margin_basis:        # null -- retired by trader, Round 4
 
 # Volume-profile Row Size N -- CONTEXT 3.3. Row Size = Number of Rows = 24, confirmed by
 # trader screenshot (Q32, Round 3): his Fixed Range Volume Profile Rows Layout = "Number of
