@@ -3776,28 +3776,115 @@ to him: **Q43** (which capital figure the Q40-d capital-infeasibility flags must
 BEFORE any edit was made, under the same discipline every ruling in this file travels by; this
 session authored none of the ruling.
 
-### THE TRADER'S OWN WORDS -- NOT SUPPLIED TO THIS SESSION (owed, and reserved)
+### THE TRADER'S OWN WORDS -- SUPPLIED 07-Aug-2026, RECORDED VERBATIM (the two reserved slots, now FILLED)
 
-The architect's prompt for this session asks for his Q44 diagram-answer and his Q43
-points-request to be quoted WHOLE. **Neither text reached this session.** The prompt carries the
-architect's rulings and not the trader's own sentences, and nothing on this machine holds them
-(searched: the whole repository, `docs/`, and the stores). The standing quotation-fidelity ruling
-of 06-Aug-2026 is that a quotation is the source's bytes or it is a paraphrase OUTSIDE quotation
-marks with a citation, and that an abridged quotation is forbidden for any reason. A quotation
-this session does not have is therefore one it may not write. The two slots are RESERVED and
-empty, and what is known of each is described here outside quotation marks:
+The architect's prompt for the ROUND-4 EXECUTION session asked for his Q44 diagram-answer and his
+Q43 points-request to be quoted WHOLE. **Neither text reached that session** -- the prompt carried
+the architect's rulings and not the trader's own sentences, and nothing on the machine held them
+(searched: the whole repository, `docs/`, and the stores) -- so under the standing
+quotation-fidelity ruling of 06-Aug-2026 (a quotation is the source's bytes, or it is a paraphrase
+OUTSIDE quotation marks with a citation; an abridged quotation is forbidden for any reason) it
+left both slots RESERVED and empty and recorded the operator's paste as OWED (B304).
 
-* **Q44 -- his diagram-answer.** He answered the gap-rule worked example with a DIAGRAM. What the
-  architect's ruling below carries of it: the example day is a GAP day at POC 2030, and the stop
-  is the last traded close, at or below the POC -- which is the rule this repo already
-  implements and the rule the ten-year run walked.
-* **Q43 -- his points-request.** He superseded his own capital question and asked instead for a
-  PER-STOCK POINTS view: points rather than rupees, so that what is shown does not move with
-  position size.
+**The operator supplied both texts on 07-Aug-2026, through the architect's prompt for the chunk-12
+ROUND-4 REVIEW session, and they are recorded below verbatim.** The debt B304 opened is DISCHARGED.
 
-**OWED: the operator pastes both texts, and the next session records them here verbatim in these
-two slots.** Nothing executed under this block depends on their wording -- every action below is
-taken from the architect's ruling, which is quoted in full and in one piece.
+Recording conventions, stated so a later reader can tell what is the trader's and what is ours:
+
+* The texts are reproduced as supplied, byte for byte, with **one** permitted transformation --
+  the ASCII fold this repository's files travel under. **No fold was in fact needed: both texts
+  are already pure ASCII**, so what stands below is the supplied bytes unchanged. Nothing is
+  abridged, reordered, corrected or re-spelled; his capitalisation, his spacing, his `&`, his
+  `(e.g., ...)` parentheticals and his arrows are his.
+* Both answers were pictures as much as prose. The forward slash `/` marks a line or block break
+  in his original layout, and the arrows `->` / `<-` are his diagram's own connectors; the single
+  bracketed label `[flow diagram:]` is OURS, inserted to say where his prose stops and his flow
+  chart begins, and it is the only text inside the quotation marks that is not his. It is marked
+  as ours here rather than left to be inferred.
+
+* **Q44 -- his diagram-answer** (the confirmation of the gap-rule worked example). VERBATIM:
+
+  > "Updated Gap-Up SL Logic / Here is how the algorithm will structure the Stop Loss when price
+  > jumps above the POC: / Entry Price (e.g., 2037) -> Entry Candle (Candle Low: e.g., 2032) ->
+  > GAP UP ZONE (Untraded gap space between POC and Low) -> POC Level (e.g., 2030) -> STOP LOSS
+  > (SL) <- Placed directly below the origin/bottom of the Gap Up (i.e., at or below 2030)"
+
+* **Q43 -- his points-request** (the supersession of his own capital question). VERBATIM:
+
+  > "Core Concept & Key Advantages / Pure Strategy Validation: Without worrying about broker
+  > margins or account capital bottlenecks, the system purely tests whether your Entry, Exit, Stop
+  > Loss (SL), and Take Profit (TP) rules yield a profitable outcome for that specific stock. /
+  > Point & Percentage Focus: Since only one stock (e.g., TCS, RELIANCE, or INFOSYS) is processed
+  > at a time, you get a clear view of: How many points of price movement the strategy captures.
+  > Your Win Rate (percentage of winning trades) and Risk-to-Reward Ratio. Total net profit/loss
+  > in terms of points. / Stock-Specific Flexibility: Not all stocks in the Nifty 200 behave the
+  > same way. Testing one stock at a time helps you identify exactly which stocks suit your
+  > strategy best. / [flow diagram:] Select 1 Stock from Nifty 200 -> Position Size: 1 Share /
+  > Fixed Quantity -> Strategy Rules: Entry -> SL -> TP -> Exit -> Output: Profit/Loss in Points,
+  > Win Rate, Max Drawdown"
+
+**Nothing executed under this block depended on their wording** -- every action recorded below was
+taken from the architect's ruling, which was quoted in full and in one piece before any edit was
+made. The texts are recorded here because the record is owed, not because anything waits on them.
+What the arriving bytes DO settle, and the places they read further than the ruling did, are
+noted in the REVIEW session's reading immediately below; the review does not alter the ruling and
+does not act on any of it.
+
+### THE REVIEW SESSION'S READING OF THE ARRIVING BYTES (07-Aug-2026) · recording only, no action
+
+Written by the chunk-12 ROUND-4 REVIEW session, whose job on this block was to record the texts
+and then read them against what was built from the ruling. Three things they settle, and three
+they open. **Nothing below changes a rule, a number or a file** -- the two openings are put to the
+architect as Q-24 and Q-25.
+
+**Settled, and settled well.**
+
+1. **Q44's geometry is the F1/F2 geometry, in his own figures.** He writes entry 2037, entry
+   candle low 2032, POC level 2030. CONTEXT 3.4's gap predicate is *entry candle's low > POC*;
+   2032 > 2030 is TRUE, so his own three numbers put his own example on the GAP branch. CONTEXT
+   v1.8's re-parametrization of F1/F2 is therefore corroborated by the trader's bytes and not only
+   by the architect's reading of them, and Q-15's POC-2032 reading is overturned on his authority
+   exactly as CONTEXT 10's precedence rule provides.
+2. **His "GAP UP ZONE (Untraded gap space between POC and Low)" is the spec's own words for the
+   gap** -- CONTEXT 3.4's *"it opened beyond POC and never traded at/below it"*. Same object.
+3. **His stop constraint is one the engine satisfies by construction.** He asks for the SL "at or
+   below 2030", i.e. at or below the POC. On the ARMED path a candle that closes strictly above
+   the POC IS the trigger, so the candle immediately before the entry candle -- the one whose
+   close CONTEXT 3.4 makes the gap stop -- can only have closed at or below the POC. The gap stop
+   is therefore <= POC on every gap trade in the run, not merely on F1 and F2. This review
+   re-proved it on the ledger; see docs/reviews/REVIEW_12_2.md.
+
+**Opened -- put to the architect, not decided here.**
+
+* **Q-24 (class A, NON-BLOCKING) -- his Q43 text asks for outputs the adopted view does not
+  carry, and names a size basis and a universe that are not this repo's.** The ruling adopted
+  "the requested PER-STOCK POINTS VIEW ... points = exit - entry per share, signed by side", and
+  page 7 delivers exactly that. His own sentences ask for four outputs per stock: *points*
+  (delivered), *Win Rate* (delivered, as "trades positive in points"), *Max Drawdown* (delivered,
+  in points) and **Risk-to-Reward Ratio (NOT delivered anywhere on page 7 or its companion)**;
+  his heading is "Point & **Percentage** Focus" and **no percentage-of-price figure is on the
+  page** either. Separately his flow chart fixes "Position Size: 1 Share / Fixed Quantity", where
+  CONTEXT 3.5 sizes every trade by the fixed Rs 1,000 risk (Round-3 Q29, his own earlier answer),
+  and it names "Nifty 200", where CONTEXT 3.1's universe is the ~210 NSE F&O underlyings. The
+  points view is size-independent, so the sizing difference cannot move a figure on page 7 -- but
+  it can move what he THINKS page 7 is, and the universe difference is a real difference in which
+  stocks are on it. **Does the architect want R:R and a percentage column added, and does page 7
+  need a sentence saying that the list is the F&O universe and not the Nifty 200, and that the
+  run sized by Rs 1,000 of risk rather than by one share?** No figure now published is wrong
+  under either answer; this is about completeness against his request and about a reader's
+  expectation. Raised by the REVIEW session, 07-Aug-2026.
+* **Q-25 (class B, NON-BLOCKING) -- his Q44 text pins a ZONE where CONTEXT 3.4 pins a VALUE.**
+  "Placed directly below the origin/bottom of the Gap Up (i.e., at or below 2030)" admits every
+  price at or below the POC; CONTEXT 3.4 (from his EARLIER and more specific R2-Q33 answer, with
+  its own worked numbers) picks one of them, the previous 15-minute candle's close, which is 2025
+  on F1's candles and 2027 on F2's. Both are inside his zone; neither is derivable from his
+  Round-4 bytes alone, and "directly below" reads more like 2030-minus-a-tick than like 2025.
+  The architect's ruling reads Round 4 as CONFIRMING R2-Q33, which is the reading this review
+  agrees with -- an answer that is compatible with the standing rule and does not contradict it
+  confirms nothing else. **Recorded so that a later reader does not mistake the Round-4 diagram
+  for the source of the gap stop's VALUE: R2-Q33 is, and remains, that source.** No action asked
+  for beyond the architect's assent to this characterization. Raised by the REVIEW session,
+  07-Aug-2026.
 
 ### THE ARCHITECT'S RULINGS, WORD FOR WORD
 
@@ -3883,3 +3970,24 @@ Nothing inside the quotation is abridged, reordered or paraphrased.
 **Q43 is CLOSED (superseded by its asker). Q44 is CLOSED (CONFIRMED).** Neither blocks anything,
 and neither ever did after the GO ruling. What remains owed on this block is the operator's paste
 of the two trader texts into the reserved slots above.
+
+**DISCHARGED 07-Aug-2026** -- the operator supplied both texts and the chunk-12 ROUND-4 REVIEW
+session recorded them verbatim in the slots above, which now read *SUPPLIED* rather than *owed*.
+B304 is CLOSED. Two new items were opened by the reading, neither blocking: **Q-24** (Risk-to-
+Reward, a percentage column, and the size/universe basis a reader of page 7 will assume) and
+**Q-25** (the Round-4 diagram pins a zone, R2-Q33 pins the value).
+
+**One claim in the EXECUTED list above is NOT true of the tree and is corrected here rather than
+edited out** (append-only, like every other correction in this file). The fourth bullet says
+`config.yaml`'s two keys are *"now labelled retired by trader, Round 4"*. **They are not.**
+`config.yaml` was never touched in `453ba5e..6504fbf` (`git diff --name-only` over the span
+returns nothing for it), and lines 26, 33-35, 41 and 42 still say *pending* -- including the
+sentence *"it is the trader's pending Q43 answer"* and the two inline comments
+`# null -- trader Q43 pending`. The ruling's own words were *"config keys stay null, labelled
+'retired by trader, Round 4'"*, so the keys' VALUES are right (null, and no flag is computed
+anywhere) and only their LABELS were missed. The published outputs -- report, pack, manifest
+constant -- DO carry the retirement wording, so no reader of a trader-facing document is told an
+answer is awaited; the stale text is in a committed config file and in this block's own record of
+itself. Found by the chunk-12 ROUND-4 REVIEW session, 07-Aug-2026; recorded as a finding in
+docs/reviews/REVIEW_12_2.md and owed to the next session, which is a builder session and may edit
+`config.yaml`. A review session fixes nothing.
