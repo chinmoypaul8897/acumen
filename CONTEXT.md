@@ -316,7 +316,7 @@ Rules: fixtures are frozen inputs (CSV) + expected outputs; reviewers rerun them
 | OPEN-3 | reference == POC | **RESOLVED** — wait rule + side-only first distinct close (Q34b + Q41-A); §3.4 |
 | OPEN-4 | Rule-3 tie green/doji | **RESOLVED** — color irrelevant; daily close vs body with bullish precedence (Q38/Q39); §3.2. Code change executed chunk-7 prep |
 | OPEN-5 | Survivorship point-in-time upgrade | **OPEN (v2)** — E5 default stands: current list + disclosure |
-| OPEN-6 | Notional/leverage cap | **RESOLVED** — none; take-all + capital-infeasibility flags (Q40-d) |
+| OPEN-6 | Notional/leverage cap | **RESOLVED** — none; take-all (Q40-d), with max notional vs capital disclosed per §3.5. The capital-infeasibility flags Q40-d also asked for were RETIRED by the trader in Round 4 (§3.5) and are no part of this resolution |
 | OPEN-7 | Concurrency cap | **RESOLVED** — none (Q40-d); disclosures per §3.5 |
 | OPEN-8 | SmartAPI adjustment status | **RESOLVED** — back-adjusted, era-inconsistent, per-side; fully remedied by the Q-10…Q-14 machinery (§4.6) |
 | Q-13 | tpr rounding tie | **RESOLVED** — finer profile (§3.3); rounding MODE half-even = pinned interim, chunk-12 verification |
@@ -333,6 +333,7 @@ Precedence if conflict is ever found: trader's R2 answers > R1 answers > PDF tex
 
 | Version | Date | Change |
 |---|---|---|
+| 1.9 (erratum, 07-Aug-2026) | §9 OPEN-6 aligned with the Round-4 flags retirement |
 | 1.9 | 07-Aug-2026 | §3.5 aligned with Round 4: capital flags retired (Q43 superseded by the trader), points view adopted; the trader's Round-4 texts recorded verbatim in QUESTIONS.md |
 | 1.8 | 06-Aug-2026 | Round 4: Q44 confirms the gap rule as implemented and corrects the PDF example's parametrization (no engine change, no re-run); Q43 superseded — capital flags retired, per-stock points view adopted |
 | 1.7 | 03-Aug-2026 | Q-22: Q-17 made universal (Rule-3 scan + trade_evidence bound); population corrected to 51; v1.5→v1.6 supersedes marker; 21 Rule-3 days re-answered, 0 biases changed (measured) |
