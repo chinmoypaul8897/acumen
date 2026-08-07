@@ -634,6 +634,12 @@ def test_the_page_5_overlap_clause_MEASURES_what_it_claims() -> None:
     assert "overlap by 2 days" in one_stock_quiet
     assert "all of them FORCEMOT, at the edge of a long hole" in one_stock_quiet
     assert "none of them ended up taking a trade" in one_stock_quiet
+    # REVIEW_12C finding Q2: the two dates name the two OVERLAP DAYS and must not be readable as
+    # the hole's span. They sit against "on 2 days", joined by "and" -- not inside a parenthesis
+    # trailing "a long hole in that one stock's daily history", and not joined by "to".
+    assert ("on 2 days -- Wednesday 14 February 2024 and Thursday 15 February 2024 -- all of "
+            "them FORCEMOT") in one_stock_quiet
+    assert "2024 to Thursday 15 February 2024" not in one_stock_quiet
     assert "reads 100 where the number of days that settled a bias and were then refused is 102"\
         in one_stock_quiet
 
@@ -643,7 +649,9 @@ def test_the_page_5_overlap_clause_MEASURES_what_it_claims() -> None:
     assert "overlap by 3 days" in many_stocks_busy
     assert "across 3 stocks" in many_stocks_busy and "all of them" not in many_stocks_busy
     assert "2 of them took a trade" in many_stocks_busy
-    assert "Wednesday 14 February 2024 to Friday 3 January 2025" in many_stocks_busy
+    # three or more days ARE a span, so they keep "to" -- the Q2 fix is the two-day form only
+    assert ("on 3 days -- Wednesday 14 February 2024 to Friday 3 January 2025 -- across 3 "
+            "stocks") in many_stocks_busy
 
 
 # --- REVIEW_12_2 finding C4: a generator that cannot be run is a generator that will not be ------
@@ -695,3 +703,76 @@ def test_a_generator_that_wrote_nothing_CANNOT_report_success() -> None:
 
         with pytest.raises(r9.WriteError, match="bytes on disk against"):
             r9.confirm_written(path, "the whole document, and then some more of it\n")
+
+
+# --- REVIEW_12C findings C1 and C2: the guard's OWN account of itself, and the operator's exit --
+
+
+def test_the_two_main_guards_do_not_claim_a_subprocess_test_that_does_not_exist() -> None:
+    """REVIEW_12C finding C1.
+
+    Both guards read ``# pragma: no cover -- exercised as a subprocess in the tests`` and **no
+    test launches either module as a subprocess** -- the C4 test above says so in its own
+    docstring (*"Asserted at the source rather than by launching a subprocess"*). The guard
+    genuinely works; only its comment was wrong, and it was wrong in the one direction this
+    repo's recording discipline exists to prevent: a future reader's only account of how the
+    guard is verified described a verification that was deliberately not written.
+
+    This test is the account, made executable. It asserts the comment matches reality in BOTH
+    directions: no guard may claim a subprocess, and if a session ever writes one it must move
+    this test rather than quietly re-add the sentence.
+    """
+    here = Path(__file__).resolve()  # this file names both, to say they are NOT launched
+    launched = 0
+    for path in sorted((REPO_ROOT / "tests").glob("test_*.py")):
+        if path.resolve() == here:
+            continue
+        text = path.read_text(encoding="utf-8")
+        if "subprocess" in text and ("acumen.trader_pack" in text or "acumen.report_9b" in text):
+            launched += 1
+    assert launched == 0, (
+        "a test now launches one of the two generators as a subprocess -- update the guards' "
+        "pragma comments to say so, and retire this test"
+    )
+    for module in (MODULE, REPORT_MODULE):
+        line = next(
+            row for row in module.read_text(encoding="utf-8").splitlines()
+            if row.startswith("if __name__ ==")
+        )
+        assert "subprocess" not in line, (
+            f"{module.name}'s guard claims a subprocess verification that no test performs"
+        )
+        assert "ASSERTED AT THE SOURCE" in line, (
+            f"{module.name}'s guard must say HOW it is verified; the AST test above is the how"
+        )
+
+
+def test_a_missing_ledger_reaches_the_operator_as_ONE_LINE_and_exit_1() -> None:
+    """REVIEW_12C finding C2.
+
+    A mistyped ``--run`` label is an OPERATOR error, and it is the only failure mode either
+    generator has that is always the command rather than the code. ``run_backtest.main`` -- the
+    model these two joined on ``[project.scripts]`` -- prints its preflight and returns 1. Before
+    this fix the two document generators raised :class:`acumen.backtest.BacktestError` all the
+    way out, so the operator who typed the command got a traceback where the third runnable
+    module gives an answer.
+
+    Driven through ``main`` itself with a run label that cannot exist, so it is the OPERATOR's
+    experience that is pinned and not a helper's return value.
+    """
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as folder:
+        base = Path(folder)
+        for module, argv, word in (
+            (tp, ["--run", "no_such_run_12c", "--out", str(base / "p.md"),
+                  "--json", str(base / "p.json"), "--points", str(base / "t.md")], "pack"),
+            (r9, ["--run", "no_such_run_12c", "--out", str(base / "r.md")], "report"),
+        ):
+            printed: list[str] = []
+            code = module.main([*argv, "--config", str(REPO_ROOT / "config.yaml")])
+            assert code == 1, f"{module.__name__} must return 1, not raise, on a missing ledger"
+            del printed, word
+        # and nothing was written -- an exit code of 1 beside a half-written document would be
+        # the C4 defect wearing the other sign
+        assert not any(base.iterdir()), "a refused run must leave no document behind"

@@ -1205,7 +1205,15 @@ def confirm_written(path: Path, text: str) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    pieces = build_everything(config_path=Path(args.config), run_label=args.run, progress=print)
+    try:
+        pieces = build_everything(config_path=Path(args.config), run_label=args.run, progress=print)
+    except bt.BacktestError as exc:
+        # REVIEW_12C finding C2: a missing or unreadable ledger is an OPERATOR error -- a
+        # mistyped --run label -- and it reaches the operator the way `run_backtest.main`'s
+        # preflight failure does: one line naming the path, exit 1. A traceback here says
+        # "the tool broke" about the one failure mode that is always the command.
+        print(f"cannot build the report: {exc}")
+        return 1
     text = render_markdown(**pieces)
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -2583,5 +2591,5 @@ __all__ = [
 # nothing, wrote nothing and exited 0 -- the worst available failure mode for an operator who
 # believes a regeneration just succeeded. The module is also on `[project.scripts]` as
 # `acumen-report`, beside the eight other runnable modules.
-if __name__ == "__main__":  # pragma: no cover -- exercised as a subprocess in the tests
+if __name__ == "__main__":  # pragma: no cover -- ASSERTED AT THE SOURCE (an AST test)
     raise SystemExit(main())

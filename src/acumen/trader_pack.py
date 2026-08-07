@@ -891,7 +891,13 @@ def build_everything(
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    pieces = build_everything(config_path=Path(args.config), run_label=args.run, progress=print)
+    try:
+        pieces = build_everything(config_path=Path(args.config), run_label=args.run, progress=print)
+    except bt.BacktestError as exc:
+        # REVIEW_12C finding C2 -- see the twin in `acumen.report_9b.main`. One line, exit 1,
+        # the same answer `run_backtest.main` gives a failed preflight.
+        print(f"cannot build the pack: {exc}")
+        return 1
     text, payload = render(**pieces)
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -1488,12 +1494,20 @@ def _render_bias_overlap_clause(emit: _Emit,
     traded = sum(1 for _day, _symbol, _outcome, executed in overlap if executed)
     where = (f"all of them {stocks[0]}, at the edge of a long hole in that one stock's daily "
              "history" if len(stocks) == 1 else f"across {emit.n(len(stocks))} stocks")
+    # REVIEW_12C finding Q2: the dates are the OVERLAP DAYS, and in the single-stock branch a
+    # parenthetical sitting after "a long hole in that one stock's daily history" can be read as
+    # the hole's own span -- which would make "long" look like an error to the one reader who
+    # cannot check it. So they attach to the days they belong to, before `where`, and two days
+    # are joined by "and" (they are two days) where three or more keep "to" (they are a span).
+    when = (_long_date(overlap[0][0]) if len(overlap) == 1
+            else f"{_long_date(overlap[0][0])} and {_long_date(overlap[-1][0])}"
+            if len(overlap) == 2
+            else f"{_long_date(overlap[0][0])} to {_long_date(overlap[-1][0])}")
     emit.add(f"**One qualification, because those two groups overlap by "
              f"{emit.n(len(overlap))} days.** A day with no daily candle for the bias pair "
              "normally cannot be judged -- but if the machine was already carrying a bias from "
              "an earlier day, your rules say it keeps that bias, and such a day can still trade "
-             f"on it. That happened on {emit.n(len(overlap))} days, {where} "
-             f"({_long_date(overlap[0][0])} to {_long_date(overlap[-1][0])}), and "
+             f"on it. That happened on {emit.n(len(overlap))} days -- {when} -- {where}, and "
              + ("none of them ended up taking a trade" if not traded
                 else f"{emit.n(traded)} of them took a trade")
              + f". Those days are counted in the first group as judged AND in the second as a "
@@ -2459,5 +2473,5 @@ __all__ = [
 # REVIEW_12_2 finding C4: without this guard `python -m acumen.trader_pack --out ... --json ...
 # --points ...` parsed nothing, wrote none of the three documents and exited 0. The module is
 # also on `[project.scripts]` as `acumen-trader-pack`.
-if __name__ == "__main__":  # pragma: no cover -- exercised as a subprocess in the tests
+if __name__ == "__main__":  # pragma: no cover -- ASSERTED AT THE SOURCE (an AST test)
     raise SystemExit(main())
