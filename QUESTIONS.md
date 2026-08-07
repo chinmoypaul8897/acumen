@@ -4077,3 +4077,43 @@ architect supplied the three-cell replacement row
 stands in CONTEXT section 10 in place of the two-cell line B317 recorded verbatim. The change
 text is unchanged; only the row's shape and the version label (`1.9e`, so it cannot be read as a
 second `1.9`) are. B317 is DISCHARGED.
+
+---
+
+## ARCHITECT'S RULINGS (operator-confirmed, 07-Aug-2026) - THE HOLD IS LIFTED, and the DESIGN LAW - recorded VERBATIM by the chunk-13 BUILD session
+
+Recorded before any work, in its own commit, exactly as supplied. The words between the
+quotation marks are the architect's; nothing outside them is.
+
+> "ARCHITECT'S RULINGS (operator-confirmed, 07-Aug-2026): the chunks 11/13/14/15 HOLD IS
+> LIFTED - the operator rules the complete tool is the deliverable and the trader decides its
+> use; build order re-sequenced 13 -> 14 -> 11 -> 15 (functional half first). DESIGN LAW for
+> all UI work from this chunk on: the getdesign 'cohere' design system (npx getdesign@latest
+> add cohere) combined with deliberate, considered design judgment - typography, spacing,
+> hierarchy and color chosen on purpose; no generic-AI-looking output ships. Architect."
+
+**What this settles, in this session's own words (outside the quotation).**
+
+* **The 06-Aug hold is discharged.** STATUS.md's `chunk 13: ON HOLD`, `chunk 14: ON HOLD`,
+  `chunk 15: ON HOLD` and `chunk 11: ON HOLD` lines were all set by the 06-Aug-2026 plan
+  amendment (*"chunk 13+ live screener ON HOLD pending the trader's decision"*) and by the
+  06-Aug chunk-11 ruling recorded above them. The decision they waited on has been made by the
+  operator: the complete tool ships and the trader decides its use. The four cards are
+  UNCHANGED - plan.md v1.1 writes them and this ruling rescopes none of them.
+* **The build ORDER changes; the DEPENDENCIES do not.** 13 -> 14 -> 11 -> 15. plan.md section 3
+  makes chunk 13 depend on 7, 5A and 9, all three of which are `reviewed-PASS`, so chunk 13 is
+  startable today. Chunk 11 moving after 14 costs nothing: its own dependency (chunk 10) was
+  absorbed into 9B, and chunk 12's dependency on 11 was already met by the twice-reviewed
+  static report (the 06-Aug chunk-11 ruling). plan.md section 2's one blocking deadline -
+  *"chunk-12 gate before chunk 15"* - is untouched and still binds chunk 15.
+* **The DESIGN LAW binds every UI surface from this chunk forward.** `npx getdesign@latest add
+  cohere` is executed by this session and `DESIGN.md` is committed; CLAUDE.md's standing rule
+  (*"UI work (chunk 11+): tokens from DESIGN.md only - never invent colors or typography"*)
+  now has the file it names. The ruling adds a second half that a token file cannot enforce by
+  itself - deliberate, considered design judgment - so `DESIGN.md` gains a page of design
+  intent for THIS tool, written by this session and marked as ours, stating who reads the
+  screen, when, and what it is for. The reviewer's test is the ruling's own sentence: would a
+  designer sign this.
+* **Nothing here changes CONTEXT.md.** The ruling is a plan/hold decision and a design
+  standard. CONTEXT section 6 already names `npx getdesign@latest add cohere -> DESIGN.md`;
+  this executes it.
