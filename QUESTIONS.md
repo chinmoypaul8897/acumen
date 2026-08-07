@@ -4117,3 +4117,102 @@ quotation marks are the architect's; nothing outside them is.
 * **Nothing here changes CONTEXT.md.** The ruling is a plan/hold decision and a design
   standard. CONTEXT section 6 already names `npx getdesign@latest add cohere -> DESIGN.md`;
   this executes it.
+
+---
+
+## Q-28 · chunk 13 · class A · **OPEN -- STOP** · BLOCKS the LIVE mode; replay is unaffected
+
+**Question.** CONTEXT 3.3's POC is computed only when the day's **gate 1** has PASSED. Gate 1
+(CONTEXT 4.5) reconciles the day's folded 1-minute volume against **that day's bhavcopy**. During
+today's session that bhavcopy does not exist. **What does the live screener do?**
+
+**This is not a design preference; it is the code as reviewed.** `acumen.poc.day_profile` refuses
+outright -- *"if volume_reconciled is not True: ... return DayProfile(day=day, window=window,
+reason=reason)"* -- and its own docstring says why: *"the day's GATE-1 verdict, and the ONLY
+validity test there is (the completeness ruling of 2026-07-26 retired E4's minute count) ...
+`None` (gate 1 could not be run -- no raw daily row) -> also no POC, because the ruling's licence
+is 'gate 1 PASSES' and an unrun gate has not passed"*. Gate 1P has the same oracle and the same
+problem. So a live morning reaches 11:15 with no POC, and therefore no reference, no arming, no
+trigger and no alert -- for every symbol, every day.
+
+**It is measured, not argued.** `tests/test_live_screener.py::test_the_gate_battery_is_computed_ONCE_from_the_whole_day_not_per_boundary`
+runs the battery over the first 60 minutes of a day that passes it whole, and the prefix is
+refused by `gate 1 (volume reconciliation)`. A fold of part of a session cannot reconcile against
+a whole session's published volume, at any hour before the close.
+
+**Why CONTEXT does not already answer it.** Section 4.5 defines the gates as running on
+*ingestion*; 7-E3 excludes a flagged stock-day *from the backtest* and counts it *in the report*.
+Section 4.4, the live polling layer, does not mention the battery at all -- it says the live
+source is the same endpoint, so *"live bars == backtest bars by construction"*, and stops there.
+Neither passage says what a screener does with a day whose gates cannot yet be run. The gap is
+real and it is exactly where the STOP rule points.
+
+**What is at stake in each direction, stated so the architect need not re-derive it.** If the
+screener alerts on an ungated day, then a day the end-of-day battery later refuses produced a
+live alert the backtester would never have produced -- a real, countable divergence in the very
+invariant chunk 13 exists to protect. If the screener stays silent until the battery can run, it
+is silent for the whole session, every session, and the tool has no live half at all.
+
+**Options for the architect** (this session takes none of them):
+(a) the live path runs without the oracle-dependent gates, alerts, and DISCLOSES the gate posture
+    on every alert; the end-of-day battery is computed over the recording and any divergence is
+    counted and reported (chunk 14's parity harness is already the place for it);
+(b) a live-specific validity test replaces gate 1 for the intraday window -- for example E4's
+    retired minute-count completeness over the 09:15-11:14 window, which needs no oracle -- with
+    the full battery still applied post-close;
+(c) the screener stays silent until the battery can run, i.e. the live half is deferred;
+(d) something else the architect sees that this session does not.
+
+**What this session did instead of deciding.** `acumen.live_screener.build_live_screener` REFUSES
+`mode="live"` and raises `BlockedByOpenQuestion` carrying this question's own text; the CLI prints
+it and returns 1 rather than starting. `tests/test_live_safety.py::test_the_LIVE_mode_REFUSES_TO_START_and_says_which_question_blocks_it`
+is the STOP rule in executable form -- it goes red the moment anyone unblocks live without the
+ruling.
+
+**Nothing else in chunk 13 is blocked.** Replay of a PAST day has that day's bhavcopy, so the
+battery is the backtester's own verdict and the entire pipeline -- pre-open bias, the 11:15 POC
+pass, every boundary sweep, the alerts, the recording, the dashboard, the crash-safe resume --
+runs end to end. That is the mode the chunk's replay invariant is tested in, and it passes.
+
+---
+
+## Q-29 · chunk 13 · class A · **OPEN -- STOP** · blocks nothing today; BINDS the first live morning
+
+**Question.** Q-20 pinned ONE instrument master for the whole backtest. **Which master governs a
+LIVE morning** -- the same pin, or the day's own dump?
+
+**Why it is not obvious.** The Q-20 ruling's reasoning is about faithfulness to the replication
+target: *"the spec target ... is the trader's TradingView chart, and TV applies the CURRENT tick
+to the entire history; exchange-accurate historical ticks would be less faithful"*. On a LIVE
+morning "the current tick" is today's, which is the day's own dump -- so the ruling's own logic
+points at the fresh dump while its conclusion ("ONE PINNED master snapshot governs the whole
+backtest") points at the pin.
+
+**What it costs if it is got wrong.** The tick sizes CONTEXT 3.3's profile row grid, hence the
+POC, hence every entry, stop and target. Q-20 itself measured the exposure: two snapshots two days
+apart disagreed about the tick for **11 of the sealed 210**, all of them walked by the run. A live
+morning on one tick and its replay on the other is backtest/live drift by construction -- in the
+exact invariant this chunk exists to protect -- and it would be invisible, because both answers
+look like clean POCs.
+
+**What this session did, and did not do.** It did NOT choose. The live path takes the SAME
+configured pin, because that reading is the only one CONTEXT already licenses: section 6 says
+outright *"same code path, guaranteed no backtest/live drift"*, and a screener on a different tick
+from the backtester is that drift by definition. There is no override argument, exactly as
+`build_runner` has none. What was BUILT instead of a decision is the measurement --
+`acumen.live_screener.master_tick_divergence(pinned, other, symbols)` names every symbol whose
+tick differs between the pin and any other dump -- and the recording's manifest carries the master
+by filename AND sha256 (Q-20's own discipline), so a replay can prove which ticks a morning ran
+on. The detector decides nothing and alerts on nothing.
+
+**Options for the architect:**
+(a) the pin governs live too (status quo, and what is wired) -- historical and live ticks come
+    from one snapshot, and refreshing it is an architect spec change, exactly as Q-20 makes it;
+(b) live takes the day's own dump, and the REPLAY of a live day is run under that day's RECORDED
+    master rather than under the backtest pin, with the recording's `master_sha256` as the key;
+(c) live takes the day's dump but REFUSES any symbol whose tick diverges from the pin, so a
+    divergent symbol is traded on neither tick until the architect has looked at it;
+(d) something else.
+
+**It binds the first real live morning and not before.** While Q-28 blocks live, every session is
+a replay, and Q-20 already governs a replay: a replay IS the backtest path.
