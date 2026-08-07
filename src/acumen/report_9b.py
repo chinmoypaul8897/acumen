@@ -1180,6 +1180,29 @@ def _daily_count_distribution(series: Sequence[pf.DailyPnL]) -> tuple[tuple[int,
     return tuple(sorted(counts.items()))
 
 
+class WriteError(OSError):
+    """A generator finished without leaving the document it exists to produce."""
+
+
+def confirm_written(path: Path, text: str) -> None:
+    """Prove the document is ON DISK before the process may report success. I/O.
+
+    REVIEW_12_2 finding C4. A generator whose only observable is its exit code must not be able
+    to exit 0 having written nothing: a human decision rests on these two documents, and an
+    operator who reads "0" and finds a stale file on disk has been told the wrong thing by the
+    quietest possible means. So every write is read back and its size checked against what was
+    handed to :meth:`pathlib.Path.write_text`, and a mismatch is RAISED rather than printed.
+    """
+    if not path.is_file():
+        raise WriteError(f"{path} was not written -- the generator produced no document")
+    expected = len(text.encode("utf-8"))
+    actual = path.stat().st_size
+    if actual != expected:
+        raise WriteError(
+            f"{path} is {actual:,} bytes on disk against the {expected:,} bytes rendered"
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     pieces = build_everything(config_path=Path(args.config), run_label=args.run, progress=print)
@@ -1187,6 +1210,7 @@ def main(argv: list[str] | None = None) -> int:
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(text, encoding="utf-8", newline="\n")
+    confirm_written(out, text)
     print(f"wrote {out} ({len(text):,} chars)")
     return 0
 
@@ -2537,10 +2561,12 @@ __all__ = [
     "RefusalClass",
     "RunData",
     "Witnesses",
+    "WriteError",
     "YearRow",
     "benchmark_pair",
     "build_everything",
     "concurrency_closing_first",
+    "confirm_written",
     "crashed_cross_check",
     "largest_ties",
     "main",
@@ -2551,3 +2577,11 @@ __all__ = [
     "reconcile",
     "render_markdown",
 ]
+
+
+# REVIEW_12_2 finding C4: without this guard `python -m acumen.report_9b --out ...` parsed
+# nothing, wrote nothing and exited 0 -- the worst available failure mode for an operator who
+# believes a regeneration just succeeded. The module is also on `[project.scripts]` as
+# `acumen-report`, beside the eight other runnable modules.
+if __name__ == "__main__":  # pragma: no cover -- exercised as a subprocess in the tests
+    raise SystemExit(main())

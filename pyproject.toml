@@ -39,6 +39,8 @@ acumen-ca-report = "acumen.ca_report:main"
 acumen-instrument-master = "acumen.instrument_master:main"
 acumen-minute-backfill = "acumen.minute_backfill:main"
 acumen-poc-evidence = "acumen.poc_evidence:main"
+acumen-report = "acumen.report_9b:main"
+acumen-trader-pack = "acumen.trader_pack:main"
 acumen-universe-backfill = "acumen.universe_backfill:main"
 
 [tool.setuptools.packages.find]
