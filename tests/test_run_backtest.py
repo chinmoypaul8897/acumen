@@ -279,8 +279,11 @@ def test_the_q21b_disclosure_names_the_ruling_its_evidence_and_its_own_limits() 
     # The Q-22 rulings (CONTEXT v1.7) move the SPEC_VERSION again but not this radius: the
     # session filter changes which BARS a scan reads, never whether its D-1 passes the battery.
     # Round 4 (CONTEXT v1.8) moves it once more and again leaves the radius alone: the trader
-    # CONFIRMED the rule the run walked, so no bar, no gate and no bias is re-answered.
-    assert "v1.6" in rb.Q21B_BLAST_RADIUS and bt.SPEC_VERSION == "v1.8"
+    # CONFIRMED the rule the run walked, so no bar, no gate and no bias is re-answered. CONTEXT
+    # v1.9 and its OPEN-6 erratum move it a fourth time and leave the radius alone for a third
+    # reason: they change what a run must DISCLOSE (the retired capital flags), never which days
+    # it may walk (REVIEW_12_2 finding C2).
+    assert "v1.6" in rb.Q21B_BLAST_RADIUS and bt.SPEC_VERSION == "v1.9"
     assert "1 by gate 2" in rb.Q21B_BLAST_RADIUS
 
 

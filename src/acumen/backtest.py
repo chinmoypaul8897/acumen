@@ -128,8 +128,12 @@ from .signal_engine import SignalPipeline
 #: answers: CONTEXT 3.4 is UNCHANGED (his Q44 answer confirms the rule this engine implements),
 #: so this bump changes no walked row and the completed run's v1.7 manifest stays exactly as
 #: true as it was -- the constant tracks the spec's version because a ledger names the law it
-#: was produced under, and section 8's F1/F2 example and section 10 are what moved.
-SPEC_VERSION: str = "v1.8"
+#: was produced under, and section 8's F1/F2 example and section 10 are what moved. Moved to
+#: v1.9 on 07-Aug-2026 (REVIEW_12_2 finding C2, the architect's call) for the same reason and
+#: with the same cost: v1.9 aligns section 3.5 with the Round-4 retirement of the Q40-d capital
+#: flags and its erratum aligns section 9's OPEN-6 row, so it changes WHAT A RUN MUST DISCLOSE
+#: and not one walked row. The completed run's v1.7 manifest stays exactly as true as it was.
+SPEC_VERSION: str = "v1.9"
 
 #: What the manifest's ``instrument_master`` block says about itself, so a reader who has never
 #: seen QUESTIONS.md Q-20 still knows why a filename is pinned rather than resolved. Verbatim on

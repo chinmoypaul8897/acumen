@@ -705,7 +705,10 @@ def test_the_manifest_carries_the_spec_version_code_sha_and_config_digest(
     tmp_path: Path,
 ) -> None:
     manifest = make_runner(tmp_path).run(tmp_path / "run").manifest
-    assert manifest["spec_version"] == "v1.8"
+    # v1.9 (REVIEW_12_2 finding C2): the constant tracks CONTEXT's version because a ledger
+    # always names the law it was produced under. v1.9 changed what a run must DISCLOSE (the
+    # retired Q40-d flags), not which days it may walk, so nothing else in this test moves.
+    assert manifest["spec_version"] == "v1.9"
     assert manifest["code_sha"] == "0" * 40
     assert manifest["config_digest"] == make_runner(tmp_path).spec.digest()
     assert manifest["universe"] == [SYMBOL]
