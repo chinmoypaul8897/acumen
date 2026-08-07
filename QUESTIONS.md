@@ -4039,3 +4039,41 @@ it. What the record should have said on 06-Aug-2026 is that the ruling's config 
 OUTSTANDING. It is the reviewer, not the record, that caught it -- which is the failure mode the
 whole recording discipline exists to prevent, and the reason the correction is appended twice
 (once by the review, once by the fix) instead of the bullet being edited to become true.
+
+---
+
+## ARCHITECT'S RULINGS (07-Aug-2026) - Q-26, B318 and the OPERATOR RULE - recorded VERBATIM by the REVIEW_12_2 FIX RE-REVIEW session
+
+Recorded before the review proper, in its own commit, exactly as supplied. The words between
+the quotation marks are the architect's; nothing outside them is.
+
+> "ARCHITECT'S RULINGS (07-Aug-2026): Q-26 - the report stays FROZEN; the committed evidence
+> file is the technical record and the pack's clause is its pointer; the 'detail in the
+> technical report' direction is amended accordingly. B318 RATIFIED - the stated-overlap split
+> is preferred over a clean partition that moves a headline. OPERATOR RULE: no session starts
+> while another is alive - terminal closed AND no surviving process, checked before every
+> launch (the ad48ff1 concurrency incident). Architect."
+
+**What this settles, in this session's own words (outside the quotation).**
+
+* **Q-26 is CLOSED.** The FIX session's B324 - putting the Q2 boundary detail on the trader's
+  page and NOT into `docs/reports/chunk9b_backtest_report.md` - is ratified, and the fix
+  direction's parenthetical *"detail in the technical report"* is amended by the architect
+  rather than left as an unexecuted instruction. The technical record of the boundary case is
+  `docs/evidence/chunk12_fix_review12_2_measurements.{py,json}`; page 5's clause is its
+  pointer. The report stays frozen and byte-reproducing, and no freeze exclusion is owed.
+* **B318 is RATIFIED.** Page 5's three-way split may state ROW membership with the two-day
+  overlap disclosed in its own clause, in preference to a clean partition
+  (406,486 + 74,081 + 13,113) that would move 406,488 - a headline carried on four pages.
+* **The OPERATOR RULE is new and binding, and it is the operator's, not a session's.** No
+  session starts while another is alive: the previous session's terminal closed AND no
+  surviving process, checked before every launch. It is written against the `ad48ff1`
+  concurrency incident, in which the REVIEW_12_2 session's report generator was still running -
+  and that session still committing - while the FIX session worked the same three record files.
+
+**Q-27 is answered in the same relay** and is executed by this session in its own commit: the
+architect supplied the three-cell replacement row
+`| 1.9e | 07-Aug-2026 | §9 OPEN-6 aligned with the Round-4 flags retirement |`, which now
+stands in CONTEXT section 10 in place of the two-cell line B317 recorded verbatim. The change
+text is unchanged; only the row's shape and the version label (`1.9e`, so it cannot be read as a
+second `1.9`) are. B317 is DISCHARGED.
