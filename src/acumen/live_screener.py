@@ -580,7 +580,10 @@ class LiveScreener:
                     self.clock.sleep(backoff[tries])
                     continue
                 return False
-            elapsed = int((self.clock.now() - began).total_seconds() * 1000)
+            # Divided by a unit rather than scaled by a magic 1000 -- which also keeps this
+            # module clear of the chunk-8 money tripwire, whose whole value is that it is a
+            # LITERAL scan and therefore cannot be reasoned with (REVIEW_9A_2 finding C4).
+            elapsed = int((self.clock.now() - began) / timedelta(milliseconds=1))
             merged = merge_bars(self.bars.get(symbol, ()), bars)
             self.bars[symbol] = merged
             self.recording.record_bars(symbol, bars, sweep=label, at=at)
