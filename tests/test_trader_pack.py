@@ -31,6 +31,7 @@ import pytest
 from acumen import poc as poc_engine
 from acumen import points_view as pv
 from acumen import portfolio as pf
+from acumen import report_9b as r9
 from acumen import trader_pack as tp
 from acumen.config import load_config
 
@@ -542,3 +543,155 @@ def test_every_figure_that_leaves_the_emitter_is_recorded_exactly_once() -> None
 def test_the_rules_are_named_in_the_traders_own_vocabulary(rule: str, expected: str) -> None:
     assert tp._rule_words(rule).startswith(expected)
     assert tp._rule_words("something-new") == "something-new", "an unknown rule is not dressed up"
+
+
+# --- REVIEW_12_2 findings Q1, Q2 and the architect's page-6 addition ------------------------------
+
+
+def test_the_NOT_JUDGED_rules_and_the_printed_labels_are_ONE_thing() -> None:
+    """REVIEW_12_2 findings Q1 and Q2, locked together.
+
+    Page 5's reconciliation splits the rule table on :data:`tp.NOT_JUDGED_RULES` while its
+    sentence tells the trader to look at "the rows above that say *not judged*". Those are the
+    same rows only for as long as the constant and the labels agree, and nothing else in the
+    module makes them agree -- so it is asserted in BOTH directions. A rule added to the
+    constant without its label, or a label whose wording drifts, turns this red.
+    """
+    labelled = {rule for rule, words in tp._RULE_WORDS.items()
+                if tp.NOT_JUDGED_WORDS in words}
+    assert labelled == set(tp.NOT_JUDGED_RULES), (
+        "every not-judged rule says so on the page, and no other rule does"
+    )
+    assert len(tp.NOT_JUDGED_RULES) == 3, "page 5's sentence says 'three of the rows above'"
+
+
+def test_the_no_data_row_names_the_DAILY_candle_and_the_bias_pair() -> None:
+    """REVIEW_12_2 finding Q2. `bias_engine` emits this rule when `store.daily(...)` has no
+    candle for D-1 or D-2 -- the DAILY store, on the bias PAIR days. The page called it "no
+    stored one-minute data for the stock that day", which is the wrong store, the wrong
+    resolution and the wrong day, on the SECOND-LARGEST row the trader reads.
+    """
+    words = tp._rule_words("no-data")
+    assert "DAILY" in words and "bias pair" in words
+    assert "one-minute" not in words and "that day" not in words
+    assert words.endswith(tp.NOT_JUDGED_WORDS)
+
+
+def _questions_page(counted: tp.Census) -> str:
+    """Page 6 alone, rendered over a synthetic census -- no store, no ledger."""
+    emit = tp._Emit()
+    run = r9.RunData(
+        manifest={"capital_flags": {"note": "flags RETIRED"},
+                  "disclosures": ["Q44 stamp PENDING"]},
+        executed=(), days=(), walked=1, usable=1, refused=0, outcomes={}, reasons={},
+        exit_kinds={}, rare_shapes={}, flags={}, duplicate_keys=0, symbols=(), totals={},
+        witnesses=None, ledger_sha256="", ledger_bytes=0, manifest_sha256="",
+    )
+    tp._page_questions(emit, {}, run=run, walks=(), probe=None, counted=counted)
+    return "\n".join(emit.lines)
+
+
+def test_page_6_reports_the_gap_stop_check_and_has_a_LOSING_branch() -> None:
+    """The architect's 07-Aug-2026 addition: the trader's Round-4 stop constraint, checked
+    against every gap trade the run took rather than against the two worked examples.
+
+    The sentence is the measurement, so it must be able to say the bad news. Both branches are
+    driven here, because a verdict with only one reachable outcome asserts nothing -- and on
+    this run the count really is zero, which is exactly when an unreachable branch goes unnoticed.
+    """
+    clean = _census(gaps=((date(2026, 7, 27), "AAA"), (date(2026, 7, 28), "BBB")),
+                    gap_longs=1, gap_shorts=1, gap_stop_violations=0)
+    text = _questions_page(clean)
+    assert "2 of them, 1 long and 1 short" in text
+    assert "the stop sat on the correct side of the POC in every single one." in text
+    assert "WRONG side" not in text
+
+    broken = _census(gaps=((date(2026, 7, 27), "AAA"), (date(2026, 7, 28), "BBB")),
+                     gap_longs=1, gap_shorts=1, gap_stop_violations=1)
+    loud = _questions_page(broken)
+    assert "on 1 of them the stop sat on the WRONG side of the POC" in loud
+    assert "That is a defect and it is printed here" in loud
+    assert "in every single one" not in loud
+
+
+def test_the_page_5_overlap_clause_MEASURES_what_it_claims() -> None:
+    """REVIEW_12_2 finding Q1's honest half. The three-way split closes only because the days
+    that were judged INSIDE a not-judged row are counted in two of its buckets, so the clause
+    that explains it is load-bearing -- and every specific in it (one stock or several, whether
+    any of them traded) is data, not a remembered fact about this particular run.
+
+    Driven at all four combinations, because on the real run the answer happens to be the
+    flattering one -- one stock, nothing traded -- and a sentence that can only say that is a
+    sentence that would go on saying it after the data changed.
+    """
+    def clause(rows) -> str:
+        emit = tp._Emit()
+        tp._render_bias_overlap_clause(emit, rows, then_refused=100)
+        return "\n".join(emit.lines)
+
+    one_stock_quiet = clause(((date(2024, 2, 14), "FORCEMOT", "no-trade", False),
+                              (date(2024, 2, 15), "FORCEMOT", "no-trade", False)))
+    assert "overlap by 2 days" in one_stock_quiet
+    assert "all of them FORCEMOT, at the edge of a long hole" in one_stock_quiet
+    assert "none of them ended up taking a trade" in one_stock_quiet
+    assert "reads 100 where the number of days that settled a bias and were then refused is 102"\
+        in one_stock_quiet
+
+    many_stocks_busy = clause(((date(2024, 2, 14), "FORCEMOT", "target-hit", True),
+                               (date(2025, 1, 2), "AAA", "no-trade", False),
+                               (date(2025, 1, 3), "BBB", "stop-hit", True)))
+    assert "overlap by 3 days" in many_stocks_busy
+    assert "across 3 stocks" in many_stocks_busy and "all of them" not in many_stocks_busy
+    assert "2 of them took a trade" in many_stocks_busy
+    assert "Wednesday 14 February 2024 to Friday 3 January 2025" in many_stocks_busy
+
+
+# --- REVIEW_12_2 finding C4: a generator that cannot be run is a generator that will not be ------
+
+
+REPORT_MODULE = REPO_ROOT / "src" / "acumen" / "report_9b.py"
+PYPROJECT = REPO_ROOT / "pyproject.toml"
+
+
+def test_both_document_generators_can_actually_be_INVOKED() -> None:
+    """REVIEW_12_2 finding C4. Both modules define `main(argv)` with a full argparse CLI, and
+    neither had a `__main__` guard or a `[project.scripts]` entry -- so
+    `python -m acumen.trader_pack --out ... --json ... --points ...` parsed nothing, wrote
+    nothing and **exited 0**. For the two documents a human decision rests on, a silent
+    successful-looking no-op is the worst available failure mode.
+
+    Asserted at the source rather than by launching a subprocess: a real invocation reads the
+    ledger and the stores and takes many minutes, which is exactly why nobody noticed.
+    """
+    scripts = PYPROJECT.read_text(encoding="utf-8").split("[project.scripts]", 1)[1]
+    for module, entry in ((MODULE, "acumen.trader_pack:main"),
+                          (REPORT_MODULE, "acumen.report_9b:main")):
+        source = module.read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        guards = [node for node in tree.body
+                  if isinstance(node, ast.If)
+                  and ast.unparse(node.test) == "__name__ == '__main__'"]
+        assert len(guards) == 1, f"{module.name} has no __main__ guard"
+        assert "SystemExit(main())" in ast.unparse(guards[0]), (
+            f"{module.name}'s guard must PROPAGATE main's exit code, not swallow it"
+        )
+        assert entry in scripts, f"{module.name} is not on [project.scripts]"
+
+
+def test_a_generator_that_wrote_nothing_CANNOT_report_success() -> None:
+    """The other half of C4: the exit code must not be able to say "written" of a file that is
+    missing or short. `confirm_written` reads the file back and compares its size in BYTES --
+    not characters, because a non-ASCII page would otherwise pass a short write.
+    """
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as folder:
+        path = Path(folder) / "document.md"
+        with pytest.raises(r9.WriteError, match="was not written"):
+            r9.confirm_written(path, "anything at all")
+
+        path.write_text("the whole document\n", encoding="utf-8", newline="\n")
+        r9.confirm_written(path, "the whole document\n")  # the good case is silent
+
+        with pytest.raises(r9.WriteError, match="bytes on disk against"):
+            r9.confirm_written(path, "the whole document, and then some more of it\n")

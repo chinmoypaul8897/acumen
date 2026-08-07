@@ -109,6 +109,13 @@ class PointsTotals:
     symbols: int
     trades: int
     winners: int
+    #: Trades that ended EXACTLY level in points, and the stocks that have at least one. They
+    #: are inside :attr:`trades` -- the win rate's denominator is every trade (E13) -- and are
+    #: in neither the winners nor the losers, so a page that prints the rate has to name them
+    #: or leave a reader with a population in no stated category (REVIEW_12_2 finding Q3, the
+    #: same correction REVIEW_12 Q5 required of page 1).
+    flat: int
+    symbols_with_a_flat: int
     points_paise: int
     best: SymbolPoints | None
     worst: SymbolPoints | None
@@ -198,6 +205,8 @@ def totals(table: Sequence[SymbolPoints]) -> PointsTotals:
         symbols=len(table),
         trades=sum(one.trades for one in table),
         winners=sum(one.winners for one in table),
+        flat=sum(one.flat for one in table),
+        symbols_with_a_flat=sum(1 for one in table if one.flat),
         points_paise=sum(one.points_paise for one in table),
         best=table[0] if table else None,
         worst=table[-1] if table else None,
@@ -235,11 +244,19 @@ def format_points(paise: int | Fraction | None, *, signed: bool = True) -> str:
 
     Exact on the way, like :func:`acumen.portfolio.format_paise`: an integer divides in Decimal
     and a Fraction goes through its own numerator and denominator. Positives carry a leading plus
-    so a ranking cannot be misread at a glance; zero carries neither sign; thousands are grouped.
-    ``signed=False`` is for a MAGNITUDE -- a cost, a drawdown -- where a leading plus would read
-    as a gain. Every worked example lives in ``tests/test_points_view.py``, hand-computed, which
-    is also why no figure is spelled out here (the pack's no-typed-money tripwire scans this
-    module).
+    so a ranking cannot be misread at a glance; ONLY AN EXACT ZERO carries neither sign; thousands
+    are grouped. ``signed=False`` is for a MAGNITUDE -- a cost, a drawdown -- where a leading plus
+    would read as a gain. Every worked example lives in ``tests/test_points_view.py``,
+    hand-computed, which is also why no figure is spelled out here (the pack's no-typed-money
+    tripwire scans this module).
+
+    REVIEW_12_2 finding C7: the sign used to be read off the QUANTIZED value, so a stock whose
+    average move is smaller than half a paisa printed an unsigned zero in a column whose whole
+    convention is that a sign is always there -- seven rows of the 204-row companion did, beside
+    a signed and non-zero *Points* figure. The sign is now taken from the value HANDED IN, so a
+    move too small to survive rounding still shows the direction it went: the magnitude rounds
+    away, the sign does not. Nothing else moves -- an exact zero still prints unsigned, and
+    every figure that does not round to nothing is unchanged.
     """
     if paise is None:
         return "-"
@@ -247,8 +264,10 @@ def format_points(paise: int | Fraction | None, *, signed: bool = True) -> str:
         value = Decimal(paise.numerator) / Decimal(paise.denominator) / Decimal(100)
     else:
         value = Decimal(int(paise)) / Decimal(100)
+    negative = value < 0
+    positive = value > 0
     value = value.quantize(Decimal("0.01"))
-    sign = "-" if value < 0 else ("+" if value > 0 and signed else "")
+    sign = "-" if negative else ("+" if positive and signed else "")
     value = abs(value)
     whole = int(value)
     hundredths = int((value - whole) * 100)

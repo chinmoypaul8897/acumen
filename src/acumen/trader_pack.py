@@ -96,6 +96,17 @@ NAMED_GAP: tuple[str, str] = ("TIINDIA", "2026-07-27")
 #: run's own span. Days, because the span's end is a date and not a month index.
 RECENT_DAYS: int = 90
 
+#: The bias rules whose row on page 5 ends "-- not judged": no bias was settled on those days, so
+#: no trade was ever possible on them. Page 5's reconciliation splits the rule table on exactly
+#: this set, so the set and the printed labels must agree -- `_rule_words` gives each of these a
+#: label ending in :data:`NOT_JUDGED_WORDS` and gives no other rule one, which
+#: ``tests/test_trader_pack.py`` asserts in both directions rather than trusting.
+NOT_JUDGED_RULES: tuple[str, ...] = ("no-data", "minutes-ungated", "suppressed")
+
+#: The words that make a row one of the above, on the page itself. The trader's own sentence
+#: counts "the rows above that say *not judged*", so the count and the words are one thing.
+NOT_JUDGED_WORDS: str = "not judged"
+
 WEEKDAYS: tuple[str, ...] = (
     "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday",
 )
@@ -177,6 +188,24 @@ class Census:
     #: ledger does not support, and nothing checked it. Defaulted so an existing construction of
     #: this census (the reviewers' own fixtures) needs no change.
     gap_clocks: Mapping[tuple[date, str], str] = field(default_factory=dict)
+    #: Executed gap entries split by side, and the number of them whose STOP sat on the wrong
+    #: side of the POC. The trader's Round-4 words put the gap stop "at or below" the POC, and
+    #: page 6 tells him the constraint was checked against every gap trade the run took rather
+    #: than against the two worked examples -- so the page's sentence is this measurement and
+    #: not a sentence about it (architect-directed, 07-Aug-2026). Long: ``stop <= POC``. Short:
+    #: ``stop >= POC``. Compared in HALF PAISE, because CONTEXT 3.3 lets the POC sit half a
+    #: paisa off the tick grid and CONTEXT 7-E11 bans rounding a price to make a comparison work.
+    gap_longs: int = 0
+    gap_shorts: int = 0
+    gap_stop_violations: int = 0
+    #: The days that sit in one of :data:`NOT_JUDGED_RULES`' rows and were nevertheless JUDGED.
+    #: ``bias_engine`` marks such a day tradeable when a bias is already being carried, so the
+    #: three rows page 5 calls *not judged* are ROWS, not a population that was uniformly
+    #: refused. REVIEW_12_2 finding Q2 found the case in the data; page 5 states it, because
+    #: without it the page's own three-way split would share these days between two of its
+    #: buckets and say nothing about it. (day, symbol, outcome, executed) -- the last two so the
+    #: page can say how many of them TRADED rather than assuming the answer.
+    judged_inside_the_not_judged_rows: tuple[tuple[date, str, str, bool], ...] = ()
 
     @property
     def median_risk_paise(self) -> int:
@@ -214,6 +243,8 @@ def census(run_dir: Path) -> Census:
     carries: list[tuple[date, str, str]] = []
     clocks: dict[tuple[date, str], str] = {}
     pocs: dict[tuple[str, date], int] = {}
+    judged_without_a_bias_rule: list[tuple[date, str, str, bool]] = []
+    gap_longs = gap_shorts = gap_stop_violations = 0
     last: date | None = None
 
     with ledger.open("r", encoding="utf-8") as handle:
@@ -226,6 +257,10 @@ def census(run_dir: Path) -> Census:
             last = day if last is None or day > last else last
             if row["bias_rule"]:
                 rules[row["bias_rule"]] += 1
+            if (row["bias_rule"] in NOT_JUDGED_RULES
+                    and row["status"] == bt.STATUS_EVALUATED):
+                judged_without_a_bias_rule.append(
+                    (day, symbol, row["outcome"] or "", bool(row["executed"])))
             if row["tie_case"]:
                 ties.append((day, symbol, row["bias"]))
 
@@ -247,6 +282,18 @@ def census(run_dir: Path) -> Census:
                     gaps.append((day, symbol))
                     stamp = row["entry_close_stamp"]
                     clocks[(day, symbol)] = stamp[11:16] if stamp else ""
+                    # The trader's Round-4 stop constraint, on the row itself. Doubling the
+                    # stop is the only safe comparison: the POC is carried in half paise
+                    # because a row midpoint may legally sit on one (CONTEXT 3.3), and
+                    # halving it would round a price to make a check pass (CONTEXT 7-E11).
+                    stop_half = int(row["stop_paise"]) * 2
+                    poc_half = int(row["poc_half_paise"])
+                    if row["side"] == sig.LONG:
+                        gap_longs += 1
+                        gap_stop_violations += int(stop_half > poc_half)
+                    else:
+                        gap_shorts += 1
+                        gap_stop_violations += int(stop_half < poc_half)
                 if row["exit_kind"] == sig.EXIT_STOP and row["net_pnl_paise"] < 0:
                     stops.append((day, symbol, int(row["per_share_risk_paise"])))
                 if (row["exit_kind"] == sig.EXIT_TARGET and row["net_pnl_paise"] > 0
@@ -271,6 +318,10 @@ def census(run_dir: Path) -> Census:
         stops=tuple(sorted(stops)),
         carries=tuple(sorted(carries)),
         gap_clocks=dict(sorted(clocks.items())),
+        gap_longs=gap_longs,
+        gap_shorts=gap_shorts,
+        gap_stop_violations=gap_stop_violations,
+        judged_inside_the_not_judged_rows=tuple(sorted(judged_without_a_bias_rule)),
     )
 
 
@@ -847,12 +898,16 @@ def main(argv: list[str] | None = None) -> int:
     out.write_text(text, encoding="utf-8", newline="\n")
     companion = Path(args.json)
     companion.parent.mkdir(parents=True, exist_ok=True)
-    companion.write_text(json.dumps(payload, indent=2, sort_keys=False) + "\n",
-                         encoding="utf-8", newline="\n")
+    companion_text = json.dumps(payload, indent=2, sort_keys=False) + "\n"
+    companion.write_text(companion_text, encoding="utf-8", newline="\n")
     table = Path(args.points)
     table.parent.mkdir(parents=True, exist_ok=True)
-    table.write_text(render_points_companion(run=pieces["run"], points=pieces["points"]),
-                     encoding="utf-8", newline="\n")
+    table_text = render_points_companion(run=pieces["run"], points=pieces["points"])
+    table.write_text(table_text, encoding="utf-8", newline="\n")
+    # REVIEW_12_2 finding C4: all THREE documents are read back before this returns 0, so the
+    # exit code cannot say "written" of a file that is missing or short.
+    for path, written in ((out, text), (companion, companion_text), (table, table_text)):
+        r9.confirm_written(path, written)
     print(f"wrote {out} ({len(text):,} chars), {companion} and {table}")
     return 0
 
@@ -1009,7 +1064,7 @@ def render(
                 capital_paise=capital_paise)
     _page_limits(emit, figures, run=run, disclosures=disclosures, capital_paise=capital_paise,
                  config=config, register=register)
-    _page_questions(emit, figures, run=run, walks=walks, probe=probe)
+    _page_questions(emit, figures, run=run, walks=walks, probe=probe, counted=counted)
     _page_points(emit, figures, run=run, points=points)
     _page_footer(emit, run=run)
 
@@ -1295,16 +1350,34 @@ def _page_days(emit: _Emit, figures: dict, *, walks: Sequence[Walk], counted: Ce
         emit.add(f"| {_rule_words(rule)} | {emit.n(count)} |")
     emit.add("")
     ruled = sum(counted.bias_rules.values())
+    not_judged_rows = [(rule, count) for rule, count in counted.bias_rules.items()
+                       if NOT_JUDGED_WORDS in _rule_words(rule)]
+    not_judged = sum(count for _, count in not_judged_rows)
+    then_refused = ruled - run.usable - not_judged
+    judged_anyway = len(counted.judged_inside_the_not_judged_rows)
     emit.add(f"**Those rows add up to {emit.n(ruled)}, and here is the rest of the arithmetic so "
              f"you can check it.** The machine walked {emit.n(run.walked)} stock-days in all. "
              f"{emit.n(run.walked - ruled)} of them carry no rule at all -- they are days the "
              "market was not open in the normal way (a Muhurat session, say), thrown out before "
-             "any bias was computed. Of the ones that do carry a rule, three of the rows above "
-             "say *not judged*: a bias could not be settled there, so no trade was possible. And "
-             f"{emit.n(ruled - run.usable)} more had a bias but were refused afterwards on a "
-             f"data check, which is why the table is bigger than the {emit.n(run.usable)} "
-             "stock-days the machine actually judged and could have traded.")
+             f"any bias was computed. That leaves the {emit.n(ruled)} in the table, and they go "
+             "three ways.")
     emit.add("")
+    emit.add(f"* **{emit.n(run.usable)}** the machine judged -- a bias was settled and the day "
+             "could have traded. That is the figure used everywhere else in this pack.")
+    emit.add(f"* **{emit.n(not_judged)}** sit in the "
+             f"{emit.n(len(not_judged_rows))} rows above that say *{NOT_JUDGED_WORDS}*, and "
+             "those rows add up on their own: "
+             + " + ".join(emit.n(count) for _, count in not_judged_rows)
+             + f" = {emit.n(not_judged)}.")
+    emit.add(f"* **{emit.n(then_refused)}** settled a bias and were then refused on a data "
+             "check, before the day could be traded.")
+    emit.add("")
+    emit.add(f"Add them back and you get the table: {emit.n(run.usable)} + "
+             f"{emit.n(not_judged)} + {emit.n(then_refused)} = {emit.n(ruled)}.")
+    emit.add("")
+    if judged_anyway:
+        _render_bias_overlap_clause(emit, counted.judged_inside_the_not_judged_rows,
+                                    then_refused=then_refused)
     used = sorted({one.bias.rule for one in walks})
     missing = [rule for rule in counted.bias_rules
                if rule in (bias_engine.RULE_1, bias_engine.RULE_2, bias_engine.RULE_3,
@@ -1343,28 +1416,92 @@ def _page_days(emit: _Emit, figures: dict, *, walks: Sequence[Walk], counted: Ce
         "bias_rules_total": sum(counted.bias_rules.values()),
         "bias_rules_walked_without_a_rule": run.walked - sum(counted.bias_rules.values()),
         "bias_rules_ruled_then_refused": sum(counted.bias_rules.values()) - run.usable,
+        # REVIEW_12_2 finding Q1: page 5's three-way split, in the companion, so the arithmetic
+        # the trader is invited to check can be re-derived from data rather than re-parsed out
+        # of prose. `bias_rules_not_judged` + `bias_rules_then_refused` + `usable` == the total,
+        # and `bias_rules_judged_inside_the_not_judged_rows` is the overlap the page states.
+        "bias_rules_not_judged_rows": {rule: count for rule, count in not_judged_rows},
+        "bias_rules_not_judged": not_judged,
+        "bias_rules_then_refused": then_refused,
+        "bias_rules_judged_inside_the_not_judged_rows": judged_anyway,
+        "bias_rules_judged_inside_the_not_judged_rows_days": [
+            [day.isoformat(), symbol, outcome, executed]
+            for day, symbol, outcome, executed in counted.judged_inside_the_not_judged_rows
+        ],
         "rounding_candidates_in_window": len(candidates),
         "rounding_candidates_where_the_poc_moves": sum(1 for c in candidates if c.poc_moves),
     }
 
 
+#: Every bias rule the ledger can carry, in the words the trader's page prints for it. A module
+#: constant rather than a dict built inside :func:`_rule_words` so that a test can walk the whole
+#: mapping: page 5's arithmetic splits the table on the rows whose words end
+#: :data:`NOT_JUDGED_WORDS`, and "the constant and the labels agree" is a property to be asserted
+#: in both directions rather than an arrangement to be trusted (REVIEW_12_2 Q1/Q2).
+_RULE_WORDS: Mapping[str, str] = {
+    bias_engine.RULE_1: "Rule 1 -- a breakout on the close",
+    bias_engine.RULE_2: "Rule 2 -- a single sweep",
+    bias_engine.RULE_3: "Rule 3 -- both sides swept, decided on the one-minute candles",
+    bias_engine.RULE_3_TIE: "Rule 3 -- both sides swept inside ONE one-minute candle",
+    bias_engine.RULE_INSIDE: "Inside bar -- yesterday's bias kept",
+    bias_engine.RULE_CARRY: "No rule fitted -- yesterday's bias kept",
+    bias_engine.RULE_3_NO_MINUTE: "Rule 3, but no one-minute data that day -- bias kept",
+    bias_engine.RULE_3_NO_BREAK: "Rule 3, but no one-minute candle broke either side -- "
+                                 "bias kept",
+    # REVIEW_12_2 finding Q2. This rule is emitted by `bias_engine` when `store.daily(...)`
+    # has no candle for D-1 or D-2 -- the DAILY store, on the bias PAIR days, not the
+    # one-minute store and not the trade day. The two usually go together early in a
+    # symbol's history, which is why the wrong cause survived a review; they are not the
+    # same thing, and this is the SECOND-LARGEST row on the trader's page.
+    "no-data": "no DAILY candle for the bias pair (the two days before) -- not judged",
+    "minutes-ungated": "the day before failed a data check, so the bias could not be "
+                       "settled -- not judged",
+    "suppressed": "a demerger sat inside the pair, so no bias could be computed -- not "
+                  "judged",
+}
+
+
 def _rule_words(rule: str) -> str:
-    return {
-        bias_engine.RULE_1: "Rule 1 -- a breakout on the close",
-        bias_engine.RULE_2: "Rule 2 -- a single sweep",
-        bias_engine.RULE_3: "Rule 3 -- both sides swept, decided on the one-minute candles",
-        bias_engine.RULE_3_TIE: "Rule 3 -- both sides swept inside ONE one-minute candle",
-        bias_engine.RULE_INSIDE: "Inside bar -- yesterday's bias kept",
-        bias_engine.RULE_CARRY: "No rule fitted -- yesterday's bias kept",
-        bias_engine.RULE_3_NO_MINUTE: "Rule 3, but no one-minute data that day -- bias kept",
-        bias_engine.RULE_3_NO_BREAK: "Rule 3, but no one-minute candle broke either side -- "
-                                     "bias kept",
-        "no-data": "no stored one-minute data for the stock that day -- not judged",
-        "minutes-ungated": "the day before failed a data check, so the bias could not be "
-                           "settled -- not judged",
-        "suppressed": "a demerger sat inside the pair, so no bias could be computed -- not "
-                      "judged",
-    }.get(rule, rule)
+    return _RULE_WORDS.get(rule, rule)
+
+
+def _render_bias_overlap_clause(emit: _Emit,
+                                overlap: Sequence[tuple[date, str, str, bool]],
+                                *, then_refused: int) -> None:
+    """The clause that makes page 5's three-way split exactly true. PURE (writes to ``emit``).
+
+    REVIEW_12_2 findings Q1 and Q2 meet here. The split is `judged + not-judged rows + the
+    rest`, and its first two buckets OVERLAP: a day with no daily candle for the bias pair is
+    still tradeable when a bias is being carried (CONTEXT 3.2, "no rule fires -> carry last
+    known bias"), so such a day is judged AND sits in a row the page calls *not judged*. The sum
+    closes because the third figure absorbs the difference -- and a reconciliation that closes
+    by quietly absorbing something is the same defect as one that does not close. So it is
+    stated.
+
+    Every specific is measured from the rows handed in rather than remembered about this run:
+    whether they are one stock or several, when they run from and to, and how many of them
+    actually took a trade. On the current run the answer is the flattering one (two days, one
+    stock, neither traded); a sentence that could only say that would go on saying it after the
+    data changed.
+    """
+    stocks = sorted({symbol for _day, symbol, _outcome, _executed in overlap})
+    traded = sum(1 for _day, _symbol, _outcome, executed in overlap if executed)
+    where = (f"all of them {stocks[0]}, at the edge of a long hole in that one stock's daily "
+             "history" if len(stocks) == 1 else f"across {emit.n(len(stocks))} stocks")
+    emit.add(f"**One qualification, because those two groups overlap by "
+             f"{emit.n(len(overlap))} days.** A day with no daily candle for the bias pair "
+             "normally cannot be judged -- but if the machine was already carrying a bias from "
+             "an earlier day, your rules say it keeps that bias, and such a day can still trade "
+             f"on it. That happened on {emit.n(len(overlap))} days, {where} "
+             f"({_long_date(overlap[0][0])} to {_long_date(overlap[-1][0])}), and "
+             + ("none of them ended up taking a trade" if not traded
+                else f"{emit.n(traded)} of them took a trade")
+             + f". Those days are counted in the first group as judged AND in the second as a "
+             f"*{NOT_JUDGED_WORDS}* row, which is why the third figure reads "
+             f"{emit.n(then_refused)} where the number of days that settled a bias and were "
+             f"then refused is {emit.n(then_refused + len(overlap))}. Said out loud rather than "
+             "left inside the arithmetic.")
+    emit.add("")
 
 
 def _render_walk(emit: _Emit, one: Walk, *, index: int, letters: str, row_size: int,
@@ -2011,7 +2148,7 @@ def _page_limits(emit: _Emit, figures: dict, *, run: r9.RunData, disclosures: pf
 
 
 def _page_questions(emit: _Emit, figures: dict, *, run: r9.RunData, walks: Sequence[Walk],
-                    probe: RoundingCandidate | None) -> None:
+                    probe: RoundingCandidate | None, counted: Census) -> None:
     emit.add("## 6. What we need from you")
     emit.add("")
     emit.add("### The two questions you have now answered")
@@ -2046,6 +2183,19 @@ def _page_questions(emit: _Emit, figures: dict, *, run: r9.RunData, walks: Seque
             emit.add("")
             break
     emit.add("-- and that pending note is now closed by your answer, with the rule unchanged.")
+    emit.add("")
+    # The claim is the MEASUREMENT, not a sentence about it: the count, the split and the
+    # verdict all come off the census, and the verdict has a losing branch. Your diagram put
+    # the gap stop "at or below" the POC; long means stop <= POC and short means stop >= POC,
+    # compared in half paise so an off-grid POC is never rounded to make the check pass.
+    emit.add(f"Your Round-4 gap rule was checked against every gap trade the run took -- "
+             f"{emit.n(len(counted.gaps))} of them, {emit.n(counted.gap_longs)} long and "
+             f"{emit.n(counted.gap_shorts)} short -- and "
+             + ("the stop sat on the correct side of the POC in every single one."
+                if not counted.gap_stop_violations else
+                f"on {emit.n(counted.gap_stop_violations)} of them the stop sat on the WRONG "
+                "side of the POC. That is a defect and it is printed here rather than left "
+                "for you to find."))
     emit.add("")
     emit.add("### And two things to confirm")
     emit.add("")
@@ -2097,6 +2247,11 @@ def _page_questions(emit: _Emit, figures: dict, *, run: r9.RunData, walks: Seque
             "count the profile rows on the day in section 3f",
         ],
         "paths": ["retire it", "change it", "take it live knowing the arithmetic"],
+        # The Round-4 stop check, as data beside the sentence that states it.
+        "gap_trades": len(counted.gaps),
+        "gap_trades_long": counted.gap_longs,
+        "gap_trades_short": counted.gap_shorts,
+        "gap_stop_violations": counted.gap_stop_violations,
     }
 
 
@@ -2176,11 +2331,24 @@ def _page_points(emit: _Emit, figures: dict, *, run: r9.RunData,
              "and *worst trade* are its single largest move each way. None of them knows how "
              "many shares were taken, and none of them has had a cost subtracted.")
     emit.add("")
+    emit.add(f"**And the same count page 1 makes, made here too: {emit.n(table.flat)} trades "
+             "ended exactly level in points** -- the exit was the entry, to the paisa -- across "
+             f"{emit.n(table.symbols_with_a_flat)} of the {emit.n(table.symbols)} stocks. "
+             "*Trades positive in points* counts a trade only when it moved in your favour, and "
+             f"its denominator is every trade on that stock, so those {emit.n(table.flat)} are "
+             "in the bottom of the fraction and in neither the positive nor the negative side "
+             f"of it. The same is true of the {emit.pct(table.win_rate)} above: it is "
+             f"{emit.n(table.winners)} positive out of all {emit.n(table.trades)} trades, "
+             f"{emit.n(table.flat)} of them level. Page 1 states its own count of level trades "
+             "for the same reason; this page is bigger, so the number is bigger.")
+    emit.add("")
 
     figures["points"] = {
         "symbols": table.symbols,
         "trades": table.trades,
         "winners": table.winners,
+        "flat": table.flat,
+        "symbols_with_a_flat": table.symbols_with_a_flat,
         "win_rate": str(table.win_rate),
         "points_paise": table.points_paise,
         "avg_points_paise": str(table.avg_points_paise),
@@ -2243,6 +2411,15 @@ def render_points_companion(*, run: r9.RunData, points: Sequence[pts.SymbolPoint
         f"{pts.format_points(table.points_paise)} points in total, "
         f"{pts.format_points(table.avg_points_paise)} a trade.")
     add("")
+    # REVIEW_12_2 finding Q3, on this document too: the column's denominator is every trade, so
+    # the trades that ended exactly level sit in it and in neither named side of it.
+    add(f"**{table.flat:,} of those trades ended exactly level in points**, across "
+        f"{table.symbols_with_a_flat:,} of the {table.symbols:,} stocks. *Trades positive in "
+        "points* is winners over ALL of a stock's trades (CONTEXT 7-E13's one denominator), so a "
+        "level trade is in the denominator and in neither the positive nor the negative side of "
+        "it. Each stock's own count is the `flat` field of the JSON companion to the validation "
+        "pack.")
+    add("")
     add("| # | Stock | Trades | Trades positive in points | Points | Points a trade | "
         "Worst points drawdown | Best trade | on | Worst trade | on |")
     add("|---:|---|---:|---:|---:|---:|---:|---:|---|---:|---|")
@@ -2277,3 +2454,10 @@ __all__ = [
     "rounding_candidates",
     "walk",
 ]
+
+
+# REVIEW_12_2 finding C4: without this guard `python -m acumen.trader_pack --out ... --json ...
+# --points ...` parsed nothing, wrote none of the three documents and exited 0. The module is
+# also on `[project.scripts]` as `acumen-trader-pack`.
+if __name__ == "__main__":  # pragma: no cover -- exercised as a subprocess in the tests
+    raise SystemExit(main())

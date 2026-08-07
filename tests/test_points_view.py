@@ -228,3 +228,85 @@ def test_the_cost_in_points_is_the_cost_divided_by_ONE_share() -> None:
     assert pv.cost_in_points_paise(10_000, shares=350) == Fraction(10_000, 350)
     with pytest.raises(pv.PointsError):
         pv.cost_in_points_paise(10_000, shares=0)
+
+
+# --- REVIEW_12_2 findings C7 and C8 --------------------------------------------------------------
+
+
+def test_a_move_too_small_to_survive_rounding_STILL_SHOWS_ITS_DIRECTION() -> None:
+    """REVIEW_12_2 finding C7. The sign is taken from the value handed in, not from the
+    quantized one, so a column whose convention is "a sign is always there" keeps it.
+
+    HAND-COMPUTED. Half a paisa either way is the boundary: `Fraction(1, 2)` paise is
+    0.005 rupees, which quantizes to nothing at two places but is not nothing. Seven rows of the
+    204-row companion sat exactly here -- an average move under half a paisa beside a *Points*
+    column carrying thousands of rupees, printed without a sign.
+    """
+    tiny_gain, tiny_loss = Fraction(1, 2), Fraction(-1, 2)
+    assert pv.format_points(tiny_gain).startswith("+"), "a gain too small to print is a gain"
+    assert pv.format_points(tiny_loss).startswith("-"), "and a loss too small to print is a loss"
+    assert pv.format_points(tiny_gain).endswith("0.00") and pv.format_points(
+        tiny_loss).endswith("0.00"), "the magnitude still rounds away; only the sign survives"
+
+    # an EXACT zero is genuinely neither, and still prints neither
+    assert pv.format_points(0) == "0.00" and pv.format_points(Fraction(0)) == "0.00"
+    # ...and nothing that does not round to nothing has moved
+    assert pv.format_points(250) == "+2.50" and pv.format_points(-100) == "-1.00"
+    # a MAGNITUDE still refuses the leading plus, and still shows a minus if one ever arrives
+    assert pv.format_points(tiny_gain, signed=False).endswith("0.00")
+    assert not pv.format_points(tiny_gain, signed=False).startswith("+")
+
+
+def test_the_totals_carry_the_flat_trades_page_7_has_to_state() -> None:
+    """REVIEW_12_2 finding Q3. The win rate's denominator is EVERY trade (E13), so the trades
+    that ended exactly level are inside it and in neither named side of it -- a page that prints
+    the rate has to say how many there are.
+
+    HAND-COMPUTED from the fixture above: BBB day 5 entered and exited at 5,100, so it is the
+    one flat trade, on one of the two symbols. The rate is 3 winners over all 6 trades.
+    """
+    table = pv.per_symbol(FIXTURE)
+    totals = pv.totals(table)
+    assert totals.flat == 1 and totals.symbols_with_a_flat == 1
+    assert totals.trades == 6 and totals.winners == 3
+    assert totals.win_rate == Fraction(3, 6), "flats are in the denominator, not removed from it"
+    assert totals.flat == sum(one.flat for one in table)
+    assert totals.winners + totals.flat + sum(one.losers for one in table) == totals.trades
+
+
+def test_the_trade_ORDER_is_safe_only_because_one_stock_trades_once_a_day() -> None:
+    """REVIEW_12_2 finding C8, PINNED rather than fixed -- it is latent, not live.
+
+    `_ordered` sorts on `(day, entry_close_stamp or day, symbol)`. The second element mixes a
+    `datetime` with a `date`, which Python refuses to compare, so it would raise `TypeError` the
+    moment two rows of the same symbol tied on `day` with one of them carrying no stamp. That
+    cannot happen under CONTEXT 3.4 (R1-Q16: at most one trade per stock per day), so the second
+    element is never reached and the ledger holds zero executed rows without a stamp.
+
+    Both halves are asserted here: the safe case, which is every real case, and the unreachable
+    one, so that a future change making a second same-day trade legal turns this red with an
+    explanation attached instead of raising in a report generator.
+    """
+    stamped = row("AAA", 1, sig.LONG, 10_000, 10_250)
+    unstamped = LedgerRow(
+        symbol="AAA", day=date(2026, 4, 1), status="evaluated", reason="", side=sig.LONG,
+        executed=True, entry_paise=10_000, exit_paise=10_100, entry_close_stamp=None,
+    )
+
+    # SAFE: distinct days, so the stamp is never compared against a date
+    later = row("AAA", 2, sig.LONG, 10_000, 10_100)
+    assert [one.day for one in pv._ordered([later, unstamped])] == [
+        date(2026, 4, 1), date(2026, 4, 2),
+    ]
+    # SAFE: same day, DIFFERENT symbols -- ties break on `day` alone only when both stamps exist,
+    # and here the missing stamp is compared against another date, not a datetime
+    other = LedgerRow(
+        symbol="BBB", day=date(2026, 4, 1), status="evaluated", reason="", side=sig.LONG,
+        executed=True, entry_paise=1, exit_paise=2, entry_close_stamp=None,
+    )
+    assert [one.symbol for one in pv._ordered([other, unstamped])] == ["AAA", "BBB"]
+
+    # LATENT: same day, same symbol, one stamped and one not -- CONTEXT 3.4 forbids it, and if
+    # it ever became legal this is what would happen.
+    with pytest.raises(TypeError):
+        pv._ordered([stamped, unstamped])
