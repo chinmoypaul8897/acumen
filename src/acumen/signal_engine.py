@@ -176,8 +176,39 @@ class SignalPipeline:
             return StockDay(
                 symbol=symbol, day=day, evaluated=False, reason=NOT_EVALUATED_NO_MINUTES, bias=bias
             )
+        return self.evaluate(symbol, day, bias=bias, minutes=minutes)
 
-        day_gates = self.gate_day(symbol, day, minutes)
+    def evaluate(
+        self,
+        symbol: str,
+        day: date,
+        *,
+        bias: DailyBias,
+        minutes: Sequence[StoredBar],
+        gates: DayGates | None = None,
+    ) -> StockDay:
+        """CONTEXT 3.4 over MINUTES THE CALLER HOLDS -- the one-engine seam (CONTEXT 6).
+
+        :meth:`stock_day` is this method with the store in front of it. The live screener
+        (chunk 13) holds its minutes in a recording rather than in the Parquet lake, so it calls
+        THIS -- and therefore runs the identical battery, the identical POC engine, the identical
+        aggregation and the identical :func:`acumen.signals.evaluate_day`, in the identical
+        order. CONTEXT 6's *"same code path, guaranteed no backtest/live drift"* is a property of
+        this split rather than a claim beside two implementations.
+
+        ``minutes`` is a whole stock-day of stored bars, ungated and unfiltered -- exactly what
+        :meth:`acumen.minute_store.MinuteStore.minutes` returns. The live screener passes the
+        bars it has collected SO FAR; the pure engine reads a prefix perfectly well (an absent
+        grid stamp is a no-trade quarter-hour, not an error) and the live layer is what knows
+        that a square-off marked on the last bar of a prefix is not yet an exit.
+
+        ``gates`` lets a caller that already computed the CONTEXT 4.6 battery for this day hand
+        it in instead of paying for it again -- a live sweep evaluates the same day at every
+        15-minute boundary and the battery is a whole-day measurement, so recomputing it per
+        boundary would be both wasteful and, on a growing prefix, WRONG. ``None`` means
+        "compute it here", which is what :meth:`stock_day` does.
+        """
+        day_gates = self.gate_day(symbol, day, minutes) if gates is None else gates
         refusal = day_gates.refusal
         if refusal is not None:
             return StockDay(
