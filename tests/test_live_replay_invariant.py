@@ -345,3 +345,125 @@ def test_the_recording_carries_everything_a_replay_needs(tmp_path: Path) -> None
     assert inventory["candle_lines"] > 300, "seventeen polls of a 375-minute day"
     assert inventory["alerts"] == 3 and inventory["has_bias"] and inventory["has_manifest"]
     assert len(inventory["digest"]) == 64
+
+
+# --- CONTEXT 4.7 / Q-29: a recording replays under ITS OWN master --------------------------------
+
+
+def _second_master_or_skip() -> tuple[str, str]:
+    """A cached dump that is NOT the config pin, with its digest. Skips if the cache has one."""
+    from acumen import backtest as bt
+    from acumen.instrument_master import cached_masters
+
+    config = load_config(include_env=False)
+    others = [
+        path for path in cached_masters(config.path("cache_root"))
+        if path.name != config.instrument_master
+    ]
+    if not others:
+        pytest.skip("the cache holds only the pinned master; this test needs a second dump")
+    return others[-1].name, bt.file_sha256(others[-1])
+
+
+def test_a_RECORDING_replays_under_the_master_IT_NAMES_not_under_the_config_pin(
+    tmp_path: Path,
+) -> None:
+    """QUESTIONS.md Q-29, the architect's option (b), made structural.
+
+    *"replay consumes the recording's own pin, so section 6 holds per day"*. This is the one
+    property that makes a live day reproducible AT ALL once the pin moves: the vendor's tick is
+    not stable between dumps -- Q-20 measured 11 of the sealed 210 disagreeing across two
+    snapshots two days apart -- and the tick sizes the row grid, hence the POC, hence every entry,
+    stop and target. A replay that silently took today's pin would answer a different question
+    from the morning it claims to reproduce, and both answers would look like clean POCs.
+
+    The recording here names the cache's OTHER dump. Nothing about the day changes; what must
+    change is which file the pipeline was built from.
+    """
+    _stores_or_skip()
+    other_name, other_sha = _second_master_or_skip()
+    config = load_config(include_env=False)
+    assert other_name != config.instrument_master
+
+    recording = LiveRecording.at(tmp_path / "recorded-under-another-master")
+    recording.open_session({
+        "trade_date": GOLDEN_DAY.isoformat(),
+        "mode": "live",
+        "master_file": other_name,
+        "master_sha256": other_sha,
+    })
+
+    # The resolution itself, asserted directly -- so this test fails on its OWN claim if the
+    # rule is ever reverted, rather than on some downstream refusal (REVIEW_12_2 finding C5).
+    assert ls._master_for("replay", day=GOLDEN_DAY, recording=recording) == other_name
+    assert ls._master_for(
+        "live", day=GOLDEN_DAY, recording=recording
+    ) == ls.day_master_filename(GOLDEN_DAY), "and a LIVE morning takes its OWN day's dump"
+
+    screener = ls.build_live_screener(
+        GOLDEN_DAY, (GOLDEN_SYMBOL,),
+        source=StoredDayBarSource(MinuteStore.at(config.path("data_root") / "minute_store")),
+        recording=recording,
+        clock=ls.VirtualClock(stamp=datetime.combine(GOLDEN_DAY, datetime.min.time())),
+        mode="replay",
+        sinks=(ls.CollectingAlertSink(),),
+    )
+
+    manifest = screener.recording.read_manifest()
+    assert manifest["master_file"] == other_name, "the recording's own pin, not the config's"
+    assert manifest["master_sha256"] == other_sha
+    # ...and the PIPELINE really was built from that file, which is the part that moves a POC
+    from acumen.instrument_master import load_master_file
+
+    home = config.path("cache_root") / "instrument_master"
+    recorded_master = load_master_file(home / other_name)
+    pinned_master = load_master_file(home / config.instrument_master)
+    if len(recorded_master) == len(pinned_master):  # pragma: no cover -- cache-dependent
+        pytest.skip(
+            "the two cached dumps hold the same number of instruments, so this assertion "
+            "could not tell them apart"
+        )
+    assert (
+        screener.pipeline.master.instrument(GOLDEN_SYMBOL).tick_size_paise
+        == recorded_master.instrument(GOLDEN_SYMBOL).tick_size_paise
+    )
+    assert len(screener.pipeline.master) == len(recorded_master) != len(pinned_master), (
+        "the pipeline was built from the RECORDING's dump, and the two dumps are "
+        "distinguishable -- which is what makes this assertion mean anything"
+    )
+
+
+def test_a_FRESH_replay_with_no_recording_still_takes_the_Q20_PIN(tmp_path: Path) -> None:
+    """The other half of the same resolution, and the one that governs the historical ledger.
+
+    With nothing recorded to inherit, a replay is a backtest of a past day and Q-20's pin is its
+    law -- unchanged by CONTEXT 4.7, which says so in its own last clause.
+    """
+    _stores_or_skip()
+    config = load_config(include_env=False)
+    screener = _screener(tmp_path)
+    assert screener.recording.read_manifest()["master_file"] == config.instrument_master
+
+
+def test_the_BACKTEST_still_REFUSES_any_master_but_the_pin() -> None:
+    """CONTEXT 4.7 opened ONE door and it is not this one.
+
+    *"the Q-20 pin remains law for the historical ledger"*. ``build_runner``'s ``master_path``
+    argument still confirms the pin and refuses anything else, and passing both doors at once is
+    itself an error -- so a future caller cannot reach the live door by accident while believing
+    it is confirming the pin.
+    """
+    from acumen import backtest as bt
+
+    config = load_config(include_env=False)
+    with pytest.raises(bt.BacktestError, match="is not the pinned instrument master"):
+        bt.build_runner(
+            (GOLDEN_SYMBOL,), GOLDEN_DAY, GOLDEN_DAY, seed_from=GOLDEN_DAY,
+            master_path=Path("OpenAPIScripMaster_1999-01-01.json"),
+        )
+    with pytest.raises(bt.BacktestError, match="never both"):
+        bt.build_runner(
+            (GOLDEN_SYMBOL,), GOLDEN_DAY, GOLDEN_DAY, seed_from=GOLDEN_DAY,
+            master_path=Path(config.instrument_master),
+            master_file=config.instrument_master,
+        )

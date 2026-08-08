@@ -9,9 +9,11 @@ Three of them, and each is a rule someone wrote down before this chunk existed:
    package, at the source text AND through the AST, rather than by a promise in a docstring.
 2. **Credentials are never printed, logged or committed.** Same rule, the other half.
 3. **The screener degrades to SILENCE plus a visible failure banner, never to a wrong alert.**
-   The per-symbol half is tested in ``tests/test_live_screener.py``; what is tested here is that
-   the LIVE mode -- the one nobody may rely on until QUESTIONS.md **Q-28** is ruled -- refuses to
-   start at all rather than starting and producing numbers.
+   The per-symbol half is tested in ``tests/test_live_screener.py``; what is tested here is the
+   LIVE mode's own refusals and its DISCLOSURE. Q-28 blocked that mode entirely until the
+   architect ruled on 08-Aug-2026; the block is now CONTEXT 4.7 and what stands in its place is
+   tested here -- a live morning without THE DAY'S OWN instrument master refuses to start
+   (Q-29), and one that does start says, before anything else, exactly what it could not verify.
 
 ASCII-only, like every other source file in this repo (chunk-0 B7).
 """
@@ -152,30 +154,28 @@ def test_a_credential_never_reaches_a_string(monkeypatch: pytest.MonkeyPatch) ->
         assert secret not in repr(client)
 
 
-def test_the_LIVE_mode_REFUSES_TO_START_and_says_which_question_blocks_it(
-    tmp_path: Path,
-) -> None:
-    """QUESTIONS.md Q-28, made structural.
+def test_the_LIVE_mode_REFUSES_TO_START_WITHOUT_THE_DAYS_OWN_MASTER(tmp_path: Path) -> None:
+    """CONTEXT 4.7 / QUESTIONS.md Q-29, made structural -- the successor to the Q-28 block.
 
-    CONTEXT 3.3's POC needs CONTEXT 4.5 gate 1 to have PASSED, gate 1 needs TODAY's bhavcopy,
-    and today's bhavcopy does not exist during today. This session did not decide what a live
-    screener does about that -- so the live mode does not start, and it says so in the
-    question's own words rather than failing with an obscure refusal from four layers down.
-
-    This test is the STOP rule in executable form: it will go red the moment someone unblocks
-    live without the ruling, which is exactly when someone should be stopped.
+    Until 08-Aug-2026 this file held the STOP rule in executable form: ``mode="live"`` raised
+    :class:`BlockedByOpenQuestion` carrying Q-28's text. The architect ruled, Q-28 is CONTEXT
+    4.7, and the block is GONE -- but the ruling replaced it with a prerequisite that is just as
+    structural and is tested here in its place: *"a live morning uses THE DAY'S OWN instrument
+    master, fetched pre-open"*. The tick sizes CONTEXT 3.3's row grid, hence the POC, hence every
+    entry, stop and target, so a morning whose dump did not arrive must refuse rather than fall
+    back to a stale snapshot -- silently running on last week's ticks is exactly the failure Q-20
+    measured on 11 of the sealed 210.
     """
-    with pytest.raises(ls.BlockedByOpenQuestion) as caught:
+    with pytest.raises(Exception) as caught:
         ls.build_live_screener(
             date(2026, 7, 17), ("SYNTH",),
             source=None, recording=LiveRecording.at(tmp_path / "r"),
             clock=ls.VirtualClock(stamp=datetime(2026, 7, 17, 9, 0)), mode="live",
         )
     message = str(caught.value)
-    assert "Q-28" in message
-    assert "gate 1" in message and "bhavcopy" in message
-    assert "Replay of a past day is unaffected" in message
-    assert ls.Q28_TEXT == message
+    assert "OpenAPIScripMaster_2026-07-17.json" in message, "it names the file it wanted"
+    assert "CONTEXT 4.7" in message
+    assert "not something to substitute around" in message
 
     with pytest.raises(ls.ScreenerError, match="mode must be"):
         ls.build_live_screener(
@@ -185,11 +185,33 @@ def test_the_LIVE_mode_REFUSES_TO_START_and_says_which_question_blocks_it(
         )
 
 
-def test_the_screener_cli_reports_the_block_rather_than_crashing(tmp_path: Path) -> None:
-    """The operator's experience of the block: exit 1 and the question, not a traceback.
+def test_the_LIVE_startup_disclosure_says_what_could_not_be_verified() -> None:
+    """CONTEXT 4.7's disclosure, in the words the section itself uses.
 
-    The same standard REVIEW_12C finding C2 set for the two document generators, applied to the
-    newest runnable module in the repo before anyone has to find out the hard way.
+    Three things must survive any future edit of that banner, because each is a promise the
+    ruling makes to the trader: WHICH battery ran, WHAT it could not check, and HOW OFTEN that
+    has historically mattered. The measured residual is in it as a NUMBER -- the ruling's own
+    instruction was that the residual is disclosed as a measured frequency, not an adjective.
+    """
+    text = ls.LIVE_STARTUP_DISCLOSURE
+    assert "ORACLE-FREE battery" in text
+    assert "Gates 1 and 1P are structurally INAPPLICABLE" in text
+    assert ls.LIVE_DISCLOSURE in text, "the alert-level sentence is quoted inside the banner"
+    assert "0.5229%" in text and "2,187/418,275" in text, (
+        "the residual is a measured frequency, not an adjective (the architect's own words)"
+    )
+    assert "THIS TOOL PLACES NO ORDERS." in text
+
+
+def test_the_screener_cli_reports_a_FAILURE_TO_START_rather_than_crashing(
+    tmp_path: Path,
+) -> None:
+    """The operator's experience of a refusal: exit 1 and one sentence, not a traceback.
+
+    The same standard REVIEW_12C finding C2 set for the two document generators. The refusal
+    exercised here is the live path's own prerequisite (no dump for that day), which is what
+    replaced the Q-28 block -- and the startup disclosure is printed BEFORE it, so an operator
+    who gets no further has still been told what a live morning is.
     """
     from acumen import run_screener
 
@@ -199,13 +221,35 @@ def test_the_screener_cli_reports_the_block_rather_than_crashing(tmp_path: Path)
     real_print = builtins.print
     builtins.print = lambda *args, **kwargs: printed.append(" ".join(str(a) for a in args))
     try:
-        code = run_screener.main(["--mode", "live", "--day", "2026-07-17", "--symbols", "SYNTH"])
+        code = run_screener.main([
+            "--mode", "live", "--day", "2026-07-17", "--symbols", "SYNTH",
+            "--recording-root", str(tmp_path / "rec"),
+        ])
     finally:
         builtins.print = real_print
     assert code == 1
     joined = "\n".join(printed)
-    assert "BLOCKED" in joined and "Q-28" in joined
+    assert "CONTEXT 4.7 -- LIVE MODE" in joined, "the disclosure prints before anything runs"
+    assert ls.LIVE_DISCLOSURE in joined
+    assert "the screener cannot start" in joined
     assert "Traceback" not in joined
+
+
+def test_a_REPLAY_carries_no_live_disclosure_because_its_day_WAS_verified() -> None:
+    """The other half of CONTEXT 4.7, and the one a careless edit would get wrong.
+
+    The disclosed line is a fact about DATA, not a disclaimer about software: a replayed day has
+    a published bhavcopy and ran the full battery, so stamping it "not yet verified" would be
+    false -- and a sentence that appears on everything is a sentence that means nothing when it
+    appears on the morning that needs it.
+    """
+    screener = ls.LiveScreener(
+        day=date(2026, 6, 10), symbols=(), pipeline=None, biases={}, gates={},
+        source=None, recording=LiveRecording.at(Path(".")),
+        clock=ls.VirtualClock(stamp=datetime(2026, 6, 10, 9, 0)),
+    )
+    assert screener.disclosure == ""
+    assert screener.posture == ls.POSTURE_SETTLED
 
 
 def test_the_master_tick_divergence_detector_MEASURES_and_decides_nothing() -> None:
@@ -232,3 +276,44 @@ def test_the_master_tick_divergence_detector_MEASURES_and_decides_nothing() -> N
     assert ls.master_tick_divergence(pinned, newer, ("AAA", "BBB")) == {"BBB": (5, 1)}
     # an unknown symbol is not a divergence and is not an exception
     assert ls.master_tick_divergence(pinned, newer, ("ZZZ",)) == {}
+
+
+def test_THE_NEWLY_LIVE_PATH_STILL_TOUCHES_ONE_BROKER_METHOD(tmp_path: Path) -> None:
+    """The tripwires re-asserted against the path that can now actually run.
+
+    Until 08-Aug-2026 ``run_screener`` could not reach a broker at all, because live refused to
+    start -- so the AST scan above was guarding a path with no feed behind it. It has one now.
+    What this checks is that opening that feed added exactly two calls to this repo's surface,
+    both of them already reviewed: ``login`` on our own client, and ``get_candles``, which is
+    CONTEXT 4.3 and 4.4's single named source of bars.
+
+    Written as an AST walk over ``run_screener`` rather than as a string search, because the way
+    this rule erodes is a convenience helper, not a pasted endpoint name.
+    """
+    from acumen import run_screener
+
+    tree = ast.parse(Path(run_screener.__file__).read_text(encoding="utf-8"))
+    called = {
+        node.func.attr for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+    }
+    broker_ish = {name for name in called if name in ORDER_ENDPOINTS}
+    assert not broker_ish, f"the CLI reaches {sorted(broker_ish)}"
+    assert "login" in called, "the live path opens a session, and that is all it opens"
+    source_text = (PACKAGE / "live_source.py").read_text(encoding="utf-8")
+    assert source_text.count("self.client.") == 1, (
+        "the ONE broker call on the whole live path, unchanged by the unblocking"
+    )
+
+
+def test_A_PREFLIGHT_OPENS_NO_BROKER_SESSION_AT_ALL(tmp_path: Path) -> None:
+    """``--preflight-only`` is what an operator runs before the bell. It must cost nothing.
+
+    A preflight that logged in would be a preflight nobody runs twice, and a session opened at
+    08:50 for a check is a session that can expire at 11:15 for a trade.
+    """
+    from acumen.live_source import BarSourceError
+    from acumen.run_screener import PreflightOnlySource
+
+    with pytest.raises(BarSourceError, match="no broker session is opened"):
+        PreflightOnlySource().fetch("SYNTH", date(2026, 7, 17), datetime(2026, 7, 17, 11, 15))

@@ -31,20 +31,27 @@ re-poll at sweep end**, and a **hard deadline before the next boundary**. A symb
 its window is reported as ``skipped`` and never allowed to stall the queue -- one slow ticker
 must not cost the other 209 their 11:30 evaluation.
 
-## What is BLOCKED, and why (QUESTIONS.md Q-28)
+## Which battery a morning runs (CONTEXT 4.7)
 
-CONTEXT 3.3's POC is computed only when the day's **gate 1** (CONTEXT 4.5 volume reconciliation)
-has PASSED -- :func:`acumen.poc.day_profile` refuses outright otherwise, and the 2026-07-26
-completeness ruling made that verdict the window's ONLY validity test. Gate 1 measures the day's
-folded 1-minute volume against **that day's bhavcopy**, which for TODAY does not exist until
-after the close. Gate 1P has the same oracle and the same problem.
+CONTEXT 3.3's POC is computed only when the day's governing battery has PASSED. On a SETTLED day
+that battery is CONTEXT 4.6's -- gate 1 (volume reconciliation), gate 2 (integrity) and gate 1P
+(price containment) -- and gate 1 and gate 1P both measure the day against **that day's
+bhavcopy**, which for TODAY does not exist until after the close.
 
-So a genuinely live session cannot run the battery the engines require, and CONTEXT is silent on
-what the screener does about it. That is a class-A hole, it is raised as **Q-28**, and this
-module does not decide it: :func:`build_live_screener` REFUSES to start a session for a day
-whose battery cannot be computed. **Replay is unaffected** -- a past day has its bhavcopy, so the
-battery is the backtester's own verdict and the whole pipeline runs end to end, which is exactly
-what this chunk's replay invariant tests.
+That was **Q-28**, and it blocked this module's live mode until the architect ruled on
+08-Aug-2026. The ruling, now **CONTEXT 4.7**: gates 1 and 1P exist to catch history being
+rewritten, and today cannot be rewritten during today, so they are structurally INAPPLICABLE to
+same-day data -- a live morning runs the **ORACLE-FREE battery per sweep** (gate 2 with the
+Q-21(a) open test, the Q-17 candle-level drops, candle validity), every live alert carries
+:data:`LIVE_DISCLOSURE`, and the NEXT pre-open runs the full battery over the recording against
+the published bhavcopy and reports the verdict loudly
+(:func:`acumen.live_refresh.verify_prior_recording`). The residual is measured, not asserted:
+0.5229% of settled symbol-days over the ten-year ledger failed gate 1 alone
+(``docs/evidence/chunk13_q28_residual.md``).
+
+**Replay is unchanged.** A past day has its bhavcopy, so the battery is the backtester's own
+verdict and the whole pipeline runs end to end -- which is exactly what this chunk's replay
+invariant tests, and it tests the same code the live morning runs.
 
 Source files in this package are ASCII-only on purpose (see src/acumen/config.py).
 """
@@ -77,7 +84,14 @@ from .live_recording import (
 )
 from .live_source import BarSource, merge_bars
 from .minute_store import StoredBar
-from .signal_engine import DayGates, SignalPipeline, StockDay
+from .signal_engine import (
+    POSTURE_LIVE,
+    POSTURE_SETTLED,
+    DayGates,
+    SignalPipeline,
+    StockDay,
+    oracle_free_battery,
+)
 
 # --- the seven states the dashboard shows (DESIGN.md PART II names each one's colour) ---------
 
@@ -129,16 +143,35 @@ class ScreenerError(RuntimeError):
 
 
 class BlockedByOpenQuestion(ScreenerError):
-    """A class-A spec hole stands between this session and a correct answer. See QUESTIONS.md."""
+    """A class-A spec hole stands between this session and a correct answer. See QUESTIONS.md.
+
+    Nothing raises this today -- Q-28, the hole it was written for, was ruled on 08-Aug-2026 and
+    is CONTEXT 4.7. It is KEPT, and kept exported, because the next class-A hole a live session
+    walks into needs the same exit: refuse to start, in the question's own words, rather than
+    start and produce a number nobody may rely on.
+    """
 
 
-Q28_TEXT: str = (
-    "QUESTIONS.md Q-28 (class A, OPEN): CONTEXT 3.3's POC is computed only when CONTEXT 4.5's "
-    "gate 1 has PASSED, and gate 1 reconciles the day's folded 1-minute volume against THAT "
-    "DAY'S BHAVCOPY -- which does not exist until after the close. A live session therefore "
-    "cannot run the battery the engines require, and CONTEXT is silent on what the screener "
-    "does instead. This session did not decide it. Replay of a past day is unaffected and is "
-    "fully built: its bhavcopy exists, so the battery is the backtester's own verdict."
+#: CONTEXT 4.7, the architect's own words, carried on **every live alert** and on the dashboard
+#: header of any live session -- dry-run included, because a dry-run morning reads the same
+#: unverified feed. It is not a caveat about the software; it is a fact about the data: no
+#: exchange record exists for today until the evening's bhavcopy is published.
+LIVE_DISCLOSURE: str = "live feed, not yet verified against the exchange's end-of-day record"
+
+#: What a live session prints before it starts, so the operator sees the posture he is running
+#: under rather than inferring it from a mode flag. CONTEXT 4.7 in the section's own terms.
+LIVE_STARTUP_DISCLOSURE: str = (
+    "CONTEXT 4.7 -- LIVE MODE. A live trading day has no bhavcopy oracle until evening, so this "
+    "session runs the ORACLE-FREE battery per sweep: gate 2 (with the Q-21(a) open test), the "
+    "Q-17 candle-level drops, and candle validity. Gates 1 and 1P are structurally INAPPLICABLE "
+    "to same-day data -- what they detect is history being rewritten, and today cannot be "
+    "rewritten during today. Every alert this session produces carries: '" + LIVE_DISCLOSURE +
+    "'. The NEXT pre-open runs the FULL battery over this day's recording against the published "
+    "bhavcopy and reports both verdicts, naming loudly any day it alerted on that the oracle "
+    "then refuses. Measured residual: 0.5229% of settled symbol-days (2,187/418,275 over the "
+    "ten-year ledger) failed gate 1 alone -- the frequency this morning accepts and discloses. "
+    "The instrument master is THIS DAY'S OWN dump (QUESTIONS.md Q-29), named and hashed into the "
+    "recording. THIS TOOL PLACES NO ORDERS."
 )
 
 
@@ -157,6 +190,12 @@ def boundary_stamps(day: date) -> tuple[datetime, ...]:
         stamps.append(stamp)
         stamp += timedelta(minutes=sig.CANDLE_MINUTES)
     return tuple(stamps)
+
+
+#: How long a live loop sleeps between checks while it waits for the next boundary. Short enough
+#: that the sweep starts within a second of the candle closing (CONTEXT 4.4 measures the
+#: just-closed candle as arriving ~0.2s after the boundary), long enough not to spin.
+BOUNDARY_POLL_SECONDS: float = 1.0
 
 
 class Clock(Protocol):
@@ -254,7 +293,18 @@ class CollectingAlertSink:
 
 
 def format_alert(alert: RecordedAlert) -> str:
-    """One line, the trader's four numbers first (CONTEXT 4.4's payload list)."""
+    """One line, the trader's four numbers first (CONTEXT 4.4's payload list).
+
+    A live alert carries CONTEXT 4.7's disclosure on the same line, after the numbers rather
+    than before them: the sentence must not be what he reads first at 11:30, and it must not be
+    absent from what he forwards at 11:31.
+    """
+    line = _format_alert_body(alert)
+    disclosure = alert.payload.get("disclosure")
+    return f"{line}   [{disclosure}]" if disclosure else line
+
+
+def _format_alert_body(alert: RecordedAlert) -> str:
     at = alert.at.strftime("%H:%M")
     payload = alert.payload
     if alert.kind == ALERT_TRIGGER:
@@ -378,9 +428,14 @@ class LiveScreener:
         symbols: the universe, in sweep order.
         pipeline: the chunk-7 orchestration -- the SAME object the backtester wires.
         biases: today's bias per symbol, computed pre-open from the stored daily candles.
-        gates: the CONTEXT 4.6 battery per symbol for this day. A whole-day measurement, so it
-            is computed ONCE and reused at every boundary; see Q-28 for why a live session
-            cannot have it at all.
+        gates: the CONTEXT 4.6 battery per symbol for this day, under :data:`POSTURE_SETTLED`.
+            A whole-day measurement, so it is computed ONCE and reused at every boundary. EMPTY
+            under :data:`POSTURE_LIVE`: CONTEXT 4.7's oracle-free battery is a property of the
+            bars in hand and is therefore recomputed per sweep, from the same shared function.
+        posture: which battery governs (CONTEXT 4.7). ``settled`` for a replay of a past day,
+            ``live`` for today.
+        disclosure: the sentence every alert of this session carries. Empty for a replay, whose
+            day HAS been verified against the exchange's record.
         source: where the 1-minute bars come from (:mod:`acumen.live_source`).
         recording: the replay contract (:mod:`acumen.live_recording`).
         clock: injectable wall time.
@@ -406,6 +461,8 @@ class LiveScreener:
     cost_paise: int = 0
     deadline_seconds: int = (sig.CANDLE_MINUTES - 1) * 60
     dry_run: bool = True
+    posture: str = POSTURE_SETTLED
+    disclosure: str = ""
 
     # --- mutable session state (persisted to state.json after every sweep) ---
     bars: dict[str, tuple[StoredBar, ...]] = field(default_factory=dict)
@@ -624,12 +681,29 @@ class LiveScreener:
             return []
 
         stock_day = self.pipeline.evaluate(
-            symbol, self.day, bias=bias, minutes=minutes, gates=self.gates.get(symbol)
+            symbol, self.day, bias=bias, minutes=minutes, gates=self._battery(symbol, minutes)
         )
         before = self.states[symbol]
         after = self._state_from(stock_day, boundary, previous=before)
         self.states[symbol] = after
         return self._alerts_for(before, after, stock_day, boundary)
+
+    def _battery(self, symbol: str, minutes: Sequence[StoredBar]) -> DayGates | None:
+        """Which battery governs this symbol-day, and for a live morning, over these bars.
+
+        CONTEXT 4.7 is the whole of this method. A REPLAY takes the settled battery computed once
+        from the whole stored day (gate 1 folds a whole session's volume against a whole day's
+        bhavcopy, so recomputing it on a growing prefix would be wrong at every boundary but the
+        last). A LIVE morning has no bhavcopy to fold against, so it runs the ORACLE-FREE battery
+        PER SWEEP over the bars actually in hand -- which is legitimate precisely because every
+        trigger left in that battery is a property of the bars themselves.
+
+        Neither branch computes anything here: both call functions the backtester's own path
+        calls, which is what keeps CONTEXT section 6 a property of the code.
+        """
+        if self.posture == POSTURE_LIVE:
+            return oracle_free_battery(self.day, minutes)
+        return self.gates.get(symbol)
 
     def _state_from(
         self, stock_day: StockDay, boundary: datetime, *, previous: SymbolState
@@ -758,6 +832,12 @@ class LiveScreener:
     def _alert(self, kind: str, symbol: str, at: datetime, payload: dict) -> RecordedAlert:
         body = dict(payload)
         body["dry_run"] = self.dry_run
+        if self.disclosure:
+            # CONTEXT 4.7: "Every live alert carries: 'live feed, not yet verified against the
+            # exchange's end-of-day record.'" On the alert itself, not only on the screen it was
+            # read from -- an alert is forwarded, screenshotted and quoted, and the sentence has
+            # to travel with it.
+            body["disclosure"] = self.disclosure
         return RecordedAlert(kind=kind, symbol=symbol, at=at, payload=body)
 
     def _deliver(self, alert: RecordedAlert) -> bool:
@@ -810,10 +890,9 @@ class LiveScreener:
             "banner-raised", at=report.finished, sweep=report.boundary.isoformat(),
             detail=self.banner,
         )
-        self._deliver(RecordedAlert(
-            kind=ALERT_FAILURE, symbol="-", at=report.finished,
-            payload={"detail": self.banner, "dry_run": self.dry_run,
-                     "sweep": report.boundary.isoformat()},
+        self._deliver(self._alert(
+            ALERT_FAILURE, "-", report.finished,
+            {"detail": self.banner, "sweep": report.boundary.isoformat()},
         ))
 
     # --- crash-safe resume ---------------------------------------------------------
@@ -872,6 +951,29 @@ class LiveScreener:
         }
 
 
+def wait_for_boundary(
+    clock: Clock, stamp: datetime, *, poll_seconds: float = BOUNDARY_POLL_SECONDS
+) -> float:
+    """Sleep until ``clock`` reaches ``stamp``. Returns the seconds waited.
+
+    A REPLAY drives a :class:`VirtualClock` and never waits at all; a live morning drives a
+    :class:`SystemClock` and must not sweep a boundary before the candle has closed -- the bar
+    stamped 11:15 covers ``[11:15, 11:30)`` (CONTEXT 7-E12), so polling for it at 11:29 is
+    polling for a candle that does not exist yet. Written as a loop over the injected clock
+    rather than as one long sleep so that the wait is itself replayable, which is the same
+    discipline every other clock read in this module follows.
+    """
+    waited = 0.0
+    while clock.now() < stamp:
+        remaining = (stamp - clock.now()).total_seconds()
+        nap = min(poll_seconds, remaining) if remaining > 0 else 0.0
+        if nap <= 0:
+            break
+        clock.sleep(nap)
+        waited += nap
+    return waited
+
+
 def _state_words(signal: sig.SignalDay) -> str:
     if signal.final_state == sig.STATE_ARMED:
         return "armed -- waiting for a close across the POC"
@@ -902,8 +1004,10 @@ def full_day_gates(
     bhavcopy), which is why it is computed once and handed to every boundary rather than
     recomputed on a growing prefix, where it would be wrong at every boundary but the last.
 
-    It is available for a PAST day and not for TODAY. That asymmetry is QUESTIONS.md **Q-28**
-    and it is the one thing standing between this module and a genuinely live morning.
+    It is available for a PAST day and not for TODAY. That asymmetry was QUESTIONS.md **Q-28**
+    and CONTEXT 4.7 is the ruling on it: a live morning runs
+    :func:`acumen.signal_engine.oracle_free_battery` per sweep instead, and this function is not
+    called at all for ``mode="live"``.
     """
     out: dict[str, DayGates] = {}
     for symbol in symbols:
@@ -929,30 +1033,41 @@ def build_live_screener(
     allow_network: bool = False,
     calendar: TradingCalendar | None = None,
     calendar_source: str = CALENDAR_PUBLISHED,
+    master_file: str | None = None,
 ) -> LiveScreener:
     """Wire the screener over the local stores. ``mode`` is ``"replay"`` or ``"live"``.
 
-    Everything is taken from the same places the backtester takes it (``config.yaml`` through
-    the loader, the Q-20 PINNED instrument master, the local stores) and from nowhere else. In
-    particular the tick comes from the configured pin and cannot be overridden here, for the
-    reason CONTEXT section 6 gives: a live screener on a different tick from the backtester is
-    backtest/live drift by construction, and the pin is the only thing that forbids it. The
-    residual ambiguity -- what happens when a NEWER vendor dump disagrees with the pin about a
-    live symbol's tick -- is measured by :func:`master_tick_divergence` and raised as
-    QUESTIONS.md **Q-29**; it is not decided here.
+    Everything is taken from the same places the backtester takes it (``config.yaml`` through the
+    loader, the local stores) and from nowhere else. The ONE thing that is chosen here rather
+    than inherited is the instrument master, and CONTEXT 4.7 is why:
 
-    Raises:
-        BlockedByOpenQuestion: ``mode="live"``. See :data:`Q28_TEXT`.
+    * ``mode="live"`` takes **THE DAY'S OWN master** (QUESTIONS.md Q-29, architect 08-Aug-2026):
+      the replication target is the trader's chart AS OF THAT MORNING, and his chart's tick that
+      morning is that morning's dump. It must already be in the cache -- the pre-open refresh
+      fetches it (:func:`acumen.live_refresh.refresh_instrument_master`) -- and the morning
+      REFUSES to start without it rather than silently falling back to a stale snapshot, because
+      the tick sizes the profile row grid, hence the POC, hence every entry, stop and target.
+    * ``mode="replay"`` takes **the recording's own pin** when the recording already names one,
+      so section 6's no-drift guarantee holds PER DAY: a live day replays under the master it
+      ran on, whatever the config pin has since become. With no recording to read, the Q-20 pin
+      governs, exactly as it governs the historical ledger.
+
+    ``master_file`` overrides that resolution explicitly (chunk 14's parity harness replaying a
+    recording into a fresh directory is the caller that needs it).
+
+    :func:`master_tick_divergence` reports pin-vs-day differences as information every morning;
+    it decides nothing, which is the ruling's own instruction.
     """
     if mode not in ("replay", "live"):
         raise ScreenerError(f"mode must be 'replay' or 'live', got {mode!r}.")
-    if mode == "live":
-        raise BlockedByOpenQuestion(Q28_TEXT)
+    live = mode == "live"
+    chosen_master = master_file or _master_for(mode, day=day, recording=recording)
 
     runner, master_path, _ca = bt.build_runner(
         symbols, day, day, data_dir=data_dir, cache_dir=cache_dir,
         seed_from=seed_from if seed_from is not None else day,
         label="live-screener", allow_network=allow_network,
+        master_file=chosen_master,
     )
     wanted = tuple(symbol.strip().upper() for symbol in symbols)
     biases: dict[str, DailyBias] = {}
@@ -961,7 +1076,9 @@ def build_live_screener(
         if day in series:
             biases[symbol] = series[day]
 
-    gates = full_day_gates(runner.pipeline, wanted, day)
+    # CONTEXT 4.7: a live morning has no stored day to gate and no oracle to gate it against, so
+    # the settled battery is not computed at all and the oracle-free one runs per sweep.
+    gates = {} if live else full_day_gates(runner.pipeline, wanted, day)
     recording.open_session(_manifest(
         runner=runner, day=day, symbols=wanted, master_path=master_path,
         mode=mode, dry_run=dry_run,
@@ -984,7 +1101,39 @@ def build_live_screener(
         source=source, recording=recording, clock=clock, sinks=tuple(sinks),
         risk_per_trade_paise=runner.spec.risk_per_trade_paise,
         cost_paise=runner.spec.cost_paise, dry_run=dry_run,
+        posture=POSTURE_LIVE if live else POSTURE_SETTLED,
+        disclosure=LIVE_DISCLOSURE if live else "",
     )
+
+
+def day_master_filename(day: date) -> str:
+    """The filename of ``day``'s OWN instrument-master dump (CONTEXT 4.7 / QUESTIONS.md Q-29).
+
+    One place, because three modules need to agree on it: the pre-open refresh that fetches it,
+    the screener that runs on it, and the verification that replays yesterday under the one
+    yesterday recorded. It is the same name :func:`acumen.instrument_master.master_cache_path`
+    writes, taken from that function rather than spelled again here.
+    """
+    from .instrument_master import master_cache_path
+
+    return master_cache_path(".", day).name
+
+
+def _master_for(mode: str, *, day: date, recording: LiveRecording) -> str | None:
+    """Which instrument master governs this session (CONTEXT 4.7). ``None`` means the Q-20 pin.
+
+    Live: the day's own dump, always, and its absence is a refusal rather than a fallback.
+    Replay: the recording's own pin when the recording already names one -- which is what makes
+    section 6's guarantee hold PER DAY -- and otherwise the config pin, which is the law for
+    every historical day.
+    """
+    if mode == "live":
+        return day_master_filename(day)
+    if recording.exists():
+        recorded = recording.read_manifest().get("master_file")
+        if recorded:
+            return str(recorded)
+    return None
 
 
 def _manifest(
@@ -1065,7 +1214,11 @@ __all__ = [
     "BlockedByOpenQuestion",
     "Clock",
     "CollectingAlertSink",
+    "LIVE_DISCLOSURE",
+    "LIVE_STARTUP_DISCLOSURE",
     "LiveScreener",
+    "POSTURE_LIVE",
+    "POSTURE_SETTLED",
     "PHASES",
     "PHASE_ARMED",
     "PHASE_EXITED",
@@ -1074,7 +1227,6 @@ __all__ = [
     "PHASE_SKIPPED",
     "PHASE_TRIGGERED",
     "PHASE_WAITING",
-    "Q28_TEXT",
     "RETRY_BACKOFF_SECONDS",
     "ScreenAlertSink",
     "ScreenerError",
@@ -1085,7 +1237,9 @@ __all__ = [
     "VirtualClock",
     "boundary_stamps",
     "build_live_screener",
+    "day_master_filename",
     "format_alert",
     "full_day_gates",
     "master_tick_divergence",
+    "wait_for_boundary",
 ]

@@ -59,12 +59,17 @@ def make_screener(
     source=None,
     dry_run: bool = True,
     deadline_seconds: int = (sig.CANDLE_MINUTES - 1) * 60,
+    live: bool = False,
 ) -> tuple[ls.LiveScreener, ls.CollectingAlertSink, LiveRecording]:
     """The screener over the synthetic day, wired exactly as ``build_live_screener`` wires it.
 
     The bias is supplied directly rather than walked, because this file is about the LIVE layer;
     the "the bias is the backtester's own" property is proved in
     ``tests/test_live_replay_invariant.py`` against the real stores, where it means something.
+
+    ``live`` wires CONTEXT 4.7's posture: no settled battery at all (there is no bhavcopy for
+    today to compute one against), the oracle-free battery per sweep, and the disclosed line on
+    every alert -- exactly what ``build_live_screener(mode="live")`` produces.
     """
     from acumen.bias import BULLISH
     from acumen.bias_engine import DailyBias
@@ -86,7 +91,7 @@ def make_screener(
         symbols=symbols,
         pipeline=pipeline,
         biases={symbol: bias for symbol in symbols},
-        gates=ls.full_day_gates(pipeline, symbols, TRADE_DAY),
+        gates={} if live else ls.full_day_gates(pipeline, symbols, TRADE_DAY),
         source=source if source is not None else StoredDayBarSource(minute_store),
         recording=recording,
         clock=ls.VirtualClock(stamp=datetime.combine(TRADE_DAY, datetime.min.time())),
@@ -94,6 +99,8 @@ def make_screener(
         risk_per_trade_paise=RISK_PAISE,
         deadline_seconds=deadline_seconds,
         dry_run=dry_run,
+        posture=ls.POSTURE_LIVE if live else ls.POSTURE_SETTLED,
+        disclosure=ls.LIVE_DISCLOSURE if live else "",
     )
     return screener, sink, recording
 
