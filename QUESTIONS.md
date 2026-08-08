@@ -4285,3 +4285,33 @@ every morning and REPORTS pin-vs-day differences as information, deciding nothin
 frozen and the settled-day battery is unchanged, gate for gate. The only day whose verdict is
 computed differently is a day whose oracle does not exist yet, which is the day the ruling is
 about.
+---
+
+## ARCHITECT'S RULING (08-Aug-2026) - B340 - recorded VERBATIM by the chunk-13 REVIEW session
+
+Recorded in its own commit, before any finding of this review was written. The words between the
+quotation marks are the architect's; nothing outside them is. The single supplied line is on one
+line here, so the record is byte-reconstructable by stripping the `> ` prefix and the outer
+quotation marks -- which is what the 06-Aug-2026 ruling (1) requires of anything that quotes it,
+and which the B349 correction two commits earlier made this file's standard to the character. No
+transliteration: the em dash is the architect's own and it stays.
+
+> "ARCHITECT'S RULING (08-Aug-2026): B340's parameter name stands — the poc_licence IS volume_reconciled identity is asserted on every settled construction; the rename happens only when the file is next opened for cause, never as its own change. Architect."
+
+**What it settles, in this review session's own words (outside the quotation).** B340 is the one
+place the chunk-13 fix session itself flagged as reading less plainly than it behaves:
+`acumen.poc.day_profile` keeps the parameter name `volume_reconciled` while what it now receives
+is `DayGates.poc_licence`, which is gate 1's verdict on a settled day and the ORACLE-FREE
+battery's verdict on a live one. The ruling APPROVES the decision as taken and fixes the terms on
+which it may be revisited:
+
+* the name **stands**. A rename would edit 41 call sites including frozen-era tests for no
+  behavioural gain, and this review does not raise it as a finding to fix;
+* what carries the safety is the **identity**, not the name -- `poc_licence IS
+  volume_reconciled` on every settled construction, asserted by the suite, which is what keeps
+  the ten-year ledger still. This review verifies that identity rather than the wording;
+* the rename happens **only when the file is next opened for cause** -- i.e. it rides along with
+  a change that already had a reason to touch `poc.py`, and is never its own commit.
+
+The ruling changes no code, no test and no document. It is recorded because an approved Class-B
+decision that a later session might "tidy" is exactly the kind of thing that goes missing.
