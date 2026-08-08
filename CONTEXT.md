@@ -1,6 +1,6 @@
 # CONTEXT.md — ACUMEN INTELLIGENCE · Master Specification
 
-**Version 1.9 · 7 August 2026 · THIS FILE IS LAW.**
+**Version 2.0 · 8 August 2026 · THIS FILE IS LAW.**
 Every build/review session reads this before touching code. Nothing here may be changed by any Claude Code session — spec changes flow only through the architect (the Cowork chat), arrive as a new version of this file, and are logged in §10. If reality and this file disagree, STOP and write it to QUESTIONS.md.
 
 ## Table of contents
@@ -253,6 +253,10 @@ enumeration and is therefore invisible to a flip-derived count. The 11
 moved-POC days are documented in docs/evidence/chunk9b_q21a_poc_impact.md.
 Corrupt days are refused, never repaired.
 
+## 4.7 LIVE-MODE VALIDITY (v2.0 — the Q-28 and Q-29 rulings, 08-Aug-2026)
+
+A live trading day has no bhavcopy oracle until evening. Live sweeps therefore run the ORACLE-FREE battery — gate 2 (with the open test), Q-17 candle-level drops, candle validity — per sweep; gates 1 and 1P are structurally inapplicable to same-day data (they detect rewritten history). Every live alert carries: "live feed, not yet verified against the exchange's end-of-day record." The next pre-open runs the FULL battery on the prior recording against the published bhavcopy and reports both verdicts; a live-alerted day the oracle refuses is named loudly. Measured residual: 0.5229% of settled symbol-days (2,187/418,275 over the ten-year ledger) failed gate 1 alone — the frequency a live morning accepts and discloses. A live morning uses the DAY'S OWN instrument master, fetched pre-open, named and hashed into the recording; replay consumes the recording's pin (§6 holds per day); the backtest's Q-20 pin governs the historical ledger only.
+
 ## 5. TradingView replication facts (why our POC = his POC)
 
 - TV is an NSE-authorized realtime data vendor (NSE vendor list PDF) — its NSE volume is licensed exchange feed.
@@ -333,6 +337,7 @@ Precedence if conflict is ever found: trader's R2 answers > R1 answers > PDF tex
 
 | Version | Date | Change |
 |---|---|---|
+| 2.0 | 08-Aug-2026 | The live era: §4.7 live-mode validity (Q-28 oracle-free battery + next-morning verification + measured residual; Q-29 day's-own master per recording); live mode unblocked |
 | 1.9e | 07-Aug-2026 | §9 OPEN-6 aligned with the Round-4 flags retirement |
 | 1.9 | 07-Aug-2026 | §3.5 aligned with Round 4: capital flags retired (Q43 superseded by the trader), points view adopted; the trader's Round-4 texts recorded verbatim in QUESTIONS.md |
 | 1.8 | 06-Aug-2026 | Round 4: Q44 confirms the gap rule as implemented and corrects the PDF example's parametrization (no engine change, no re-run); Q43 superseded — capital flags retired, per-stock points view adopted |
