@@ -23,6 +23,15 @@ The failure banner is the only element permitted the full width, because silence
 meanings on this screen -- *nothing has fired* and *I am broken* -- and they must never look
 alike.
 
+**CONTEXT 4.7 adds two things to this screen and nothing else.** The header of a LIVE session
+(dry run included -- a dry-run morning reads the same unverified feed) carries the disclosed
+line *"live feed, not yet verified against the exchange's end-of-day record"*, in the same muted
+register as the date and the clock: it is a standing condition of the morning, not an alarm. And
+the previous day's verdict appears as its own section at the BOTTOM, quiet when the oracle
+agreed and in the banner's own colour -- full width, `error`, the only other element allowed it
+-- when the exchange's record refuses a day this tool alerted on. Those are the two states that
+must never look alike here, for the same reason silence has two meanings above.
+
 Source files in this package are ASCII-only on purpose (see src/acumen/config.py).
 """
 
@@ -130,12 +139,16 @@ def render_text(
     banner: str = "",
     dry_run: bool = True,
     width: int = 96,
+    disclosure: str = "",
+    verification=None,
 ) -> str:
     """The operator's view: the same seven groups, in the same reading order, as plain text."""
     lines: list[str] = []
     mode = "DRY RUN (log only)" if dry_run else "LIVE"
     lines.append("=" * width)
     lines.append(f"ACUMEN SCREENER   {day.isoformat()}   {now.strftime('%H:%M')}   {mode}")
+    if disclosure:
+        lines.append(f"({disclosure})")
     lines.append("=" * width)
     if banner:
         lines.append("")
@@ -156,6 +169,14 @@ def render_text(
         lines.append("  none yet")
     for alert in alerts:
         lines.append("  " + format_alert(alert))
+    if verification is not None:
+        lines.append("")
+        lines.append(f"YESTERDAY, VERIFIED (CONTEXT 4.7)")
+        lines.append("-" * width)
+        if verification.refused_after_alert:
+            lines.append("  !! " + verification.headline)
+        else:
+            lines.append("  " + verification.headline)
     lines.append("")
     return "\n".join(lines) + "\n"
 
@@ -195,6 +216,8 @@ def render_html(
     alerts: Sequence[RecordedAlert],
     banner: str = "",
     dry_run: bool = True,
+    disclosure: str = "",
+    verification=None,
 ) -> str:
     """The trader's screen. Self-contained: no network, no font file, no script.
 
@@ -223,6 +246,12 @@ def render_html(
         + "</span></div>"
     )
     add("</header>")
+
+    if disclosure:
+        # CONTEXT 4.7's disclosed line. Muted, in the header's own register: it is true of every
+        # figure below it all morning, and a red strip that is always present is a red strip
+        # nobody sees by 09:30.
+        add(f'<div class="disclosure">{html.escape(disclosure)}</div>')
 
     if banner:
         add(f'<div class="banner" role="alert">{html.escape(banner)}</div>')
@@ -257,6 +286,20 @@ def render_html(
             + "</span></div>"
         )
     add("</div></section>")
+
+    if verification is not None:
+        loud = bool(verification.refused_after_alert)
+        add('<section class="group verify"><h2><span class="chip">YESTERDAY, VERIFIED</span>'
+            '<span class="words">CONTEXT 4.7 -- the full battery, against the published '
+            'bhavcopy</span></h2>')
+        if loud:
+            add(f'<div class="banner" role="alert">'
+                f'{html.escape(verification.headline)}</div>')
+        else:
+            add(f'<div class="row quiet"><span class="body">'
+                f'{html.escape(verification.headline)}</span></div>')
+        add("</section>")
+
     add("</body></html>")
     return "\n".join(parts) + "\n"
 
@@ -318,6 +361,9 @@ def _css() -> str:
         # The banner: the only full-width element on the page, and it is present or absent.
         f".banner{{background:{t['error']};color:{t['on-dark']};padding:12px 24px;"
         "font-size:16px}",
+        # CONTEXT 4.7's disclosed line: the header's own muted register, one hairline below it.
+        f".disclosure{{color:{t['muted']};font-size:14px;padding:8px 24px;"
+        f"border-bottom:1px solid {t['hairline']}}}",
         ".group{padding:24px 24px 0}",
         "h2{display:flex;align-items:baseline;gap:12px;margin:0 0 12px;font-size:16px;"
         "font-weight:400}",
@@ -367,12 +413,16 @@ def write_dashboard(
     alerts: Sequence[RecordedAlert],
     banner: str = "",
     dry_run: bool = True,
+    disclosure: str = "",
+    verification=None,
 ) -> tuple[Path, Path]:
     """Write both surfaces into the recording, atomically. Returns ``(html, text)``."""
     page = render_html(day=day, now=now, grouped=grouped, alerts=alerts,
-                       banner=banner, dry_run=dry_run)
+                       banner=banner, dry_run=dry_run, disclosure=disclosure,
+                       verification=verification)
     text = render_text(day=day, now=now, grouped=grouped, alerts=alerts,
-                       banner=banner, dry_run=dry_run)
+                       banner=banner, dry_run=dry_run, disclosure=disclosure,
+                       verification=verification)
     return (
         atomic_write_text(Path(root) / "dashboard.html", page),
         atomic_write_text(Path(root) / "dashboard.txt", text),

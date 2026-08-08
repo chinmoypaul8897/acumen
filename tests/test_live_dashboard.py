@@ -13,6 +13,7 @@ ASCII-only, like every other source file in this repo (chunk-0 B7).
 
 from __future__ import annotations
 
+import html
 import re
 from datetime import date, datetime
 from fractions import Fraction
@@ -243,3 +244,127 @@ def test_the_text_surface_shows_the_same_seven_groups(tmp_path: Path) -> None:
         assert dash.STATE_STYLE[phase]["label"] in plain
         assert dash.STATE_WORDS[phase] in plain
     assert plain.index("TRIGGERED") < plain.index("ARMED") < plain.index("refused")
+
+
+# --- CONTEXT 4.7 on the screen -------------------------------------------------------------------
+
+
+class _Verdict:
+    """A stand-in for one symbol's verdict -- the two fields the dashboard reads, and no more."""
+
+    def __init__(self, symbol: str, refused: bool) -> None:
+        self.symbol = symbol
+        self.refused_after_alert = refused
+
+
+class _Verification:
+    """A stand-in for :class:`acumen.live_refresh.MorningVerification` with the same surface.
+
+    Written by hand rather than imported so the dashboard's contract with it is exactly two
+    attributes -- ``headline`` and ``refused_after_alert`` -- and a future widening of that
+    contract has to be deliberate.
+    """
+
+    def __init__(self, headline: str, refused: tuple[str, ...] = ()) -> None:
+        self.headline = headline
+        self.refused_after_alert = tuple(_Verdict(name, True) for name in refused)
+
+
+def test_a_LIVE_session_DISCLOSES_on_both_surfaces_and_a_replay_does_not() -> None:
+    """CONTEXT 4.7's disclosed line, on the screen the trader keeps open all morning.
+
+    It belongs in the header's own muted register and NOT in the banner's: it is true of every
+    figure below it for the whole session, and a red strip that is always present is a red strip
+    nobody sees by 09:30. A replay carries no line at all, because its day HAS been verified --
+    a disclosure that appears on everything discloses nothing.
+    """
+    live_html = dash.render_html(
+        day=DAY, now=NOW, grouped=states(), alerts=alerts(),
+        dry_run=True, disclosure=ls.LIVE_DISCLOSURE,
+    )
+    live_text = dash.render_text(
+        day=DAY, now=NOW, grouped=states(), alerts=alerts(),
+        dry_run=True, disclosure=ls.LIVE_DISCLOSURE,
+    )
+    escaped = html.escape(ls.LIVE_DISCLOSURE)
+    assert escaped in live_html and ls.LIVE_DISCLOSURE in live_text
+    assert '<div class="disclosure">' in live_html
+    # the header's register, not the banner's
+    assert escaped not in live_html.split('<div class="disclosure">')[0]
+    assert 'class="banner"' not in live_html, "a standing condition is not an alarm"
+
+    replay_html = dash.render_html(day=DAY, now=NOW, grouped=states(), alerts=alerts())
+    replay_text = dash.render_text(day=DAY, now=NOW, grouped=states(), alerts=alerts())
+    assert html.escape(ls.LIVE_DISCLOSURE) not in replay_html
+    assert ls.LIVE_DISCLOSURE not in replay_text
+    assert 'class="disclosure"' not in replay_html
+
+
+def test_YESTERDAYS_VERDICT_is_QUIET_when_the_oracle_agreed() -> None:
+    """The ordinary morning: a line at the bottom, in the page's quietest register.
+
+    Nothing about a clean verification is urgent. Putting it anywhere louder would spend, every
+    single morning, the attention the loud case needs on the one morning in a hundred.
+    """
+    page = dash.render_html(
+        day=DAY, now=NOW, grouped=states(), alerts=alerts(),
+        verification=_Verification("2026-07-16: verified against the published bhavcopy"),
+    )
+    assert "YESTERDAY, VERIFIED" in page
+    assert "verified against the published bhavcopy" in page
+    assert 'class="banner"' not in page
+    assert 'class="row quiet"' in page
+
+
+def test_a_LIVE_ALERTED_day_the_ORACLE_REFUSED_gets_the_BANNERS_OWN_COLOUR() -> None:
+    """The loud case, on the screen. CONTEXT 4.7: *"named loudly"*.
+
+    The failure banner is the only element on this page permitted the full width, because
+    silence has two meanings and they must never look alike. This is the second sentence of the
+    same kind -- "yesterday was fine" and "yesterday's alerts are withdrawn" must not look
+    alike either -- so it borrows that element rather than inventing a third register.
+    """
+    loud = _Verification(
+        "2026-07-16: THE EXCHANGE'S RECORD REFUSES 1 LIVE-ALERTED SYMBOL-DAY(S) -- HDFCBANK. "
+        "Those alerts were produced on data the end-of-day battery does not accept; treat them "
+        "as withdrawn.",
+        refused=("HDFCBANK",),
+    )
+    page = dash.render_html(day=DAY, now=NOW, grouped=states(), alerts=alerts(),
+                            verification=loud)
+    text = dash.render_text(day=DAY, now=NOW, grouped=states(), alerts=alerts(),
+                            verification=loud)
+
+    assert 'class="banner" role="alert"' in page
+    assert "THE EXCHANGE&#x27;S RECORD REFUSES" in page or "REFUSES" in page
+    assert "treat them as withdrawn" in page
+    assert "!! " in text and "REFUSES" in text
+    # and it is still only ONE banner element on the page -- the quiet path uses none
+    assert page.count('class="banner"') == 1
+
+
+def test_the_two_new_elements_INTRODUCE_NO_COLOUR_of_their_own() -> None:
+    """The design law's first half, re-run against CONTEXT 4.7's additions.
+
+    ``.disclosure`` takes ``muted`` and the verification banner takes ``error`` -- both already
+    on DESIGN.md's page and both already carrying exactly that meaning elsewhere on this screen.
+    Nothing new was invented for the new sentences.
+    """
+    css = dash._CSS
+    assert f"color:{dash.TOKENS['muted']}" in css.split(".disclosure{")[1].split("}")[0]
+    hexes = set(re.findall(r"#[0-9a-fA-F]{3,8}", css))
+    assert hexes <= set(dash.TOKENS.values()), f"invented colour(s): {hexes - set(dash.TOKENS.values())}"
+
+
+def test_both_surfaces_carry_4_7_when_written_into_the_recording(tmp_path: Path) -> None:
+    """``write_dashboard`` passes both new arguments through, which is where they would be lost."""
+    page, text = dash.write_dashboard(
+        tmp_path, day=DAY, now=NOW, grouped=states(), alerts=alerts(),
+        disclosure=ls.LIVE_DISCLOSURE,
+        verification=_Verification("2026-07-16: verified against the published bhavcopy"),
+    )
+    for path, sentence in ((page, html.escape(ls.LIVE_DISCLOSURE)),
+                           (text, ls.LIVE_DISCLOSURE)):
+        body = path.read_text(encoding="utf-8")
+        assert sentence in body
+        assert "verified against the published bhavcopy" in body
