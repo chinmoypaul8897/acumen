@@ -4120,7 +4120,7 @@ quotation marks are the architect's; nothing outside them is.
 
 ---
 
-## Q-28 · chunk 13 · class A · **OPEN -- STOP** · BLOCKS the LIVE mode; replay is unaffected
+## Q-28 · chunk 13 · class A · **CLOSED 08-Aug-2026** (see ARCHITECT'S RULINGS 08-Aug-2026, below) · it BLOCKED the LIVE mode until then; replay was unaffected throughout
 
 **Question.** CONTEXT 3.3's POC is computed only when the day's **gate 1** has PASSED. Gate 1
 (CONTEXT 4.5) reconciles the day's folded 1-minute volume against **that day's bhavcopy**. During
@@ -4176,7 +4176,7 @@ runs end to end. That is the mode the chunk's replay invariant is tested in, and
 
 ---
 
-## Q-29 · chunk 13 · class A · **OPEN -- STOP** · blocks nothing today; BINDS the first live morning
+## Q-29 · chunk 13 · class A · **CLOSED 08-Aug-2026** (see ARCHITECT'S RULINGS 08-Aug-2026, below) · it BINDS every live morning from the first
 
 **Question.** Q-20 pinned ONE instrument master for the whole backtest. **Which master governs a
 LIVE morning** -- the same pin, or the day's own dump?
@@ -4216,3 +4216,58 @@ on. The detector decides nothing and alerts on nothing.
 
 **It binds the first real live morning and not before.** While Q-28 blocks live, every session is
 a replay, and Q-20 already governs a replay: a replay IS the backtest path.
+
+---
+
+## ARCHITECT'S RULINGS (08-Aug-2026) - Q-28 and Q-29 - recorded VERBATIM by the chunk-13 FIX session
+
+Recorded first, in its own commit, before a line of code moved. The words between the quotation
+marks are the architect's; nothing outside them is.
+
+> "ARCHITECT'S RULINGS (08-Aug-2026). Q-28: gates 1/1P exist to catch history
+> being rewritten, and today cannot be rewritten during today -- so a LIVE
+> morning runs the ORACLE-FREE battery per sweep (gate 2 incl. the Q-21(a) open
+> test, Q-17 candle-level drops, candle validity); every live alert carries the
+> disclosed line 'live feed, not yet verified against the exchange's end-of-day
+> record'; the NEXT pre-open runs the FULL battery on yesterday's recording
+> against the published bhavcopy and reports the verdict, loudly naming any
+> live-alerted day the oracle refuses. The residual is disclosed as a MEASURED
+> frequency, not an adjective. Section 6 parity is judged on oracle-passing days; a
+> live-alerted-oracle-refused day is the disclosed, bounded difference (live
+> cannot see tomorrow). Q-29: a live morning uses THE DAY'S OWN instrument
+> master, fetched pre-open, named+hashed into the recording -- the replication
+> target is the trader's chart AS OF THAT MORNING; replay consumes the
+> recording's own pin, so section 6 holds per day; the Q-20 pin remains law for the
+> historical ledger; the divergence detector reports pin-vs-day differences
+> every morning as information. Architect."
+
+**Q-28 is CLOSED.** The live mode is UNBLOCKED and CONTEXT v2.0 section 4.7 carries the ruling as
+law. What the ruling settles, in this session's own words (outside the quotation):
+
+* the option taken is (a) with (b)'s discipline attached -- the live path runs without the
+  oracle-dependent gates, and the oracle-free battery it DOES run is named exactly: gate 2
+  including the Q-21(a) open test, the Q-17 candle-level drops, candle validity;
+* gates 1 and 1P are not "skipped": they are **structurally inapplicable** to same-day data,
+  because what they detect is history being rewritten and today cannot be rewritten during
+  today. That sentence is the ruling's own and it is why the residual is bounded rather than
+  unknown;
+* the disclosure is not a caveat in a docstring -- it travels on **every live alert** and on the
+  dashboard header, in the ruling's own words;
+* the NEXT pre-open runs the FULL battery on yesterday's recording against the published
+  bhavcopy and reports both verdicts. A live-alerted day the oracle later refuses is named
+  LOUDLY, and that case is driven by a test rather than waiting for the first real morning;
+* the residual is a MEASURED frequency. This session measured it from the chunk-9B ten-year
+  ledger before CONTEXT v2.0 was written, and the figure is committed as evidence
+  (`docs/evidence/chunk13_q28_residual.{py,md}`) and inserted into section 4.7's template.
+
+**Q-29 is CLOSED.** Option (b): a live morning uses the DAY'S OWN instrument master, fetched
+pre-open, named AND hashed into the recording; a replay consumes the recording's own pin, so
+CONTEXT section 6 holds per day rather than across the pin; the Q-20 pin remains law for the
+historical ledger and `build_runner` still refuses any other master for a backtest. The
+divergence detector built in the chunk-13 build session (`master_tick_divergence`) is now run
+every morning and REPORTS pin-vs-day differences as information, deciding nothing.
+
+**What this session did NOT do.** It did not touch CONTEXT sections 3 or 4.5: the strategy is
+frozen and the settled-day battery is unchanged, gate for gate. The only day whose verdict is
+computed differently is a day whose oracle does not exist yet, which is the day the ruling is
+about.
