@@ -133,7 +133,11 @@ from .signal_engine import SignalPipeline
 #: with the same cost: v1.9 aligns section 3.5 with the Round-4 retirement of the Q40-d capital
 #: flags and its erratum aligns section 9's OPEN-6 row, so it changes WHAT A RUN MUST DISCLOSE
 #: and not one walked row. The completed run's v1.7 manifest stays exactly as true as it was.
-SPEC_VERSION: str = "v1.9"
+#: Moved to v2.0 on 08-Aug-2026 (the Q-28 and Q-29 rulings) for the same reason and at the same
+#: cost: CONTEXT 4.7 is a NEW section about days whose bhavcopy does not exist yet, and the
+#: backtest walks no such day -- section 4.5's battery, section 4.6's lake and section 3's
+#: strategy are untouched, so this bump changes no walked row either.
+SPEC_VERSION: str = "v2.0"
 
 #: What the manifest's ``instrument_master`` block says about itself, so a reader who has never
 #: seen QUESTIONS.md Q-20 still knows why a filename is pinned rather than resolved. Verbatim on
@@ -1003,7 +1007,12 @@ class BacktestRunner:
             gate1_passed=None if gates is None or gates.gate1 is None else gates.gate1.passed,
             gate1_relieved=bool(gates is not None and gates.relieved),
             gate2_passed=None if gates is None else gates.gate2.passed,
-            gate1p_passed=None if gates is None else gates.gate1p.passed,
+            # `gates.gate1p` is None only under CONTEXT 4.7's LIVE posture, which no backtest row
+            # can carry (the backtester walks settled days); written defensively rather than
+            # assumed, because a null here would otherwise be an AttributeError in a ledger write.
+            gate1p_passed=(
+                None if gates is None or gates.gate1p is None else gates.gate1p.passed
+            ),
             poc_half_paise=None if poc is None else int(poc * 2),
             flags=self._session_drop_flags(symbol, bias, stock_day),
         )
@@ -1526,6 +1535,40 @@ def pinned_master(cache_dir: Path, filename: str) -> tuple[InstrumentMaster, Pat
     return master, path, file_sha256(path)
 
 
+def named_master(cache_dir: Path, filename: str) -> tuple[InstrumentMaster, Path, str]:
+    """Load a NAMED instrument master by filename. CONTEXT 4.7's door, and only its door.
+
+    QUESTIONS.md **Q-29** (architect, 08-Aug-2026): *"a live morning uses THE DAY'S OWN
+    instrument master, fetched pre-open, named+hashed into the recording ... replay consumes the
+    recording's own pin ... the Q-20 pin remains law for the historical ledger"*.
+
+    So there are now exactly two ways a master is chosen in this repo, and they do not overlap:
+    :func:`pinned_master` for anything that walks HISTORY (which still refuses every other
+    snapshot, exactly as the Q-20 ruling made it), and this function for the two cases CONTEXT
+    4.7 licenses -- a live morning's own pre-open dump, and the replay of a recording made under
+    one. The replication target is the trader's chart AS OF THAT MORNING, and his chart's tick on
+    that morning is that morning's dump.
+
+    Returns ``(master, path, sha256)``, the same triple :func:`pinned_master` returns, because
+    the recording pins the master by BOTH filename and digest (a filename can be overwritten in
+    place; a digest cannot) and a replay proves which ticks a morning ran on from the pair.
+    """
+    path = Path(cache_dir) / MASTER_CACHE_SUBDIR / filename
+    if not path.is_file():
+        raise BacktestError(
+            f"The instrument master {filename!r} is not at {path}. CONTEXT 4.7 runs a live "
+            "morning on THE DAY'S OWN master, fetched pre-open -- so this file is a prerequisite "
+            "of the morning, not something to substitute around. Run the pre-open fetch "
+            "(`python -m acumen.instrument_master --allow-network`), or replay under the master "
+            "the recording actually names."
+        )
+    try:
+        master = load_master_file(path)
+    except InstrumentMasterError as exc:  # pragma: no cover -- a corrupt cache file
+        raise BacktestError(f"Instrument master {path} is unusable: {exc}") from exc
+    return master, path, file_sha256(path)
+
+
 def file_sha256(path: Path) -> str:
     """Streaming sha256 of a file. The master is ~34 MB, so it is never slurped whole."""
     digest = hashlib.sha256()
@@ -1610,6 +1653,7 @@ def build_runner(
     non_standard_sessions: frozenset[date] | None = None,
     disclosures: tuple[str, ...] = (),
     master_path: Path | None = None,
+    master_file: str | None = None,
 ) -> tuple[BacktestRunner, Path, dict]:
     """Open the local stores read-only and wire the whole machine. Returns (runner, master, ca).
 
@@ -1628,6 +1672,14 @@ def build_runner(
     9B duty in the chunk-9A pack). ``None`` means "scan now", which is what every chunk-9A
     caller does and what keeps their artefacts byte-identical.
 
+    ``master_file`` is **CONTEXT 4.7's door and only its door** (QUESTIONS.md Q-29): the master
+    this session runs on, by FILENAME, when it is not the Q-20 pin -- a live morning's own
+    pre-open dump, or the master a live recording was made under. Every historical caller leaves
+    it ``None`` and gets the pin, which still governs the ledger and still refuses every other
+    snapshot. It is deliberately a separate argument from ``master_path`` (which CONFIRMS the
+    pin) so that the two intentions can never be confused at a call site: one says "this IS the
+    pin", the other says "section 4.7 says today is not the pin's day".
+
     ``disclosures`` are stamped verbatim onto the run's own manifest and onto nothing else.
     """
     config = load_config(include_env=False)
@@ -1636,7 +1688,14 @@ def build_runner(
 
     daily_store = DailyStore.at(data / "daily_store")
     minute_store = MinuteStore.at(data / "minute_store")
-    if master_path is not None and Path(master_path).name != config.instrument_master:
+    if master_file is not None:
+        if master_path is not None:
+            raise BacktestError(
+                "Pass master_file (CONTEXT 4.7's day master) or master_path (the Q-20 pin, "
+                "confirmed), never both -- they answer the same question under different laws."
+            )
+        # Resolved below through named_master; the config pin is not consulted at all.
+    elif master_path is not None and Path(master_path).name != config.instrument_master:
         # The ruling is "ONE PINNED master snapshot governs the whole backtest", so an explicit
         # path is a CONFIRMATION of the pin, never an override of it. Without this, threading
         # the path through would have re-opened by argument exactly the door the config closed.
@@ -1647,7 +1706,10 @@ def build_runner(
             "which makes every in-flight run refuse to resume -- rather than passing another "
             "file here."
         )
-    master, master_path, master_sha = pinned_master(cache, config.instrument_master)
+    if master_file is not None:
+        master, master_path, master_sha = named_master(cache, master_file)
+    else:
+        master, master_path, master_sha = pinned_master(cache, config.instrument_master)
     seed = seed_from if seed_from is not None else start
     calendar = TradingCalendar.from_daily_store_range(
         daily_store, seed - timedelta(days=CALENDAR_LEAD_DAYS), end

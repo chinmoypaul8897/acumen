@@ -283,7 +283,10 @@ def test_the_q21b_disclosure_names_the_ruling_its_evidence_and_its_own_limits() 
     # v1.9 and its OPEN-6 erratum move it a fourth time and leave the radius alone for a third
     # reason: they change what a run must DISCLOSE (the retired capital flags), never which days
     # it may walk (REVIEW_12_2 finding C2).
-    assert "v1.6" in rb.Q21B_BLAST_RADIUS and bt.SPEC_VERSION == "v1.9"
+    # CONTEXT v2.0 (the Q-28 / Q-29 rulings) moves it a fifth time and leaves the radius alone
+    # for a fourth reason: section 4.7 governs days whose bhavcopy does not exist yet, and a
+    # backtest walks no such day -- section 4.5's battery is untouched, gate for gate.
+    assert "v1.6" in rb.Q21B_BLAST_RADIUS and bt.SPEC_VERSION == "v2.0"
     assert "1 by gate 2" in rb.Q21B_BLAST_RADIUS
 
 

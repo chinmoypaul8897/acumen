@@ -550,12 +550,19 @@ def day_profile(
         day: the trade date.
         row_size: N (CONTEXT 3.3; ``config.yaml`` carries the trader-confirmed 24).
         tick_paise: the SYMBOL's tick from the instrument master (CONTEXT 4.3).
-        volume_reconciled: the day's GATE-1 verdict, and the ONLY validity test there is
-            (the completeness ruling of 2026-07-26 retired E4's minute count). ``True`` ->
-            the window is valid; ``False`` -> the day is excluded and gets no POC; ``None``
-            (gate 1 could not be run -- no raw daily row) -> also no POC, because the ruling's
-            licence is "gate-1 PASSES" and an unrun gate has not passed (the same conservative
-            reading the integrity gate takes).
+        volume_reconciled: the verdict of the battery that GOVERNS this day, and the ONLY
+            validity test there is (the completeness ruling of 2026-07-26 retired E4's minute
+            count). ``True`` -> the window is valid; ``False`` -> the day is excluded and gets no
+            POC; ``None`` (the gate could not be run at all -- no raw daily row) -> also no POC,
+            because the ruling's licence is "gate-1 PASSES" and an unrun gate has not passed (the
+            same conservative reading the integrity gate takes).
+
+            On a SETTLED day that verdict is gate 1's and nothing about this function has
+            changed. On a LIVE day it is CONTEXT 4.7's ORACLE-FREE battery, because gate 1
+            reconciles against a bhavcopy that does not exist during the session and gates 1/1P
+            are structurally inapplicable to same-day data. The caller decides which battery
+            governs and passes its verdict -- :attr:`acumen.signal_engine.DayGates.poc_licence`
+            is the one place that choice is made, and this engine stays free of it.
         window: which window to build over. Defaults to the spec's 8-candle window; the
             9-candle :data:`ALTERNATE_WINDOW` exists for the Q-8/Q42 gate evidence only.
 

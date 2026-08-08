@@ -424,7 +424,11 @@ def session_minutes(day: date) -> tuple[datetime, ...]:
 
 
 def integrity_gate(
-    bars: Sequence["_Bar"], day: date, *, volume_reconciled: bool | None = None
+    bars: Sequence["_Bar"],
+    day: date,
+    *,
+    volume_reconciled: bool | None = None,
+    completeness_measurable: bool = True,
 ) -> IntegrityGateResult:
     """CONTEXT 4.5 gate 2, as REDEFINED by the completeness ruling (2026-07-26). PURE.
 
@@ -438,6 +442,17 @@ def integrity_gate(
             ``None`` = gate 1 could not be run at all (no raw daily row for the day); the ruling's
             licence is "gate-1 PASSES", and an unrun gate has not passed, so ``None`` keeps the
             conservative pre-amendment behaviour and ``missing > 15`` excludes.
+        completeness_measurable: whether the question *"is this day complete?"* can be ASKED of
+            this window at all. ``True`` (every settled day, and the default, so nothing in the
+            backtest moves) means the day is over and gate 1 either answered or could not; the
+            three lines above then decide. ``False`` is **CONTEXT 4.7's live sweep**: the session
+            has not ended, so the 375-minute denominator describes minutes that have not happened
+            yet rather than minutes that were lost, and gate 1 -- the completeness oracle -- does
+            not exist until the evening's bhavcopy. The missing-minutes trigger cannot fire on
+            such a window; every absent stamp is still COUNTED and named in
+            :attr:`IntegrityGateResult.liquidity_note`, so an incomplete window is never silent.
+            The other three triggers (duplicates, impossible OHLC, negative values) are unchanged
+            and are exactly the ORACLE-FREE battery section 4.7 names.
 
     A day is EXCLUDED (``passed == False``) on exactly the ruling's four triggers: any duplicate
     stamp; impossible OHLC (``high < low``, or an OPEN **or** CLOSE outside ``[low, high]``); any
@@ -505,7 +520,20 @@ def integrity_gate(
 
     liquidity_note = ""
     missing_excluded = False
-    if missing > MAX_MISSING_MINUTES:
+    if not completeness_measurable:
+        # CONTEXT 4.7. The window is a live session in progress: the absent stamps are minutes
+        # that have not happened yet, and the gate that would tell data loss from a thin market
+        # (gate 1) has no oracle until the evening. So the trigger does not fire -- and the count
+        # is still stated, because a window this gate accepted while missing 250 of its minutes
+        # must not read as a clean 375.
+        if missing:
+            liquidity_note = (
+                f"{missing} of {EXPECTED_SESSION_MINUTES} session minutes are absent; "
+                "completeness is NOT MEASURABLE for this window (CONTEXT 4.7: the session has "
+                "not ended and gate 1, the completeness oracle, cannot run until the day's "
+                "bhavcopy exists), so the missing-minutes trigger does not fire"
+            )
+    elif missing > MAX_MISSING_MINUTES:
         if volume_reconciled is True:
             # The completeness ruling: gate 1 PASSED, so the absent stamps are no-trade minutes.
             liquidity_note = (

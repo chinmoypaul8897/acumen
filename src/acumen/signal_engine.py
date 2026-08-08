@@ -59,26 +59,73 @@ NOT_EVALUATED_NO_POC: str = "no POC for the day (CONTEXT 3.3)"
 #: The day was evaluated; ``signal`` carries the outcome (which may itself be "no trade").
 EVALUATED: str = "evaluated"
 
+#: Which BATTERY governed a day's verdict (CONTEXT 4.7).
+#:
+#: ``settled`` -- the day is over and its bhavcopy exists, so CONTEXT 4.6's full battery ran:
+#: gate 1 (volume reconciliation, with the auction-relief branch), gate 2 (integrity) and gate 1P
+#: (per-day price containment). Every stored symbol-day in the ten-year ledger is this.
+#:
+#: ``live`` -- CONTEXT 4.7. The day has no bhavcopy oracle until evening, so the ORACLE-FREE
+#: battery ran instead: gate 2 (with the Q-21(a) open test), the Q-17 candle-level drops and
+#: candle validity. Gates 1 and 1P are not skipped -- they are structurally INAPPLICABLE to
+#: same-day data, because what they detect is history being rewritten and today cannot be
+#: rewritten during today. The measured price of that posture is in section 4.7 and in
+#: docs/evidence/chunk13_q28_residual.md.
+POSTURE_SETTLED: str = "settled"
+POSTURE_LIVE: str = "live"
+
 
 @dataclass(frozen=True)
 class DayGates:
-    """The CONTEXT 4.6 battery for one stored symbol-day, all three verdicts side by side.
+    """The battery for one symbol-day, every verdict side by side.
 
     ``volume_reconciled`` is what gate 2 and the POC engine consume: gate 1's verdict, True when
     it passed strictly OR by auction relief (decision B122, chunk 5B), ``None`` when it could not
-    be run at all because the day has no raw daily row.
+    be run at all -- because the day has no raw daily row, or (CONTEXT 4.7) because the day is
+    TODAY and its bhavcopy does not exist yet. Those two cases are told apart by ``posture``, and
+    they must be: the first is a settled day that failed to prove itself and the second is a day
+    that cannot yet be asked.
+
+    ``gate1p`` is ``None`` for the same reason and only under :data:`POSTURE_LIVE`; on a settled
+    day it is always present, because the Q-14 ruling runs gate 1P on EVERY stored day.
     """
 
     gate1: gates.VolumeGateResult | None
     relieved: bool
     volume_reconciled: bool | None
     gate2: gates.IntegrityGateResult
-    gate1p: gates.PriceContainmentResult
+    gate1p: gates.PriceContainmentResult | None
+    posture: str = POSTURE_SETTLED
 
     @property
     def usable(self) -> bool:
-        """CONTEXT 4.6: all three are required for a day to be usable."""
-        return bool(self.volume_reconciled) and self.gate2.passed and self.gate1p.passed
+        """CONTEXT 4.6: all three gates are required for a SETTLED day to be usable.
+
+        CONTEXT 4.7: on a LIVE day the oracle-free battery is the whole battery there is, so
+        gate 2's verdict is the day's verdict.
+        """
+        if self.posture == POSTURE_LIVE:
+            return self.gate2.passed
+        return (
+            bool(self.volume_reconciled)
+            and self.gate2.passed
+            and self.gate1p is not None
+            and self.gate1p.passed
+        )
+
+    @property
+    def poc_licence(self) -> bool | None:
+        """What CONTEXT 3.3's window-validity test is for THIS day, from the battery that ran.
+
+        The POC engine takes one validity verdict (:func:`acumen.poc.day_profile`). On a settled
+        day that verdict is gate 1's and nothing has changed -- this property returns
+        ``volume_reconciled`` unaltered, which the suite asserts over every settled construction
+        so the backtest cannot move. On a LIVE day (CONTEXT 4.7) gate 1 is structurally
+        inapplicable and the licence is the ORACLE-FREE battery's own verdict.
+        """
+        if self.posture == POSTURE_LIVE:
+            return self.gate2.passed
+        return self.volume_reconciled
 
     @property
     def refusal(self) -> str | None:
@@ -102,16 +149,77 @@ class DayGates:
         The REASON half is what QUESTIONS.md Q-21(b) puts in a refused ledger row: a Rule-3 scan
         that is denied a battery-failing D-1 must say which gate denied it and why, in that
         gate's own words rather than in a sentence written here.
+
+        Under :data:`POSTURE_LIVE` the order has ONE gate in it. CONTEXT 4.7 makes gates 1 and 1P
+        structurally inapplicable to same-day data, and an inapplicable gate refuses nothing --
+        reading their absence as a failure is exactly the reading that left a live morning with
+        no POC for any symbol on any day (QUESTIONS.md Q-28).
         """
+        if self.posture == POSTURE_LIVE:
+            if not self.gate2.passed:
+                return (NOT_EVALUATED_GATE2, "; ".join(self.gate2.reasons))
+            return None
+        gate1p = self.gate1p
+        if gate1p is None:
+            # The constructor's contract, stated rather than assumed: a SETTLED day always
+            # carries a gate-1P verdict (the Q-14 ruling runs it on every stored day, and a day
+            # with no raw daily row FAILS it), and a live day never reaches this line.
+            raise ValueError(
+                "a settled DayGates must carry a gate-1P verdict; only CONTEXT 4.7's live "
+                "posture may leave it unrun"
+            )
         if self.gate1 is None:
-            return (NOT_EVALUATED_GATE1P, self.gate1p.reason)
+            return (NOT_EVALUATED_GATE1P, gate1p.reason)
         if not self.volume_reconciled:
             return (NOT_EVALUATED_GATE1, self.gate1.reason)
         if not self.gate2.passed:
             return (NOT_EVALUATED_GATE2, "; ".join(self.gate2.reasons))
-        if not self.gate1p.passed:
-            return (NOT_EVALUATED_GATE1P, self.gate1p.reason)
+        if not gate1p.passed:
+            return (NOT_EVALUATED_GATE1P, gate1p.reason)
         return None
+
+
+def oracle_free_battery(day: date, minutes: Sequence[StoredBar]) -> DayGates:
+    """CONTEXT 4.7's ORACLE-FREE battery for a LIVE window. PURE, and shared with nothing copied.
+
+    The architect's ruling of 08-Aug-2026 (QUESTIONS.md, verbatim): *"gates 1/1P exist to catch
+    history being rewritten, and today cannot be rewritten during today -- so a LIVE morning runs
+    the ORACLE-FREE battery per sweep (gate 2 incl. the Q-21(a) open test, Q-17 candle-level
+    drops, candle validity)"*.
+
+    Every one of those three is the SAME code the backtester runs, called with the one argument
+    that says the session is not over:
+
+    * **gate 2** is :func:`acumen.quality_gates.integrity_gate` itself -- duplicates, impossible
+      OHLC including the Q-21(a) open clause, and negative prices or volumes. Not a live copy of
+      it, not a subset of it re-implemented here: the function, with
+      ``completeness_measurable=False``, which is the one trigger that cannot be asked of a
+      session in progress (and which is itself gate-1-derived, so it was never oracle-free);
+    * **the Q-17 candle-level drops** are counted by that same call (``out_of_session``) and are
+      DROPPED where every consumer drops them, in :meth:`SignalPipeline.evaluate` through
+      :func:`acumen.aggregate.in_session_bars`;
+    * **candle validity** is gate 2's OHLC and negative-value clauses, which is what that phrase
+      names.
+
+    Per SWEEP, not per day: a live window grows all morning, and unlike gate 1 (a whole-day fold
+    against a whole-day total) every trigger here is a property of the bars in hand.
+
+    Returns:
+        A :class:`DayGates` under :data:`POSTURE_LIVE`, with ``gate1``, ``gate1p`` and
+        ``volume_reconciled`` all ``None`` -- not "failed", ``None``: the gates did not run
+        because they cannot be run, and the difference is the whole ruling.
+    """
+    gate2 = gates.integrity_gate(
+        minutes, day, volume_reconciled=None, completeness_measurable=False
+    )
+    return DayGates(
+        gate1=None,
+        relieved=False,
+        volume_reconciled=None,
+        gate2=gate2,
+        gate1p=None,
+        posture=POSTURE_LIVE,
+    )
 
 
 @dataclass(frozen=True)
@@ -244,7 +352,13 @@ class SignalPipeline:
             day,
             row_size=self.row_size,
             tick_paise=self.master.instrument(symbol).tick_size_paise,
-            volume_reconciled=day_gates.volume_reconciled,
+            # CONTEXT 4.7: the POC's licence is the GOVERNING battery's verdict -- gate 1 on a
+            # settled day, where `poc_licence` IS `volume_reconciled` and nothing moves (the
+            # suite asserts the identity), and the oracle-free battery on a live day, where
+            # gate 1 is structurally inapplicable. The parameter keeps its historical name
+            # because renaming it would edit 41 call sites including frozen-era tests; what it
+            # has always meant is "the verdict that licenses this window".
+            volume_reconciled=day_gates.poc_licence,
         )
         if profile.poc_paise is None:
             return StockDay(
