@@ -19,6 +19,8 @@ Every build/review session reads this before touching code. Nothing here may be 
    - 4.3 Intraday layer (SmartAPI)
    - 4.4 Live polling layer
    - 4.5 Quality gates
+   - 4.6 Minute-lake final state
+   - 4.7 Live-mode validity
 5. TradingView replication facts (why our POC matches his chart)
 6. Architecture & repo
 7. Engineering defaults (not trader-specified — disclosed, changeable)
@@ -337,6 +339,7 @@ Precedence if conflict is ever found: trader's R2 answers > R1 answers > PDF tex
 
 | Version | Date | Change |
 |---|---|---|
+| 2.0e | 08-Aug-2026 | table of contents gains 4.6 and 4.7 (omitted since v1.3) |
 | 2.0 | 08-Aug-2026 | The live era: §4.7 live-mode validity (Q-28 oracle-free battery + next-morning verification + measured residual; Q-29 day's-own master per recording); live mode unblocked |
 | 1.9e | 07-Aug-2026 | §9 OPEN-6 aligned with the Round-4 flags retirement |
 | 1.9 | 07-Aug-2026 | §3.5 aligned with Round 4: capital flags retired (Q43 superseded by the trader), points view adopted; the trader's Round-4 texts recorded verbatim in QUESTIONS.md |
