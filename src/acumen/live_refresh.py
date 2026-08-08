@@ -10,6 +10,21 @@ half-succeeds and is reported as done. So each step returns a :class:`RefreshSte
 did, and :meth:`RefreshReport.ok` is the AND of all of them -- a screener that starts on a stale
 daily store would compute yesterday's bias and never say so.
 
+## CONTEXT 4.7, executed here (the Q-28 and Q-29 rulings, 08-Aug-2026)
+
+Two of this job's steps exist because of that section, and neither is optional:
+
+* **the day's own instrument master** (Q-29). *"A live morning uses THE DAY'S OWN instrument
+  master, fetched pre-open, named+hashed into the recording"* -- so the fetch is a pre-open STEP
+  with its filename and sha256 in the report, and a morning whose master did not arrive is NOT
+  READY. The Q-20 pin still governs the historical ledger and the divergence between the two is
+  REPORTED every morning as information, exactly as the ruling instructs;
+* **yesterday's verdict** (Q-28). *"The NEXT pre-open runs the FULL battery on yesterday's
+  recording against the published bhavcopy and reports the verdict, loudly naming any
+  live-alerted day the oracle refuses."* That is :func:`verify_prior_recording`, and it runs
+  AFTER the bhavcopy top-up in this job's order for the obvious reason: the oracle it needs is
+  the file the step before it fetched.
+
 ## The Q-19 guard, applied
 
 **QUESTIONS.md Q-19 is OPEN, and its measured workaround binds this job.** A bhavcopy 404 for a
@@ -40,7 +55,8 @@ from . import backfill_daily as daily_backfill
 from . import calendar as cal
 from . import universe as uni
 from .daily_store import DailyStore
-from .live_recording import CALENDAR_PUBLISHED, CALENDAR_STORE_SCAN
+from .live_recording import CALENDAR_PUBLISHED, CALENDAR_STORE_SCAN, LiveRecording
+from .signal_engine import DayGates, SignalPipeline, oracle_free_battery
 
 #: How far back a top-up looks when the store's own last day cannot be trusted to be recent.
 DEFAULT_LOOKBACK_DAYS: int = 10
@@ -62,10 +78,17 @@ class RefreshStep:
 
 @dataclass(frozen=True)
 class RefreshReport:
-    """The whole pre-open job. ``ok`` is the AND of every step -- there is no partial success."""
+    """The whole pre-open job. ``ok`` is the AND of every step -- there is no partial success.
+
+    ``verification`` is CONTEXT 4.7's verdict on YESTERDAY, when there was a live yesterday to
+    verify. It rides on the report rather than only in a step's ``detail`` because the dashboard
+    shows it as its own section, and because a live-alerted day the oracle refuses must be
+    reachable as data and not only as a sentence.
+    """
 
     day: date
     steps: tuple[RefreshStep, ...]
+    verification: "MorningVerification | None" = None
 
     @property
     def ok(self) -> bool:
@@ -78,6 +101,11 @@ class RefreshReport:
             lines.append(f"[{mark}] {step.name:<28} {step.detail}")
         lines.append("=" * 72)
         lines.append("READY" if self.ok else "NOT READY -- the screener must not start")
+        if self.verification is not None and self.verification.refused_after_alert:
+            # The one thing in this report that must not be read past. CONTEXT 4.7's "named
+            # loudly", in the only register a text report has.
+            lines.append("")
+            lines.append("!! " + self.verification.headline)
         return "\n".join(lines) + "\n"
 
 
@@ -267,6 +295,332 @@ def refresh_corporate_actions(
     )
 
 
+def refresh_instrument_master(
+    *, today: date, cache_dir: Path | None = None, allow_network: bool = False,
+    pin: str | None = None,
+    symbols: Sequence[str] = (),
+) -> RefreshStep:
+    """Fetch TODAY'S OWN instrument master and name it -- CONTEXT 4.7 / QUESTIONS.md Q-29.
+
+    The architect's ruling of 08-Aug-2026: *"a live morning uses THE DAY'S OWN instrument master,
+    fetched pre-open, named+hashed into the recording -- the replication target is the trader's
+    chart AS OF THAT MORNING"*. The tick sizes CONTEXT 3.3's profile row grid, hence the POC,
+    hence every entry, stop and target, so this file is a prerequisite of the morning rather than
+    a convenience: without it the step is NOT ok and :attr:`RefreshReport.ok` is False.
+
+    It also runs the ruling's second instruction -- *"the divergence detector reports pin-vs-day
+    differences every morning as information"*. The symbols whose tick moved between the Q-20 pin
+    and today's dump are NAMED in the report and in ``figures``, and nothing is refused for it:
+    today's dump governs today, the pin governs the ledger, and the operator sees the difference
+    instead of discovering it in a POC.
+    """
+    from . import backtest as bt
+    from . import instrument_master as im
+    from . import live_screener as ls
+    from .config import load_config
+
+    config = load_config(include_env=False)
+    cache = Path(cache_dir) if cache_dir is not None else config.path("cache_root")
+    wanted_name = im.master_cache_path(".", today).name
+    try:
+        master = im.load_instrument_master(
+            cache_dir=cache, today=today, allow_network=allow_network
+        )
+    except Exception as exc:
+        return RefreshStep(
+            name="instrument master (TODAY's dump)", ok=False,
+            detail=(
+                f"{wanted_name} is not available: {type(exc).__name__}: {exc}. CONTEXT 4.7 runs "
+                "a live morning on THE DAY'S OWN master; a stale snapshot is not a substitute, "
+                "because the vendor's tick moves between dumps and it sizes the POC."
+            ),
+            figures={"master_file": wanted_name, "fetched": False},
+        )
+    path = im.master_cache_path(cache, today)
+    digest = bt.file_sha256(path)
+
+    divergence: dict[str, tuple[int, int]] = {}
+    pin_name = pin if pin is not None else config.instrument_master
+    pin_note = ""
+    try:
+        pinned, _pin_path, _pin_sha = bt.pinned_master(cache, pin_name)
+    except Exception as exc:  # the pin is the LEDGER's law, not this morning's -- never fatal
+        pin_note = f"pin {pin_name} unreadable ({type(exc).__name__}); no divergence computed"
+    else:
+        divergence = ls.master_tick_divergence(pinned, master, symbols or ())
+    detail = f"{wanted_name} ({len(master):,} instruments), sha256 {digest[:12]}..."
+    if divergence:
+        named = ", ".join(
+            f"{symbol} {pin_tick}->{day_tick}"
+            for symbol, (pin_tick, day_tick) in sorted(divergence.items())
+        )
+        detail += (
+            f"; TICK DIVERGENCE vs the Q-20 pin on {len(divergence)} symbol(s): {named} "
+            "(reported as information -- today's dump governs today, the pin governs the ledger)"
+        )
+    elif pin_note:
+        detail += f"; {pin_note}"
+    elif symbols:
+        detail += f"; no tick divergence vs the Q-20 pin over {len(symbols)} symbol(s)"
+    return RefreshStep(
+        name="instrument master (TODAY's dump)", ok=True, detail=detail,
+        figures={
+            "master_file": wanted_name,
+            "master_sha256": digest,
+            "instruments": len(master),
+            "fetched": True,
+            "pin": pin_name,
+            "tick_divergence_vs_pin": {
+                symbol: {"pin_paise": pin_tick, "day_paise": day_tick}
+                for symbol, (pin_tick, day_tick) in sorted(divergence.items())
+            },
+        },
+    )
+
+
+# --- CONTEXT 4.7: the next morning's verdict on the last one -----------------------------------
+
+
+@dataclass(frozen=True)
+class SymbolVerdict:
+    """One symbol of a verified day: what the live battery said, and what the oracle says now."""
+
+    symbol: str
+    live_passed: bool
+    live_reason: str
+    oracle_passed: bool
+    oracle_reason: str
+    alerted: tuple[str, ...]
+    minutes: int
+
+    @property
+    def refused_after_alert(self) -> bool:
+        """The LOUD case: this symbol produced live alerts and the oracle refuses its day."""
+        return bool(self.alerted) and not self.oracle_passed
+
+
+@dataclass(frozen=True)
+class MorningVerification:
+    """CONTEXT 4.7's next-pre-open verdict over one prior recording.
+
+    ``ok`` is deliberately NOT "everything passed": a day the oracle refuses is a fact about the
+    market's data, not a failure of this job, and a refresh that reported NOT READY every time a
+    stock had a bad print would train the operator to ignore it. What must never be quiet is
+    :attr:`refused_after_alert` -- a day this tool ALERTED on that the exchange's own record then
+    refuses -- and that is what the report says loudly and what the dashboard shows in the
+    banner's own colour.
+    """
+
+    day: date
+    recording_root: str
+    verdicts: tuple[SymbolVerdict, ...]
+    oracle_available: bool = True
+    note: str = ""
+
+    @property
+    def alerted(self) -> tuple[SymbolVerdict, ...]:
+        return tuple(verdict for verdict in self.verdicts if verdict.alerted)
+
+    @property
+    def refused_after_alert(self) -> tuple[SymbolVerdict, ...]:
+        return tuple(verdict for verdict in self.verdicts if verdict.refused_after_alert)
+
+    @property
+    def oracle_passed(self) -> tuple[SymbolVerdict, ...]:
+        return tuple(verdict for verdict in self.verdicts if verdict.oracle_passed)
+
+    @property
+    def headline(self) -> str:
+        if not self.oracle_available:
+            return f"{self.day.isoformat()}: NOT VERIFIED -- {self.note}"
+        bad = self.refused_after_alert
+        if bad:
+            names = ", ".join(verdict.symbol for verdict in bad)
+            return (
+                f"{self.day.isoformat()}: THE EXCHANGE'S RECORD REFUSES {len(bad)} "
+                f"LIVE-ALERTED SYMBOL-DAY(S) -- {names}. Those alerts were produced on data the "
+                "end-of-day battery does not accept; treat them as withdrawn."
+            )
+        return (
+            f"{self.day.isoformat()}: verified against the published bhavcopy -- "
+            f"{len(self.oracle_passed)}/{len(self.verdicts)} symbol-day(s) pass the FULL battery, "
+            f"{len(self.alerted)} alerted, 0 alerted-then-refused."
+        )
+
+    def as_dict(self) -> dict:
+        return {
+            "trade_date": self.day.isoformat(),
+            "recording_root": self.recording_root,
+            "oracle_available": self.oracle_available,
+            "note": self.note,
+            "headline": self.headline,
+            "refused_after_alert": [v.symbol for v in self.refused_after_alert],
+            "verdicts": [
+                {
+                    "symbol": v.symbol,
+                    "live_passed": v.live_passed,
+                    "live_reason": v.live_reason,
+                    "oracle_passed": v.oracle_passed,
+                    "oracle_reason": v.oracle_reason,
+                    "alerted": list(v.alerted),
+                    "minutes": v.minutes,
+                }
+                for v in sorted(self.verdicts, key=lambda v: v.symbol)
+            ],
+        }
+
+    def render(self) -> str:
+        lines = [
+            f"YESTERDAY VERIFIED  {self.day.isoformat()}   (CONTEXT 4.7)",
+            "=" * 72,
+            self.headline,
+            "-" * 72,
+        ]
+        for verdict in sorted(self.verdicts, key=lambda v: v.symbol):
+            mark = "REFUSED-AFTER-ALERT" if verdict.refused_after_alert else (
+                "oracle-pass" if verdict.oracle_passed else "oracle-refused"
+            )
+            lines.append(
+                f"  {verdict.symbol:<14} live={'pass' if verdict.live_passed else 'refused'}  "
+                f"{mark:<20} alerts={','.join(verdict.alerted) or '-'}"
+            )
+            if not verdict.oracle_passed:
+                lines.append(f"      {verdict.oracle_reason}")
+        lines.append("=" * 72)
+        return "\n".join(lines) + "\n"
+
+
+def verify_prior_recording(
+    recording: LiveRecording,
+    pipeline: SignalPipeline,
+    *,
+    day: date,
+) -> MorningVerification:
+    """Run the FULL battery over a prior LIVE recording, against the now-published bhavcopy.
+
+    CONTEXT 4.7, executed: *"The next pre-open runs the FULL battery on the prior recording
+    against the published bhavcopy and reports both verdicts; a live-alerted day the oracle
+    refuses is named loudly."*
+
+    The bars are the recording's own -- the bytes the morning actually decided on, not a fresh
+    pull that might have been repaired since -- and they go through
+    :meth:`acumen.signal_engine.SignalPipeline.gate_day`, which is the backtester's battery with
+    nothing added. The LIVE verdict is recomputed the same way, from
+    :func:`acumen.signal_engine.oracle_free_battery` over the same bars, so the two columns of
+    the report are two batteries over one set of bytes rather than one battery and a memory.
+
+    ``pipeline`` must be wired to the TOPPED-UP daily store (this job's previous step) and to the
+    master the RECORDING names -- a day is re-judged under the ticks it ran on, which is the
+    other half of the Q-29 ruling.
+    """
+    verdicts: list[SymbolVerdict] = []
+    alerts_by_symbol: dict[str, list[str]] = {}
+    for row in recording.alerts():
+        alerts_by_symbol.setdefault(str(row.get("symbol", "")), []).append(str(row.get("kind")))
+
+    for symbol in recording.symbols():
+        bars = recording.bars(symbol, day)
+        if not bars:
+            continue
+        live_gates = oracle_free_battery(day, bars)
+        oracle_gates: DayGates = pipeline.gate_day(symbol, day, bars)
+        verdicts.append(SymbolVerdict(
+            symbol=symbol,
+            live_passed=live_gates.usable,
+            live_reason=live_gates.refusal or "the oracle-free battery accepts this day",
+            oracle_passed=oracle_gates.usable,
+            oracle_reason=(
+                oracle_gates.refusal_detail[1] if oracle_gates.refusal_detail is not None
+                else "the FULL battery accepts this day"
+            ),
+            alerted=tuple(sorted(set(alerts_by_symbol.get(symbol, ())))),
+            minutes=len(bars),
+        ))
+    return MorningVerification(
+        day=day, recording_root=str(recording.root), verdicts=tuple(verdicts),
+    )
+
+
+def verify_yesterday(
+    *,
+    today: date,
+    calendar: cal.TradingCalendar,
+    data_root: Path,
+    cache_dir: Path | None = None,
+    recording_root: Path | None = None,
+) -> tuple[MorningVerification | None, RefreshStep]:
+    """Find yesterday's LIVE recording and verify it. CONTEXT 4.7's next-pre-open duty.
+
+    Absence is not failure and says so: on the first live morning, or after a replay-only day,
+    there is no prior LIVE recording and the step reports that in one line. What IS reported
+    loudly -- in the step's own ``detail``, so it reaches an operator who reads nothing else --
+    is a live-alerted symbol-day the oracle refuses.
+    """
+    from . import backtest as bt
+    from .config import load_config
+    from .daily_store import DailyStore
+    from .minute_store import MinuteStore
+
+    prior = calendar.prev_trading_day(today)
+    root = Path(recording_root) if recording_root is not None else Path(data_root) / "live"
+    candidates = [
+        LiveRecording.at(path) for path in sorted(root.glob(f"{prior.isoformat()}*"))
+        if (path / "manifest.json").is_file()
+    ] if root.is_dir() else []
+    live_recordings = [
+        rec for rec in candidates if rec.read_manifest().get("mode") == "live"
+    ]
+    if not live_recordings:
+        return None, RefreshStep(
+            name="verify yesterday (CONTEXT 4.7)", ok=True,
+            detail=(
+                f"no LIVE recording for {prior.isoformat()} under {root} -- nothing to verify "
+                "(a replay needs no verification: its day already had a bhavcopy)"
+            ),
+            figures={"prior_day": prior.isoformat(), "verified": False},
+        )
+
+    recording = live_recordings[-1]
+    manifest = recording.read_manifest()
+    config = load_config(include_env=False)
+    cache = Path(cache_dir) if cache_dir is not None else config.path("cache_root")
+    try:
+        master, _path, _sha = bt.named_master(cache, str(manifest["master_file"]))
+    except Exception as exc:
+        return None, RefreshStep(
+            name="verify yesterday (CONTEXT 4.7)", ok=False,
+            detail=(
+                f"{recording.root} names master {manifest.get('master_file')!r}, which cannot be "
+                f"loaded: {type(exc).__name__}: {exc}. A day is re-judged under the ticks it ran "
+                "on (Q-29), so it is not re-judged under another."
+            ),
+            figures={"prior_day": prior.isoformat(), "verified": False},
+        )
+
+    pipeline = SignalPipeline(
+        minute_store=MinuteStore.at(Path(data_root) / "minute_store"),
+        daily_store=DailyStore.at(Path(data_root) / "daily_store"),
+        master=master,
+        row_size=int(manifest.get("row_size") or config.row_size),
+    )
+    verification = verify_prior_recording(recording, pipeline, day=prior)
+    recording.write_verification(verification.as_dict())
+    bad = verification.refused_after_alert
+    return verification, RefreshStep(
+        name="verify yesterday (CONTEXT 4.7)", ok=True,
+        detail=verification.headline,
+        figures={
+            "prior_day": prior.isoformat(),
+            "verified": True,
+            "recording": str(recording.root),
+            "symbols": len(verification.verdicts),
+            "oracle_pass": len(verification.oracle_passed),
+            "alerted": len(verification.alerted),
+            "refused_after_alert": [verdict.symbol for verdict in bad],
+        },
+    )
+
+
 def morning_refresh(
     *,
     today: date,
@@ -275,6 +629,8 @@ def morning_refresh(
     allow_network: bool = False,
     symbols: Sequence[str] | None = None,
     daily_runner: Callable[[list[str]], int] | None = None,
+    verify_prior: bool = True,
+    recording_root: Path | None = None,
 ) -> tuple[cal.TradingCalendar, tuple[str, ...], RefreshReport]:
     """Run every pre-open step in order and report each one. Returns what the screener needs.
 
@@ -282,6 +638,10 @@ def morning_refresh(
     computes it through the backtester's own runner, which is the only way to be sure the
     screener's 09:00 bias and the backtester's bias for the same day are the same number rather
     than two implementations that agree today.
+
+    ``verify_prior`` runs CONTEXT 4.7's next-pre-open verification of yesterday's LIVE recording.
+    It is on by default because the ruling makes it a duty rather than an option; it is a
+    parameter at all so that a test can drive the job without a recordings tree beside it.
     """
     steps: list[RefreshStep] = []
     calendar, step = refresh_calendar(
@@ -326,18 +686,64 @@ def morning_refresh(
             name="corporate actions", ok=False, detail=f"{type(exc).__name__}: {exc}"
         ))
 
-    return calendar, universe, RefreshReport(day=today, steps=tuple(steps))
+    # CONTEXT 4.7 / Q-29. AFTER the universe (it names the symbols the divergence is reported
+    # over) and before anything that needs a tick.
+    try:
+        steps.append(refresh_instrument_master(
+            today=today, cache_dir=cache_dir, allow_network=allow_network, symbols=universe,
+        ))
+    except Exception as exc:
+        steps.append(RefreshStep(
+            name="instrument master (TODAY's dump)", ok=False,
+            detail=f"{type(exc).__name__}: {exc}",
+        ))
+
+    # CONTEXT 4.7 / Q-28. AFTER the bhavcopy top-up: the oracle it verifies against is the file
+    # that step just fetched.
+    verification: MorningVerification | None = None
+    if verify_prior:
+        try:
+            verification, step = verify_yesterday(
+                today=today, calendar=calendar, data_root=data_root_for(store),
+                cache_dir=cache_dir, recording_root=recording_root,
+            )
+            steps.append(step)
+        except Exception as exc:
+            steps.append(RefreshStep(
+                name="verify yesterday (CONTEXT 4.7)", ok=False,
+                detail=f"{type(exc).__name__}: {exc}",
+            ))
+
+    return calendar, universe, RefreshReport(
+        day=today, steps=tuple(steps), verification=verification
+    )
+
+
+def data_root_for(store: DailyStore) -> Path:
+    """The ``data_root`` a daily store lives under -- ``<data_root>/daily_store``'s parent.
+
+    Derived from the store the caller already handed in rather than re-read from config, so a
+    test (or an operator pointing at a copy) cannot end up verifying yesterday out of one tree
+    while topping up another.
+    """
+    return Path(store.root).parent
 
 
 __all__ = [
     "DEFAULT_LOOKBACK_DAYS",
+    "MorningVerification",
     "RefreshError",
     "RefreshReport",
     "RefreshStep",
+    "SymbolVerdict",
+    "data_root_for",
     "last_completed_trading_day",
     "morning_refresh",
     "refresh_calendar",
     "refresh_corporate_actions",
     "refresh_daily_store",
+    "refresh_instrument_master",
     "refresh_universe",
+    "verify_prior_recording",
+    "verify_yesterday",
 ]

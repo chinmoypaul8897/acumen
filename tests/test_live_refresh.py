@@ -234,19 +234,26 @@ def test_the_refresh_runs_every_step_and_a_broken_one_does_not_stop_the_rest(
 ) -> None:
     """A pre-open job that abandoned itself at the first failure would tell the operator about
     one problem when there are three. Every step runs; the REPORT is the AND."""
+    from acumen.daily_store import DailyStore
+
     today = date(2026, 8, 7)
 
     def exploding(argv):
         raise RuntimeError("the archive is down")
 
     _cal, universe, report = refresh.morning_refresh(
-        today=today, store=None, cache_dir=holiday_cache(tmp_path, today),
+        today=today, store=DailyStore.at(tmp_path / "daily_store"),
+        cache_dir=holiday_cache(tmp_path, today),
         allow_network=False, symbols=("AAA", "BBB"), daily_runner=exploding,
     )
     names = [step.name for step in report.steps]
     assert names == [
         "calendar (published NSE)", "universe (F&O underlyings)",
         "daily store (bhavcopy top-up)", "corporate actions",
+        # CONTEXT 4.7's two additions, in the order the section needs them: the day's own master
+        # after the universe (which names the symbols its divergence is reported over), and
+        # yesterday's verification after the bhavcopy top-up (which fetched its oracle).
+        "instrument master (TODAY's dump)", "verify yesterday (CONTEXT 4.7)",
     ]
     assert universe == ("AAA", "BBB")
     assert not report.ok
@@ -258,5 +265,14 @@ def test_the_refresh_runs_every_step_and_a_broken_one_does_not_stop_the_rest(
     # the property under test -- the job did not abandon itself at the first failure, and the
     # operator is told about both problems in one preflight instead of one per restart.
     assert "corporate actions" in failed
-    assert len(report.steps) == 4
+    # ...and so does the master step, for the same honest reason: offline, with no dump cached
+    # for today, CONTEXT 4.7's prerequisite is genuinely absent and a stale snapshot is not a
+    # substitute. The refusal names the section rather than the exception.
+    assert "instrument master (TODAY's dump)" in failed
+    assert "CONTEXT 4.7" in failed["instrument master (TODAY's dump)"].detail
+    # The verification step, by contrast, is OK and says why: there is no live yesterday here.
+    verify = {step.name: step for step in report.steps}["verify yesterday (CONTEXT 4.7)"]
+    assert verify.ok and "nothing to verify" in verify.detail
+    assert report.verification is None
+    assert len(report.steps) == 6
     assert "NOT READY" in report.render()

@@ -61,6 +61,11 @@ STATE_NAME: str = "state.json"
 FETCHES_NAME: str = "fetches.jsonl"
 ALERTS_NAME: str = "alerts.jsonl"
 EVENTS_NAME: str = "events.jsonl"
+#: CONTEXT 4.7: the NEXT pre-open's verdict on this day, written back into the day's own
+#: recording. It is a separate document and not a manifest field on purpose -- the manifest
+#: describes the machine the morning RAN on and is frozen against drift, while this is what a
+#: later day, holding an oracle the morning did not have, concluded about it.
+VERIFICATION_NAME: str = "verification.json"
 
 #: The recording format's own version. Bumped when a field's MEANING changes, never for an
 #: addition -- chunk 14 must be able to read an older day and say so.
@@ -198,6 +203,10 @@ class LiveRecording:
     def events_path(self) -> Path:
         return self.root / EVENTS_NAME
 
+    @property
+    def verification_path(self) -> Path:
+        return self.root / VERIFICATION_NAME
+
     def exists(self) -> bool:
         return self.manifest_path.is_file()
 
@@ -307,6 +316,22 @@ class LiveRecording:
     def write_state(self, payload: Mapping[str, Any]) -> Path:
         """Write the crash-safe intraday state, whole-file and atomically."""
         return atomic_write_text(self.state_path, _canonical(payload))
+
+    def write_verification(self, payload: Mapping[str, Any]) -> Path:
+        """Write the NEXT pre-open's full-battery verdict on this day (CONTEXT 4.7).
+
+        The only write this repo makes into a CLOSED recording, and it is the one CONTEXT 4.7
+        requires: the day the morning could not verify is verified the next morning, and the
+        verdict belongs beside the day it judges rather than only in the log of the session that
+        computed it. Whole-file and atomic, like every other document here.
+        """
+        return atomic_write_text(self.verification_path, _canonical(payload))
+
+    def read_verification(self) -> dict[str, Any]:
+        """The verification verdict, or ``{}`` when no morning has verified this day yet."""
+        if not self.verification_path.is_file():
+            return {}
+        return _read_json(self.verification_path, "verification")
 
     # --- reading (what chunk 14's parity harness consumes) -------------------------
 
@@ -422,6 +447,7 @@ class LiveRecording:
             "has_manifest": self.manifest_path.is_file(),
             "has_bias": self.bias_path.is_file(),
             "has_state": self.state_path.is_file(),
+            "has_verification": self.verification_path.is_file(),
             "digest": self.digest(),
         }
 
@@ -516,4 +542,5 @@ __all__ = [
     "RecordedAlert",
     "RecordingError",
     "STATE_NAME",
+    "VERIFICATION_NAME",
 ]
