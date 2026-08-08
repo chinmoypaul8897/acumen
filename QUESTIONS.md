@@ -4222,24 +4222,38 @@ a replay, and Q-20 already governs a replay: a replay IS the backtest path.
 ## ARCHITECT'S RULINGS (08-Aug-2026) - Q-28 and Q-29 - recorded VERBATIM by the chunk-13 FIX session
 
 Recorded first, in its own commit, before a line of code moved. The words between the quotation
-marks are the architect's; nothing outside them is.
+marks are the architect's; nothing outside them is. The architect's own line breaks are
+preserved, so the record is byte-reconstructable by stripping the `> ` prefix and the outer
+quotation marks and re-joining with newlines — which is what the 06-Aug-2026 ruling (1) requires
+of anything that quotes it, and which this block now satisfies to the character.
 
 > "ARCHITECT'S RULINGS (08-Aug-2026). Q-28: gates 1/1P exist to catch history
-> being rewritten, and today cannot be rewritten during today -- so a LIVE
+> being rewritten, and today cannot be rewritten during today — so a LIVE
 > morning runs the ORACLE-FREE battery per sweep (gate 2 incl. the Q-21(a) open
 > test, Q-17 candle-level drops, candle validity); every live alert carries the
 > disclosed line 'live feed, not yet verified against the exchange's end-of-day
 > record'; the NEXT pre-open runs the FULL battery on yesterday's recording
 > against the published bhavcopy and reports the verdict, loudly naming any
 > live-alerted day the oracle refuses. The residual is disclosed as a MEASURED
-> frequency, not an adjective. Section 6 parity is judged on oracle-passing days; a
+> frequency, not an adjective. §6 parity is judged on oracle-passing days; a
 > live-alerted-oracle-refused day is the disclosed, bounded difference (live
 > cannot see tomorrow). Q-29: a live morning uses THE DAY'S OWN instrument
-> master, fetched pre-open, named+hashed into the recording -- the replication
+> master, fetched pre-open, named+hashed into the recording — the replication
 > target is the trader's chart AS OF THAT MORNING; replay consumes the
-> recording's own pin, so section 6 holds per day; the Q-20 pin remains law for the
+> recording's own pin, so §6 holds per day; the Q-20 pin remains law for the
 > historical ledger; the divergence detector reports pin-vs-day differences
 > every morning as information. Architect."
+
+**Fidelity note (this session's own words, outside the quotation).** The block as first committed
+(`b1bc57f`) transliterated four characters of the supplied text — two em dashes to `--`, and both
+`§` signs to the word `section` — following the shape of the three preceding architect relays in
+this file. That transliteration is **not licensed here** and has been reverted above. The
+06-Aug-2026 ruling (1) is *"a quoted architect ruling is BYTE-VERBATIM or it is a paraphrase
+outside quotation marks"*, and the single mechanical exception it grants is scoped to
+`docs/reports/`, which `src/acumen/config.py` holds to ASCII; QUESTIONS.md is not such a file and
+already carries both characters throughout. Exactly those four substitutions were reverted and
+nothing else in the 1,163 characters moved — the quotation now compares byte-identical against
+the supplied text. CONTEXT v2.0 §4.7, committed the same day, was byte-verbatim from the start.
 
 **Q-28 is CLOSED.** The live mode is UNBLOCKED and CONTEXT v2.0 section 4.7 carries the ruling as
 law. What the ruling settles, in this session's own words (outside the quotation):
