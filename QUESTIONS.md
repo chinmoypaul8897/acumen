@@ -4315,3 +4315,65 @@ which it may be revisited:
 
 The ruling changes no code, no test and no document. It is recorded because an approved Class-B
 decision that a later session might "tidy" is exactly the kind of thing that goes missing.
+---
+
+## Q-30 · chunk 13 · class A · OPEN · raised by the REVIEW_13 session · **binds the first live morning; blocks nothing today**
+
+**Question.** Which universe does a LIVE morning screen -- CONTEXT 3.1's *"all NSE F&O stock
+underlyings (~210)"*, or the **settled 204** the backtester actually walked?
+
+**Why it is not obvious, and why it is not a detail.** The two readings are both licensed by the
+law as written and they disagree about six real stocks. CONTEXT 3.1 and 4.4 describe the live
+sweep over the whole F&O list; CONTEXT 4.6 quarantines six symbols (APLAPOLLO, ASTRAL, IEX, NTPC,
+UPL, VBL) for data quality, and the chunk-9B run walked **none** of their days -- zero rows in
+495,312. As shipped, `run_screener --refresh` takes the raw NSE list (208 symbols in the cached
+payload today) and **no module on the live path reads the settled/quarantined register at all**,
+so a live morning screens all six.
+
+**What it costs if it is got wrong.** The trader would receive alerts on six stocks for which
+**no backtest evidence exists** -- the machine has never been shown to reproduce his strategy on
+them, because their data was refused. And CONTEXT 4.7's disclosed residual does not describe them:
+0.5229% is measured over settled symbol-days, while these six carry a gate-1 refusal rate of
+22.1%-47.2% (32.8% pooled) and an oracle-only refusal rate of 10.7644%, some 4.3x the settled
+population's. The sentence on every live alert would be calibrated to a population that excludes
+exactly the symbols most likely to break it.
+
+**Options for the architect** (this session takes none of them):
+(a) the live universe is the SETTLED 204 -- the screener reads the chunk-5B register and refuses
+    a quarantined symbol out loud, so live and backtest cover the same stocks;
+(b) the live universe is the full F&O list, and the six are alerted on with a per-symbol
+    disclosure naming their measured refusal rate;
+(c) the full list, with the quarantined six disclosed once at startup rather than per alert;
+(d) something else.
+
+**What this session did instead of deciding.** Nothing but measure it and write it here. The
+review reports it as finding M2 and takes no position; no code was changed by this review at all.
+
+---
+
+## Q-31 · chunk 13 · class B · OPEN · raised by the REVIEW_13 session · **architect-only edits; blocks nothing**
+
+Two things about CONTEXT v2.0 section 4.7 that only the architect may move, both measured rather
+than argued, and neither of which changes what any code does today.
+
+**(1) The ruling's section-6 clause did not reach the law.** The architect's 08-Aug-2026 ruling,
+recorded verbatim above, contains: *"section 6 parity is judged on oracle-passing days; a
+live-alerted-oracle-refused day is the disclosed, bounded difference (live cannot see tomorrow)."*
+Section 4.7 carries every other operative clause of that ruling and not this one, and CONTEXT
+section 6 still reads *"same code path, guaranteed no backtest/live drift"* unqualified. Chunk 14's
+parity harness is the next thing that needs the qualification, and it is the one place a reader of
+CONTEXT alone -- which CLAUDE.md's read order makes the primary source -- would not find it.
+
+**(2) The quoted disclosed line is one byte longer than the ruling's.** The ruling gives the
+sentence as 68 characters; section 4.7's copy, inside quotation marks, is 69 -- it adds a terminal
+full stop. `acumen.live_screener.LIVE_DISCLOSURE` is 68 and matches the ruling byte for byte, so
+the CODE is right and the LAW is the one that differs. The B349 fidelity note and PROGRESS both
+assert that *"CONTEXT v2.0 section 4.7 was byte-verbatim from the start"*; at the one point in 4.7
+that can be checked against a recorded architect text, it is not. Recorded here rather than
+corrected, because a session may not edit CONTEXT.
+
+**A note the architect may want to act on separately.** The "architect's template" that section
+4.7 is said to be quoted from is recorded NOWHERE in this repository. QUESTIONS.md records the
+ruling and nothing else. So the directed check *"4.7 verbatim against the architect's template"*
+cannot be discharged by any reviewer, now or later. If the template is pasted into QUESTIONS.md it
+becomes checkable, exactly as the ruling itself became checkable and was in fact corrected (B349).
