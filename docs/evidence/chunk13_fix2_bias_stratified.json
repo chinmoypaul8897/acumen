@@ -1,0 +1,175 @@
+{
+  "carry_rules": [
+    "inside-bar-carry",
+    "no-data",
+    "no-rule-carry",
+    "rule-3-no-1min-carry",
+    "rule-3-no-break-carry"
+  ],
+  "note": "Stratified by bias_rule from the chunk-9B ledger by docs/evidence/chunk13_fix2_bias_stratified.py (REVIEW_13 B1). The SUITE re-runs these days on every run; the counts are this document's.",
+  "sample": [
+    {
+      "carried": true,
+      "day": "2026-06-10",
+      "expected": {
+        "bias": "bearish",
+        "bias_rule": "inside-bar-carry",
+        "entry_paise": null,
+        "exit_kind": null,
+        "poc_paise": "56655/2",
+        "qty": null,
+        "reference_paise": 28440,
+        "stop_paise": null,
+        "target_paise": null
+      },
+      "rule": "inside-bar-carry",
+      "symbol": "ITC"
+    },
+    {
+      "carried": true,
+      "day": "2026-01-01",
+      "expected": {
+        "bias": "bullish",
+        "bias_rule": "inside-bar-carry",
+        "entry_paise": 117910,
+        "exit_kind": "stop-loss-hit",
+        "poc_paise": "117875",
+        "qty": 625,
+        "reference_paise": 117780,
+        "stop_paise": 117750,
+        "target_paise": 118390
+      },
+      "rule": "inside-bar-carry",
+      "symbol": "360ONE"
+    },
+    {
+      "carried": true,
+      "day": "2024-02-14",
+      "expected": {
+        "bias": "bearish",
+        "bias_rule": "no-data",
+        "entry_paise": null,
+        "exit_kind": null,
+        "poc_paise": "440250",
+        "qty": null,
+        "reference_paise": 439700,
+        "stop_paise": null,
+        "target_paise": null
+      },
+      "rule": "no-data",
+      "symbol": "FORCEMOT"
+    },
+    {
+      "carried": false,
+      "day": "2026-01-05",
+      "expected": {
+        "bias": "bullish",
+        "bias_rule": "rule-1-breakout",
+        "entry_paise": 120710,
+        "exit_kind": "target-hit",
+        "poc_paise": "120435",
+        "qty": 222,
+        "reference_paise": 120420,
+        "stop_paise": 120260,
+        "target_paise": 122060
+      },
+      "rule": "rule-1-breakout",
+      "symbol": "360ONE"
+    },
+    {
+      "carried": false,
+      "day": "2026-01-06",
+      "expected": {
+        "bias": "bearish",
+        "bias_rule": "rule-2-sweep",
+        "entry_paise": 120540,
+        "exit_kind": "target-hit",
+        "poc_paise": "120560",
+        "qty": 625,
+        "reference_paise": 120510,
+        "stop_paise": 120700,
+        "target_paise": 120060
+      },
+      "rule": "rule-2-sweep",
+      "symbol": "360ONE"
+    },
+    {
+      "carried": true,
+      "day": "2021-01-27",
+      "expected": {
+        "bias": "bearish",
+        "bias_rule": "rule-3-no-1min-carry",
+        "entry_paise": null,
+        "exit_kind": null,
+        "poc_paise": "253395",
+        "qty": null,
+        "reference_paise": 253215,
+        "stop_paise": null,
+        "target_paise": null
+      },
+      "rule": "rule-3-no-1min-carry",
+      "symbol": "AMBER"
+    },
+    {
+      "carried": true,
+      "day": "2017-07-11",
+      "expected": {
+        "bias": "bearish",
+        "bias_rule": "rule-3-no-break-carry",
+        "entry_paise": null,
+        "exit_kind": null,
+        "poc_paise": "112535",
+        "qty": null,
+        "reference_paise": 113105,
+        "stop_paise": null,
+        "target_paise": null
+      },
+      "rule": "rule-3-no-break-carry",
+      "symbol": "ASIANPAINT"
+    },
+    {
+      "carried": false,
+      "day": "2026-04-22",
+      "expected": {
+        "bias": "bullish",
+        "bias_rule": "rule-3-outside-bar",
+        "entry_paise": 105490,
+        "exit_kind": "square-off-at-the-15:15-close",
+        "poc_paise": "105075",
+        "qty": 144,
+        "reference_paise": 105340,
+        "stop_paise": 104800,
+        "target_paise": 107560
+      },
+      "rule": "rule-3-outside-bar",
+      "symbol": "360ONE"
+    },
+    {
+      "carried": false,
+      "day": "2026-03-04",
+      "expected": {
+        "bias": "bullish",
+        "bias_rule": "rule-3-tie",
+        "entry_paise": 126890,
+        "exit_kind": "stop-loss-hit",
+        "poc_paise": "126815",
+        "qty": 232,
+        "reference_paise": 127560,
+        "stop_paise": 126460,
+        "target_paise": 128180
+      },
+      "rule": "rule-3-tie",
+      "symbol": "BDL"
+    }
+  ],
+  "strata_counts": {
+    "inside-bar-carry": 62680,
+    "no-data": 2,
+    "rule-1-breakout": 276541,
+    "rule-2-sweep": 60527,
+    "rule-3-no-1min-carry": 7,
+    "rule-3-no-break-carry": 5,
+    "rule-3-outside-bar": 6664,
+    "rule-3-tie": 62
+  }
+}
