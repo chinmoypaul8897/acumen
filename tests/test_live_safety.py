@@ -21,6 +21,7 @@ ASCII-only, like every other source file in this repo (chunk-0 B7).
 from __future__ import annotations
 
 import ast
+import re
 from datetime import date, datetime
 from pathlib import Path
 
@@ -51,62 +52,282 @@ ALLOWED_BROKER_CALLS: frozenset[str] = frozenset(
     {"generateSession", "terminateSession", "getCandleData"}
 )
 
+#: **Where the tripwire looks.** CONTEXT section 1 R4 says *"anywhere in this repo"* and the
+#: shipped scan was ``PACKAGE.glob("*.py")`` -- non-recursive, and blind to ``tests/``,
+#: ``scripts/``, ``docs/evidence/`` and any subpackage ``src/acumen`` might grow (REVIEW_13
+#: **M7**). Every Python file under these roots is scanned, recursively.
+SCAN_ROOTS: tuple[str, ...] = ("src", "tests", "scripts", "docs/evidence")
+
+#: The one file the scan cannot read: this one. It must NAME the forbidden endpoints in order to
+#: forbid them, and it must carry the evasion corpus in order to prove the scan catches it. The
+#: exemption is by filename and is asserted to be exactly one file, so it cannot quietly grow.
+SELF_EXEMPT: frozenset[str] = frozenset({"test_live_safety.py"})
+
+#: Characters removed before the literal scan compares. Quotes, ``+`` and whitespace defeat
+#: ``"place" + "Order"`` and ``"place" "Order"``; commas defeat ``"".join(["place", "Order"])``;
+#: underscores, hyphens and backslashes defeat ``place_order``, ``place-order`` and an escaped
+#: split. The comparison is then case-insensitive, which defeats ``PlaceOrder``.
+_NOISE = re.compile(r"[\s'\"+_\\,-]")
+
+
+def _squash(text: str) -> str:
+    """Normalise a line (or a name) so that a spelling trick cannot hide an endpoint in it."""
+    return _NOISE.sub("", text).lower()
+
+
+#: The endpoints in the one form the scan actually compares against.
+NORMALISED_ENDPOINTS: tuple[str, ...] = tuple(sorted({_squash(e) for e in ORDER_ENDPOINTS}))
+
+
+def repo_sources() -> list[Path]:
+    """Every Python file the tripwire covers -- recursively, over all of :data:`SCAN_ROOTS`."""
+    found: list[Path] = []
+    for root in SCAN_ROOTS:
+        found.extend(sorted((REPO_ROOT / root).rglob("*.py")))
+    return [path for path in found if path.name not in SELF_EXEMPT]
+
 
 def package_sources() -> list[Path]:
-    return sorted(path for path in PACKAGE.glob("*.py"))
+    """Every module of the package itself, recursively (subpackages included)."""
+    return sorted(PACKAGE.rglob("*.py"))
 
 
-def test_NO_ORDER_PLACEMENT_ENDPOINT_IS_NAMED_ANYWHERE_IN_THE_PACKAGE() -> None:
-    """CONTEXT section 1 R4, enforced over every module in ``src/acumen``.
+def literal_offenders(text: str, label: str) -> list[str]:
+    """The LITERAL half, widened: a squashed, case-folded line scan."""
+    found: list[str] = []
+    for number, line in enumerate(text.splitlines(), start=1):
+        squashed = _squash(line)
+        for endpoint in NORMALISED_ENDPOINTS:
+            if endpoint in squashed:
+                found.append(f"{label}:{number} literal-scan names {endpoint!r}")
+    return found
 
-    A literal scan, because that is what catches the thing this rule is really about: a future
-    session pasting a snippet from the vendor's documentation. It does not need to be reachable
-    to be a breach -- an order call sitting behind a flag is an order call.
+
+def _folded_strings(node: ast.AST) -> list[str]:
+    """Every string a constant-folding expression can produce, best-effort.
+
+    ``"place" + "Order"``, an f-string whose parts are constants, and a list/tuple of constants
+    that something will join -- the three shapes that turn a name the AST never sees as one
+    piece into a name the interpreter does.
     """
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return [node.value]
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left, right = _folded_strings(node.left), _folded_strings(node.right)
+        return ["".join(left) + "".join(right)] if left and right else []
+    if isinstance(node, ast.FormattedValue):
+        return _folded_strings(node.value)
+    if isinstance(node, ast.JoinedStr):
+        parts = [part for value in node.values for part in _folded_strings(value)]
+        return ["".join(parts)] if parts else []
+    if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+        parts = [part for element in node.elts for part in _folded_strings(element)]
+        return parts + (["".join(parts)] if len(parts) > 1 else [])
+    return []
+
+
+def candidate_names(tree: ast.AST) -> set[str]:
+    """Every name this file could reach an attribute by, however it spells it.
+
+    The shipped AST half collected attribute names and the literal second argument of
+    ``getattr``, and REVIEW_13 measured what that missed: of 22 evasion variants it turned red on
+    3, **all 3 already red on the literal scan, so it added ZERO catches** -- and it missed the
+    evasion its own docstring named. What is collected now:
+
+    * every attribute access (``connect.placeOrder``), including one merely bound to a name;
+    * **every string constant anywhere in the file**, which is what catches a name assigned to a
+      variable first, a dict value, an ``operator.attrgetter`` argument, a
+      ``__getattribute__`` call, and a string handed to ``exec``/``eval``;
+    * every constant-foldable string expression -- concatenation with ``+``, implicit adjacency,
+      an f-string of constants, and the parts of a list/tuple something will ``join``;
+    * every import name AND alias, so ``from x import placeOrder as ship_it`` is caught by the
+      name even though the alias is innocent.
+    """
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute):
+            names.add(node.attr)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                names.add(alias.name)
+                if alias.asname:
+                    names.add(alias.asname)
+            if isinstance(node, ast.ImportFrom) and node.module:
+                names.add(node.module)
+        else:
+            names.update(_folded_strings(node))
+    return names
+
+
+def ast_offenders(tree: ast.AST, label: str) -> list[str]:
+    """The AST half, widened -- and it now catches things the literal half cannot."""
+    found: list[str] = []
+    for name in sorted(candidate_names(tree)):
+        squashed = _squash(name)
+        for endpoint in NORMALISED_ENDPOINTS:
+            if endpoint in squashed:
+                found.append(f"{label}: ast-scan reaches {name!r} (~{endpoint})")
+    return found
+
+
+def scan_source(text: str, label: str) -> list[str]:
+    """Both halves over one file's text. Empty means clean."""
+    offenders = literal_offenders(text, label)
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:  # pragma: no cover -- every file in this repo parses
+        return offenders + [f"{label}: does not parse"]
+    return offenders + ast_offenders(tree, label)
+
+
+def test_NO_ORDER_PLACEMENT_ENDPOINT_IS_NAMED_ANYWHERE_IN_THE_REPOSITORY() -> None:
+    """CONTEXT section 1 R4, over the whole repository rather than over one directory listing.
+
+    It does not need to be reachable to be a breach -- an order call sitting behind a flag is an
+    order call. What changed with REVIEW_13 M7 is REACH: the scan was
+    ``PACKAGE.glob("*.py")``, so ``tests/``, ``scripts/``, ``docs/evidence/`` and any subpackage
+    were invisible to a rule whose own words are "anywhere in this repo".
+    """
+    files = repo_sources()
+    assert len(files) > len(list(PACKAGE.glob("*.py"))), (
+        "the scan reaches beyond the package's own top-level modules"
+    )
     offenders: list[str] = []
-    for path in package_sources():
-        text = path.read_text(encoding="utf-8")
-        for line_number, line in enumerate(text.splitlines(), start=1):
-            if line.lstrip().startswith("#") and "ORDER_ENDPOINTS" in line:
-                continue
-            for endpoint in ORDER_ENDPOINTS:
-                if endpoint in line:
-                    offenders.append(f"{path.name}:{line_number} names {endpoint!r}")
+    for path in files:
+        offenders.extend(
+            scan_source(path.read_text(encoding="utf-8"), str(path.relative_to(REPO_ROOT)))
+        )
     assert not offenders, (
         "CONTEXT section 1 R4: no order-placement code anywhere in this repo in v1. Found:\n"
         + "\n".join(offenders)
     )
 
 
-def test_the_broker_connection_is_only_ever_asked_for_candles_or_a_session() -> None:
-    """The AST half: what the package actually CALLS on the broker object.
+def test_the_ONE_exempt_file_is_this_one_and_it_is_exempt_for_a_stated_reason() -> None:
+    """The exemption cannot quietly grow into a place to keep an endpoint.
 
-    A literal scan can be walked around by ``getattr(connect, "place" + "Order")``. So every
-    attribute access and every ``getattr`` string in the package is collected and checked against
-    the three calls this repo is allowed to make -- login, logout, and the read-only
-    ``getCandleData`` CONTEXT 4.3 and 4.4 both name as the one source of bars.
+    This file must name the forbidden endpoints to forbid them and must carry the evasion corpus
+    to prove the scan catches it, so it cannot scan itself. That is the whole exemption: one
+    file, named, and its own contents are the tripwire rather than a gap in it.
+    """
+    assert SELF_EXEMPT == {Path(__file__).name}
+    skipped = [
+        path for root in SCAN_ROOTS
+        for path in (REPO_ROOT / root).rglob("*.py")
+        if path.name in SELF_EXEMPT
+    ]
+    assert len(skipped) == 1 and skipped[0].resolve() == Path(__file__).resolve()
+
+
+#: Every evasion REVIEW_13 walked past the shipped tripwire with, plus the ones its own docstring
+#: claimed to stop. Source TEXT, compiled nowhere, scanned as files -- so the corpus proves the
+#: SCANNER rather than proving Python. The finding was 5 of 22 caught, with the AST half adding
+#: zero over the literal one.
+EVASIONS: tuple[tuple[str, str], ...] = (
+    ("plain attribute", "connect.placeOrder(params)\n"),
+    ("snake_case attribute", "connect.place_order(params)\n"),
+    ("case variant", "connect.PlaceOrder(params)\n"),
+    ("doubled underscore", "connect.place__order(params)\n"),
+    ("getattr literal", 'getattr(connect, "placeOrder")(params)\n'),
+    ("getattr concatenation", 'getattr(connect, "place" + "Order")(params)\n'),
+    ("getattr adjacency", 'getattr(connect, "place" "Order")(params)\n'),
+    ("getattr f-string", "getattr(connect, f\"place{'Order'}\")(params)\n"),
+    ("getattr via join", 'getattr(connect, "".join(["place", "Order"]))(params)\n'),
+    ("name assigned first", 'method = "placeOrder"\ngetattr(connect, method)(params)\n'),
+    ("name built first", 'method = "place" + "Order"\ngetattr(connect, method)(params)\n'),
+    ("dict value", 'ROUTES = {"go": "placeOrder"}\ngetattr(connect, ROUTES["go"])(params)\n'),
+    ("attrgetter", 'import operator\noperator.attrgetter("placeOrder")(connect)(params)\n'),
+    ("dunder getattribute", 'connect.__getattribute__("placeOrder")(params)\n'),
+    ("setattr", 'setattr(shim, "placeOrder", fn)\n'),
+    ("bound to a local", "shipit = connect.placeOrder\n"),
+    ("import by name", "from vendor.smartConnect import placeOrder\n"),
+    ("import under an alias", "from vendor.smartConnect import placeOrder as ship_it\n"),
+    ("exec string", 'exec("connect.placeOrder(params)")\n'),
+    ("eval string", 'eval(\'getattr(connect, "cancelOrder")\')\n'),
+    ("modify", "connect.modifyOrder(params)\n"),
+    ("cancel", "connect.cancelOrder(params)\n"),
+    ("gtt create", "connect.gttCreateRule(params)\n"),
+    ("gtt built", 'getattr(connect, "gtt" + "CreateRule")(params)\n'),
+    ("convert position", "connect.convertPosition(params)\n"),
+    ("in a docstring", '"""Pasted from the vendor docs: placeOrder(variety, ...)."""\n'),
+)
+
+
+def _shipped_scan(text: str) -> bool:
+    """The tripwire as REVIEW_13 found it: a plain line scan plus the narrow AST half.
+
+    Kept so the widening can be MEASURED rather than asserted -- the review's own number was
+    5 caught of 22, with the AST half adding nothing over the literal one.
+    """
+    for line in text.splitlines():
+        for endpoint in ORDER_ENDPOINTS:
+            if endpoint in line:
+                return True
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return False
+    for node in ast.walk(tree):
+        name = None
+        if isinstance(node, ast.Attribute):
+            name = node.attr
+        elif (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+              and node.func.id == "getattr" and len(node.args) > 1
+              and isinstance(node.args[1], ast.Constant)
+              and isinstance(node.args[1].value, str)):
+            name = node.args[1].value
+        if name and name in ORDER_ENDPOINTS:
+            return True
+    return False
+
+
+def test_the_order_tripwire_CATCHES_EVERY_EVASION_the_review_walked_past() -> None:
+    """REVIEW_13 **M7**: 17 of 22 evasion variants walked past both halves. Now none does.
+
+    The corpus is scanned as SOURCE TEXT and nothing in it is imported or executed. Each variant
+    is a real way to reach a method without writing its name where a line scan would see it, and
+    the two halves are checked separately as well as together -- because the finding was not
+    only that variants escaped, it was that the AST half **added zero catches** over the literal
+    one and so was not doing the job its docstring claimed.
+    """
+    missed = [label for label, source in EVASIONS if not scan_source(source, label)]
+    assert not missed, f"the widened tripwire still walks past: {missed}"
+
+    shipped_caught = [label for label, source in EVASIONS if _shipped_scan(source)]
+    assert len(shipped_caught) < len(EVASIONS), (
+        "the corpus must contain variants the shipped scan missed, or it proves nothing"
+    )
+
+    # The AST half must now EARN its place: at least one variant that the literal half cannot
+    # see must be caught by it. (The reverse also holds -- a bare `exec` string is a literal
+    # catch -- which is why both halves are kept.)
+    ast_only = [
+        label for label, source in EVASIONS
+        if not literal_offenders(source, label) and ast_offenders(ast.parse(source), label)
+    ]
+    assert ast_only, "the AST half adds nothing over the literal scan -- that was the finding"
+
+
+def test_the_broker_connection_is_only_ever_asked_for_candles_or_a_session() -> None:
+    """What the package actually CALLS on the broker object -- login, logout, candles, nothing.
+
+    The scan above proves no order endpoint is NAMED. This one proves the positive: the three
+    calls this repo is allowed to make are the only three it makes.
     """
     suspicious: list[str] = []
     for path in package_sources():
         tree = ast.parse(path.read_text(encoding="utf-8"))
-        for node in ast.walk(tree):
-            name = None
-            if isinstance(node, ast.Attribute):
-                name = node.attr
-            elif (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-                  and node.func.id == "getattr" and len(node.args) > 1
-                  and isinstance(node.args[1], ast.Constant)
-                  and isinstance(node.args[1].value, str)):
-                name = node.args[1].value
-            if name is None:
-                continue
+        for name in candidate_names(tree):
             lowered = name.lower()
             if ("order" in lowered or "gtt" in lowered) and name not in ALLOWED_BROKER_CALLS:
                 # `ordered`, `order` as a local, `sort_order` etc. are English, not endpoints.
                 if lowered in {"order", "ordered", "sort_order", "reorder", "ordering"}:
                     continue
-                suspicious.append(f"{path.name}: .{name}")
-    unexpected = [row for row in suspicious if any(e in row for e in ORDER_ENDPOINTS)]
+                suspicious.append(f"{path.name}: {name}")
+    unexpected = [
+        row for row in suspicious
+        if any(endpoint in _squash(row) for endpoint in NORMALISED_ENDPOINTS)
+    ]
     assert not unexpected, "an order endpoint is reachable by attribute:\n" + "\n".join(unexpected)
 
     # and the three calls the client really makes are exactly the allowed set
@@ -165,17 +386,25 @@ def test_the_LIVE_mode_REFUSES_TO_START_WITHOUT_THE_DAYS_OWN_MASTER(tmp_path: Pa
     entry, stop and target, so a morning whose dump did not arrive must refuse rather than fall
     back to a stale snapshot -- silently running on last week's ticks is exactly the failure Q-20
     measured on 11 of the sealed 210.
+
+    **REVIEW_13 M24, closed.** As replaced, this test caught ``Exception`` -- which admits any
+    exception whatsoever -- and checked three substrings, because the refusal really was leaking
+    a ``BacktestError`` through a module whose error base is ``ScreenerError``. Both halves are
+    repaired: the contract is asserted by TYPE and the sentence by EQUALITY against the module
+    constant that carries it, which is what the test it replaced did.
     """
-    with pytest.raises(Exception) as caught:
+    with pytest.raises(ls.ScreenerError) as caught:
         ls.build_live_screener(
             date(2026, 7, 17), ("SYNTH",),
             source=None, recording=LiveRecording.at(tmp_path / "r"),
             clock=ls.VirtualClock(stamp=datetime(2026, 7, 17, 9, 0)), mode="live",
         )
     message = str(caught.value)
+    assert message.startswith(ls.MASTER_MISSING_REFUSAL), (
+        "the refusal is the module's own recorded sentence, not a paraphrase of it"
+    )
     assert "OpenAPIScripMaster_2026-07-17.json" in message, "it names the file it wanted"
     assert "CONTEXT 4.7" in message
-    assert "not something to substitute around" in message
 
     with pytest.raises(ls.ScreenerError, match="mode must be"):
         ls.build_live_screener(
@@ -183,6 +412,50 @@ def test_the_LIVE_mode_REFUSES_TO_START_WITHOUT_THE_DAYS_OWN_MASTER(tmp_path: Pa
             recording=LiveRecording.at(tmp_path / "r2"),
             clock=ls.VirtualClock(stamp=datetime(2026, 7, 17, 9, 0)), mode="paper",
         )
+
+
+def test_the_STOP_RULE_still_REFUSES_a_live_mode_that_an_open_question_blocks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CLAUDE.md rule 1, in executable form -- restored (REVIEW_13 **M24**).
+
+    The original safety test asserted ``pytest.raises(BlockedByOpenQuestion)`` plus an equality
+    against a module constant, and it went red the moment anyone unblocked a live mode without a
+    ruling. Its successor asserted a different refusal entirely, so **neither successor preserved
+    the STOP-rule property**: nothing went red on a future unblocking, and
+    ``BlockedByOpenQuestion`` became unraised, unconstructed and untested -- the exit the
+    docstring reserves for the next class-A hole was a branch no test had ever taken.
+
+    It is a REGISTER now rather than a hard-coded refusal, which generalises the property instead
+    of re-pinning it to Q-28: a session that meets a class-A hole on the live path adds one row
+    to ``LIVE_BLOCKING_QUESTIONS`` and the mode refuses in the question's own words. Both halves
+    are asserted here -- that the register is empty TODAY (every question a live morning has met
+    has been ruled on), and that a non-empty register really does stop the morning.
+    """
+    assert ls.LIVE_BLOCKING_QUESTIONS == (), (
+        "Q-28 and Q-29 are CONTEXT 4.7 and Q-30 is the architect's 08-Aug-2026 ruling; if a "
+        "session adds a row here, this line is where it says so"
+    )
+    assert issubclass(ls.BlockedByOpenQuestion, ls.ScreenerError)
+
+    question = ("Q-99", "the words of the question that blocks this morning")
+    monkeypatch.setattr(ls, "LIVE_BLOCKING_QUESTIONS", (question,))
+    with pytest.raises(ls.BlockedByOpenQuestion) as caught:
+        ls.build_live_screener(
+            date(2026, 7, 17), ("SYNTH",),
+            source=None, recording=LiveRecording.at(tmp_path / "blocked"),
+            clock=ls.VirtualClock(stamp=datetime(2026, 7, 17, 9, 0)), mode="live",
+        )
+    message = str(caught.value)
+    assert question[0] in message and question[1] in message, (
+        "the refusal is in the QUESTION's own words -- CLAUDE.md rule 1's whole point"
+    )
+    assert not (tmp_path / "blocked").exists(), (
+        "and it refuses BEFORE anything is written: a blocked morning leaves no recording"
+    )
+
+    # A REPLAY is never blocked by a live question: a past day has its bhavcopy and its verdict.
+    assert ls.build_live_screener.__module__ == "acumen.live_screener"
 
 
 def test_the_LIVE_startup_disclosure_says_what_could_not_be_verified() -> None:
