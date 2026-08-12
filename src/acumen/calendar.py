@@ -598,6 +598,106 @@ def load_cached_calendar(
     return fetched_on, TradingCalendar.from_payload(payload, segment=segment)
 
 
+#: What :func:`live_trading_calendar` stamps as its source. Both readings are named, in the
+#: order they govern, so a recording can never claim one calendar while carrying another
+#: (REVIEW_13 M17 / F2, and the C5 duty it executes).
+LIVE_CALENDAR_SOURCE: str = "published-nse-holiday-master (today) + daily-store scan (history)"
+
+
+def live_trading_calendar(
+    published: TradingCalendar,
+    *,
+    store: Any,
+    first_day: date,
+    day: date,
+) -> TradingCalendar:
+    """The calendar a LIVE morning runs on. REVIEW_13 **B6**, and the C5 duty executed.
+
+    A derived calendar cannot answer for TODAY and never will be able to. It answers from the
+    daily store's outcome ledger (QUESTIONS.md Q-3: *"a date with a bhavcopy IS a trading day"*)
+    and refuses any range holding a date it has never attempted (safeguard 1: *"a download error
+    is NEVER treated as a holiday"*). Today's bhavcopy does not exist during today -- CONTEXT
+    4.7's own opening sentence -- and :func:`acumen.live_refresh.last_completed_trading_day`
+    stops the pre-open top-up strictly before today under Q-19's guard, so the date a live
+    morning needs is the one date the store is structurally guaranteed never to hold. That is
+    B6: the live mode refused to start on every real morning, exit 1.
+
+    So the two readings divide the span exactly as QUESTIONS.md **C5** divides them:
+
+    * the **PUBLISHED NSE holiday master** governs the days the store cannot answer for --
+      today, and anything after the store's last settled date. It is the only reading that can
+      answer for a current or future date at all (Q-3 safeguard 3), and it is the reading
+      :func:`acumen.live_refresh.refresh_calendar` already fetches and already cross-checks;
+    * the **daily store's own scan** supplies the history behind it, unchanged. CONTEXT 3.2's
+      bias pair for today is (D-1, D-2), both in the past, and the backtester reads those days
+      from this same ledger -- so taking them from anywhere else would be backtest/live drift in
+      the one place CONTEXT section 6 forbids it.
+
+    The result carries an EXPLICIT ``trading_days`` set (never the weekday rule), because that is
+    what lets the caller subtract CONTEXT 7-E2 non-standard sessions from it and what lets a
+    weekend session NSE really held stay honestly excluded (Q-5).
+
+    Args:
+        published: the published holiday-master calendar (:func:`fetch_calendar`).
+        store: the daily store, duck-typed on ``coverage(from_date, to_date)``.
+        first_day: the earliest date the caller will ask about (the bias seed's own lead).
+        day: the live trade date -- today.
+
+    Raises:
+        CalendarError: the published master cannot answer for a year in the span it has to
+            cover, or the store's ledger is unusable over the history it has to supply. Both
+            are refusals with a named cause, never a silently invented holiday.
+    """
+    first = _require_plain_date(first_day, "first_day")
+    live_day = _require_plain_date(day, "day")
+    if live_day < first:
+        raise CalendarError(
+            f"Empty range: {live_day.isoformat()} is before {first.isoformat()}."
+        )
+
+    from .bhavcopy import OUTCOME_NOT_FOUND, OUTCOME_PRESENT  # local: storage vocabulary
+
+    terminal = {OUTCOME_PRESENT, OUTCOME_NOT_FOUND}
+    frame = store.coverage(first, live_day)
+    ledger = {
+        _require_plain_date(stamp, "ledger date"): str(outcome)
+        for stamp, outcome in zip(frame["trade_date"], frame["outcome"])
+    }
+    # How far the store's evidence reaches WITHOUT a gap. A gap is not filled by the published
+    # master: an unattempted date inside the history is the incomplete-backfill case Q-3
+    # safeguard 1 refuses, and papering over it here would re-open exactly that door.
+    settled_through = first - timedelta(days=1)
+    cursor = first
+    while cursor < live_day and ledger.get(cursor) in terminal:
+        settled_through = cursor
+        cursor += timedelta(days=1)
+
+    trading: set[date] = set()
+    holidays: set[date] = set(published.holidays)
+    weekend_sessions: set[date] = set()
+    if settled_through >= first:
+        derived = TradingCalendar.from_daily_store_range(store, first, settled_through)
+        trading |= set(derived.trading_days or ())
+        holidays |= set(derived.holidays)
+        weekend_sessions |= set(derived.excluded_weekend_sessions)
+
+    for stamp in _walk(max(first, settled_through + timedelta(days=1)), live_day):
+        if published.is_trading_day(stamp):
+            trading.add(stamp)
+        elif stamp.weekday() not in _WEEKEND:
+            holidays.add(stamp)
+
+    covered = frozenset(_walk(first, live_day))
+    return TradingCalendar(
+        holidays=frozenset(holidays),
+        covered_years=frozenset(stamp.year for stamp in covered),
+        trading_days=frozenset(trading),
+        covered_days=covered,
+        excluded_weekend_sessions=frozenset(weekend_sessions),
+        source=LIVE_CALENDAR_SOURCE,
+    )
+
+
 def _walk(start: date, end: date) -> Iterable[date]:
     """Every calendar date from ``start`` to ``end`` inclusive."""
     current = start

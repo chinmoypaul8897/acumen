@@ -1552,8 +1552,23 @@ def named_master(cache_dir: Path, filename: str) -> tuple[InstrumentMaster, Path
     Returns ``(master, path, sha256)``, the same triple :func:`pinned_master` returns, because
     the recording pins the master by BOTH filename and digest (a filename can be overwritten in
     place; a digest cannot) and a replay proves which ticks a morning ran on from the pair.
+
+    ``filename`` is validated as a BARE FILENAME -- no directory separator, no ``..``, not
+    absolute -- exactly as :func:`acumen.config._validate_instrument_master` validates the Q-20
+    pin, and for the same reason (REVIEW_13 **M8**). The input is not a literal: it arrives from
+    a RECORDING MANIFEST, through ``_master_for`` and ``verify_yesterday``, so an unsanitised
+    name loaded a master from outside the cache the operator snapshots -- and the manifest then
+    recorded only its basename, so the day stopped being replayable at all.
     """
-    path = Path(cache_dir) / MASTER_CACHE_SUBDIR / filename
+    name = str(filename).strip()
+    if not name or name != Path(name).name or Path(name).is_absolute() or ".." in name:
+        raise BacktestError(
+            f"The instrument master must be named by a bare FILENAME, not a path; got "
+            f"{filename!r}. CONTEXT 4.7's master is resolved under "
+            f"<cache_root>/{MASTER_CACHE_SUBDIR}/ so that it can never point outside the cache "
+            "the operator snapshots -- the same rule config.yaml's Q-20 pin is held to."
+        )
+    path = Path(cache_dir) / MASTER_CACHE_SUBDIR / name
     if not path.is_file():
         raise BacktestError(
             f"The instrument master {filename!r} is not at {path}. CONTEXT 4.7 runs a live "
@@ -1654,6 +1669,7 @@ def build_runner(
     disclosures: tuple[str, ...] = (),
     master_path: Path | None = None,
     master_file: str | None = None,
+    calendar: TradingCalendar | None = None,
 ) -> tuple[BacktestRunner, Path, dict]:
     """Open the local stores read-only and wire the whole machine. Returns (runner, master, ca).
 
@@ -1679,6 +1695,17 @@ def build_runner(
     snapshot. It is deliberately a separate argument from ``master_path`` (which CONFIRMS the
     pin) so that the two intentions can never be confused at a call site: one says "this IS the
     pin", the other says "section 4.7 says today is not the pin's day".
+
+    ``calendar`` is **CONTEXT 4.7's second door, and only its door** (REVIEW_13 B6). Every
+    HISTORICAL caller leaves it ``None`` and gets the store-derived calendar QUESTIONS.md Q-3
+    rules for the backtest -- *"a date with a bhavcopy IS a trading day"* -- which refuses any
+    range holding a date it has never attempted. That refusal is right for history and fatal for
+    a live morning, whose trade date is TODAY and whose bhavcopy cannot exist during today: it
+    is why ``mode="live"`` could not start at all. A LIVE caller therefore supplies the calendar
+    :func:`acumen.calendar.live_trading_calendar` builds -- the published NSE master for today,
+    the store's own scan for the history behind it, which is the C5 division of labour. The
+    supplied calendar must carry an EXPLICIT trading-day set, so that CONTEXT 7-E2's
+    non-standard sessions can be subtracted from evidence rather than from a weekday rule.
 
     ``disclosures`` are stamped verbatim onto the run's own manifest and onto nothing else.
     """
@@ -1711,9 +1738,17 @@ def build_runner(
     else:
         master, master_path, master_sha = pinned_master(cache, config.instrument_master)
     seed = seed_from if seed_from is not None else start
-    calendar = TradingCalendar.from_daily_store_range(
-        daily_store, seed - timedelta(days=CALENDAR_LEAD_DAYS), end
-    )
+    if calendar is None:
+        calendar = TradingCalendar.from_daily_store_range(
+            daily_store, seed - timedelta(days=CALENDAR_LEAD_DAYS), end
+        )
+    elif calendar.trading_days is None:
+        raise BacktestError(
+            "A supplied calendar must carry an EXPLICIT trading-day set (CONTEXT 4.7 / "
+            "REVIEW_13 B6). A weekday-rule calendar has nothing for the CONTEXT 7-E2 "
+            "non-standard-session scan to be subtracted from, so an excluded session would "
+            "silently stay a trading day. Build it with acumen.calendar.live_trading_calendar."
+        )
     residual = load_residual_register(data / RESIDUAL_LEDGER_RELPATH)
 
     wanted = tuple(symbol.strip().upper() for symbol in symbols)

@@ -294,6 +294,7 @@ class SignalPipeline:
         bias: DailyBias,
         minutes: Sequence[StoredBar],
         gates: DayGates | None = None,
+        profile: poc_engine.DayProfile | None = None,
     ) -> StockDay:
         """CONTEXT 3.4 over MINUTES THE CALLER HOLDS -- the one-engine seam (CONTEXT 6).
 
@@ -315,6 +316,16 @@ class SignalPipeline:
         15-minute boundary and the battery is a whole-day measurement, so recomputing it per
         boundary would be both wasteful and, on a growing prefix, WRONG. ``None`` means
         "compute it here", which is what :meth:`stock_day` does.
+
+        ``profile`` is the same door for CONTEXT 3.3's last sentence -- *"POC is fixed for the
+        rest of the day once computed"* (REVIEW_13 B3, architect 08-Aug-2026: *"the POC is fixed
+        at 11:15 and immutable for the day"*). A live sweep evaluates a GROWING prefix, so
+        recomputing the profile at every boundary would republish the day's POC seventeen times
+        and move the entry, stop, target and quantity underneath an alert already delivered. The
+        live layer computes it ONCE, at the first sweep at or after 11:15, through
+        :meth:`profile_day` -- this engine's own call, not a second implementation -- and hands
+        the same object back at every later boundary. ``None`` means "compute it here", which is
+        what the backtester does and what keeps the ten-year ledger byte-still.
         """
         day_gates = self.gate_day(symbol, day, minutes) if gates is None else gates
         refusal = day_gates.refusal
@@ -347,19 +358,8 @@ class SignalPipeline:
         # reconciles against), so the filter starts here and nowhere earlier. Zero on almost
         # every day; when it is not zero the count reaches the ledger row (QUESTIONS.md Q-17).
         session, dropped = in_session_bars(minutes)
-        profile = poc_engine.day_profile(
-            session,
-            day,
-            row_size=self.row_size,
-            tick_paise=self.master.instrument(symbol).tick_size_paise,
-            # CONTEXT 4.7: the POC's licence is the GOVERNING battery's verdict -- gate 1 on a
-            # settled day, where `poc_licence` IS `volume_reconciled` and nothing moves (the
-            # suite asserts the identity), and the oracle-free battery on a live day, where
-            # gate 1 is structurally inapplicable. The parameter keeps its historical name
-            # because renaming it would edit 41 call sites including frozen-era tests; what it
-            # has always meant is "the verdict that licenses this window".
-            volume_reconciled=day_gates.poc_licence,
-        )
+        if profile is None:
+            profile = self.profile_day(symbol, day, minutes, licence=day_gates.poc_licence)
         if profile.poc_paise is None:
             return StockDay(
                 symbol=symbol, day=day, evaluated=False,
@@ -376,6 +376,43 @@ class SignalPipeline:
             symbol=symbol, day=day, evaluated=True, reason=EVALUATED,
             bias=bias, side=side, gates=day_gates, profile=profile, bars=bars,
             minute_count=len(minutes), signal=signal, out_of_session_dropped=dropped,
+        )
+
+    def profile_day(
+        self,
+        symbol: str,
+        day: date,
+        minutes: Sequence[StoredBar],
+        *,
+        licence: bool | None,
+    ) -> poc_engine.DayProfile:
+        """CONTEXT 3.3's profile for one symbol-day. The ONE place the POC engine is called.
+
+        Split out of :meth:`evaluate` for the same reason :meth:`evaluate` was split out of
+        :meth:`stock_day` (decision B328): a caller that must compute the profile ONCE and reuse
+        it -- which CONTEXT 3.3's *"POC is fixed for the rest of the day once computed"* makes a
+        requirement rather than an optimisation for the live screener -- has to be able to do so
+        through this engine's own call rather than by assembling
+        :func:`acumen.poc.day_profile`'s arguments a second time somewhere else. The tick, the
+        Row Size, the Q-17 session filter and the licence are resolved HERE and nowhere else, so
+        a pinned profile and a recomputed one can never be built from different inputs.
+
+        ``licence`` is the GOVERNING battery's verdict (:attr:`DayGates.poc_licence`) -- gate 1's
+        on a settled day, the oracle-free battery's on a live one (CONTEXT 4.7).
+        """
+        session, _dropped = in_session_bars(minutes)
+        return poc_engine.day_profile(
+            session,
+            day,
+            row_size=self.row_size,
+            tick_paise=self.master.instrument(symbol).tick_size_paise,
+            # CONTEXT 4.7: the POC's licence is the GOVERNING battery's verdict -- gate 1 on a
+            # settled day, where `poc_licence` IS `volume_reconciled` and nothing moves (the
+            # suite asserts the identity), and the oracle-free battery on a live day, where
+            # gate 1 is structurally inapplicable. The parameter keeps its historical name
+            # because renaming it would edit 41 call sites including frozen-era tests; what it
+            # has always meant is "the verdict that licenses this window".
+            volume_reconciled=licence,
         )
 
     def gate_day(

@@ -180,6 +180,20 @@ class ProfileWindow:
             raise PocError(f"1-minute stamps must be naive IST (CONTEXT 7-E8); got {stamp!r}.")
         return self.first_time <= stamp.time() <= self.last_time
 
+    @property
+    def expected_minutes(self) -> int:
+        """How many 1-minute open-stamps a COMPLETE window holds. Eight candles -> 120.
+
+        Not a validity test -- the completeness ruling of 2026-07-26 retired E4's minute count
+        and gate 1 is the only licence (see :func:`day_profile`). It exists so a CALLER that
+        must know whether the window it is pinning was whole can say so: CONTEXT 3.3 fixes the
+        POC for the rest of the day once computed, and the architect's 08-Aug-2026 ruling on
+        REVIEW_13 B3 makes a window missing its late minutes a COMPLETENESS FAILURE that is
+        flagged rather than silently re-fixed. The engine's answer does not change; what changes
+        is that the day can say the answer was taken on a short window.
+        """
+        return CANDLE_MINUTES * self.candles
+
     def describe(self) -> str:
         """One line for a report / evidence pack: ``spec-8-candle 09:15..11:14 (8 candles)``."""
         return (
@@ -528,6 +542,19 @@ class DayProfile:
     def zero_volume_profile(self) -> bool:
         """True when the window held bars but NO volume at all -- see :func:`day_profile`."""
         return self.has_poc and self.window_volume == 0
+
+    @property
+    def missing_window_minutes(self) -> int:
+        """How many of the window's expected 1-minute stamps were absent when it was built.
+
+        Reported, never decisive: on a settled day an absent stamp is a minute in which nothing
+        traded (the completeness ruling of 2026-07-26) and this is zero or near-zero noise. It
+        matters on the LIVE path, where the window can be short because the vendor's answer had
+        not arrived yet -- and CONTEXT 3.3 fixes the POC once computed, so a POC pinned on a
+        short window is a completeness failure to be flagged rather than a number to re-fix
+        (REVIEW_13 B3; architect, 08-Aug-2026).
+        """
+        return max(0, self.window.expected_minutes - self.bar_count)
 
 
 def day_profile(
