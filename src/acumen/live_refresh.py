@@ -392,6 +392,13 @@ class SymbolVerdict:
     oracle_reason: str
     alerted: tuple[str, ...]
     minutes: int
+    #: Stamps ONE reply served twice -- CONTEXT 4.5 gate 2's first exclusion trigger, which both
+    #: batteries below are handed so they can act on it (REVIEW_13 B2).
+    duplicate_stamps: int = 0
+    #: Stamps the vendor served twice with DIFFERENT values across polls. B331's reporting half,
+    #: which had ZERO callers in ``src/`` until this finding gave it one: a revision is a real
+    #: event about the feed and the morning after is where it has to be visible.
+    revisions: int = 0
 
     @property
     def refused_after_alert(self) -> bool:
@@ -464,6 +471,8 @@ class MorningVerification:
                     "oracle_reason": v.oracle_reason,
                     "alerted": list(v.alerted),
                     "minutes": v.minutes,
+                    "duplicate_stamps": v.duplicate_stamps,
+                    "revisions": v.revisions,
                 }
                 for v in sorted(self.verdicts, key=lambda v: v.symbol)
             ],
@@ -522,19 +531,42 @@ def verify_prior_recording(
         bars = recording.bars(symbol, day)
         if not bars:
             continue
-        live_gates = oracle_free_battery(day, bars)
-        oracle_gates: DayGates = pipeline.gate_day(symbol, day, bars)
+        # REVIEW_13 B2. `recording.bars()` de-duplicates a re-polled stamp exactly as the
+        # screener's `merge_bars` does, and it must -- the engines need one bar per minute. But
+        # running the BATTERY over the de-duplicated day meant the morning after could not see
+        # the duplicate either, so a corrupt twin that had already won a live TRIGGER was
+        # laundered a second time, past the very verification CONTEXT 4.7 exists for. Both
+        # columns are now computed over the bars PLUS the twins, so gate 2 reaches its own
+        # verdict on CONTEXT 4.5's first exclusion trigger.
+        twins = recording.duplicate_bars(symbol, day)
+        revisions = recording.revisions(symbol)
+        judged = tuple(bars) + twins
+        live_gates = oracle_free_battery(day, judged)
+        oracle_gates: DayGates = pipeline.gate_day(symbol, day, judged)
+        note = ""
+        if twins:
+            note = (
+                f" [{len(twins)} duplicate stamp(s) in a single reply -- CONTEXT 4.5 gate 2's "
+                "first exclusion trigger]"
+            )
+        if revisions:
+            note += (
+                f" [{len(revisions)} stamp(s) the vendor RE-SERVED with different values; the "
+                "screener acted on the later one]"
+            )
         verdicts.append(SymbolVerdict(
             symbol=symbol,
             live_passed=live_gates.usable,
-            live_reason=live_gates.refusal or "the oracle-free battery accepts this day",
+            live_reason=(live_gates.refusal or "the oracle-free battery accepts this day") + note,
             oracle_passed=oracle_gates.usable,
             oracle_reason=(
                 oracle_gates.refusal_detail[1] if oracle_gates.refusal_detail is not None
                 else "the FULL battery accepts this day"
-            ),
+            ) + note,
             alerted=tuple(sorted(set(alerts_by_symbol.get(symbol, ())))),
             minutes=len(bars),
+            duplicate_stamps=len(twins),
+            revisions=len(revisions),
         ))
     return MorningVerification(
         day=day, recording_root=str(recording.root), verdicts=tuple(verdicts),
