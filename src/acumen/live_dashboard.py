@@ -47,6 +47,7 @@ from typing import Mapping, Sequence
 from .atomic_io import atomic_write_text
 from .live_recording import RecordedAlert
 from .live_screener import (
+    POC_PROVISIONAL,
     PHASE_ARMED,
     PHASE_EXITED,
     PHASE_IN_TRADE,
@@ -58,6 +59,7 @@ from .live_screener import (
     SymbolState,
     format_alert,
 )
+from .live_screener import rupees as _rupees
 
 #: DESIGN.md's palette, by the names the token file gives them. Nothing outside this dict may
 #: appear as a colour anywhere in this module -- the test asserts it.
@@ -89,6 +91,20 @@ STATE_STYLE: Mapping[str, dict] = {
     PHASE_REFUSED: {"fg": "muted", "bg": "canvas", "rule": "error", "label": "refused"},
 }
 
+#: How far behind the boundary a row's last 1-minute bar may be before the row is STALE.
+#:
+#: A poll at boundary ``T`` may legally have seen stamps up to ``T - 1min`` (CONTEXT 7-E12, and
+#: :func:`acumen.live_source._clamp`), so a fresh row's last stamp IS ``T - 1min``. Anything
+#: older means the screener is looking at a prefix that stopped somewhere before now, and
+#: REVIEW_13 **B10** is what that cost: a feed answering 200 with an empty candle array froze
+#: every row on its last good prefix, and the page rendered "IN TRADE (1) -- position open,
+#: being watched" off bars that had stopped an hour earlier, byte-identical to a fresh row,
+#: while the header clock asserted the current boundary. DESIGN.md PART II's third acceptance
+#: question -- *"if the tool were broken, would this screen look different from a quiet
+#: market?"* -- was answered NO by the rendered artifact. One minute of tolerance, because one
+#: minute is the honest width of the clamp and not a judgment about liveness.
+STALE_AFTER_MINUTES: int = 1
+
 #: What each state means, in the trader's words rather than the engine's. Shown once, as a
 #: group heading -- not as a legend, because a screen that needs a legend has already failed
 #: DESIGN.md PART II's first question.
@@ -103,28 +119,14 @@ STATE_WORDS: Mapping[str, str] = {
 }
 
 
-def rupees(paise) -> str:
-    """Integer (or exact Fraction) paise as rupees -- and a HALF-paise POC as it really is.
-
-    CONTEXT 3.3 lets a POC sit on half a paisa (it is a row MIDPOINT) and CONTEXT 7-E11 says
-    every comparison against it runs at full precision. Two decimal places are right for money
-    and wrong for a row midpoint: they would move the POC by half a paisa on the one screen
-    whose purpose is that the trader can check it against his own chart. So a value that is a
-    whole number of paise prints in two places and one that is not prints in three -- the same
-    rule ``trader_pack._Emit.poc`` applies to the validation pack, for the same reason.
-
-    Exact throughout: :class:`~fractions.Fraction` and :class:`~decimal.Decimal`, never a float.
-    """
-    if paise is None:
-        return "-"
-    value = Fraction(paise)
-    if value.denominator == 1:
-        exact = (Decimal(value.numerator) / Decimal(100)).quantize(Decimal("0.01"))
-        return f"{exact:,.2f}"
-    exact = (
-        Decimal(value.numerator) / Decimal(value.denominator) / Decimal(100)
-    ).quantize(Decimal("0.001"))
-    return f"{exact:,.3f}"
+#: Paise as rupees, EXACT -- half-paise POCs included. **The same object the alert line uses.**
+#:
+#: REVIEW_13 **M10**: this module rendered a half-paise POC exactly (148.695) while
+#: ``live_screener._rs`` ran the same number through a binary float and printed 148.69 on the
+#: alert line -- so one page showed two different POCs for one stock, and the direction of the
+#: difference was IEEE-754's rather than a stated rule. Two implementations of one spec sentence
+#: is the defect; this is the fix, and it is an import rather than a copy.
+rupees = _rupees
 
 
 # --- the terminal surface ----------------------------------------------------------------------
@@ -161,7 +163,7 @@ def render_text(
         lines.append(f"{STATE_STYLE[phase]['label']}  ({len(rows)})  -- {STATE_WORDS[phase]}")
         lines.append("-" * width)
         for row in rows:
-            lines.append("  " + _text_row(row))
+            lines.append("  " + _text_row(row, now))
     lines.append("")
     lines.append(f"ALERTS ({len(alerts)})")
     lines.append("-" * width)
@@ -181,8 +183,43 @@ def render_text(
     return "\n".join(lines) + "\n"
 
 
-def _text_row(row: SymbolState) -> str:
+def data_age(row: SymbolState, now: datetime) -> tuple[bool, int]:
+    """``(is this row STALE, how many minutes behind the boundary its last bar is)``.
+
+    REVIEW_13 B10 / M20. ``SymbolState`` has carried ``last_stamp`` and ``minute_count`` since
+    the chunk was built and neither reached either surface, so a row an hour stale was
+    indistinguishable from a fresh one. Both are rendered now, and this is the predicate that
+    decides whether the row is additionally MARKED -- because a number the reader has to
+    subtract in his head at 11:31 is a number he will not subtract at 14:31.
+
+    A ``refused`` row is never stale: its data is not what the reader is being asked to act on,
+    and marking it would spend the flag on the one state that is already explaining itself.
+    """
+    if row.phase == PHASE_REFUSED:
+        return (False, 0)
+    if row.last_stamp is None:
+        return (row.minute_count == 0, 0)
+    behind = int((now - row.last_stamp).total_seconds() // 60)
+    return (behind > STALE_AFTER_MINUTES, max(0, behind))
+
+
+def _data_words(row: SymbolState, now: datetime) -> str:
+    """The freshness cell: how many bars this verdict stands on, and how old the last one is."""
+    stale, behind = data_age(row, now)
+    last = "-" if row.last_stamp is None else row.last_stamp.strftime("%H:%M")
+    text = f"bars {row.minute_count:>3}  last {last}"
+    if stale:
+        # Bracketed, never "!!": that marker belongs to the failure banner alone, and a row-level
+        # flag that borrowed it would blunt the one element DESIGN.md PART II gives full width.
+        text += f"  [STALE {behind}m BEHIND - NOT being watched]"
+    if row.poc_provisional:
+        text += f"  [{POC_PROVISIONAL}: {row.poc_missing_minutes}m absent]"
+    return text
+
+
+def _text_row(row: SymbolState, now: datetime) -> str:
     head = f"{row.symbol:<14}"
+    tail = "   " + _data_words(row, now)
     if row.phase in (PHASE_TRIGGERED, PHASE_IN_TRADE, PHASE_EXITED) and row.entry_paise:
         body = (
             f"{str(row.side or '').upper():<6}"
@@ -193,7 +230,7 @@ def _text_row(row: SymbolState) -> str:
         )
         if row.exit_kind:
             body += f"  -> {row.exit_kind} at {rupees(row.exit_paise)}"
-        return head + body
+        return head + body + tail
     if row.phase in (PHASE_ARMED, PHASE_WAITING) and row.poc_paise is not None:
         return (
             head
@@ -201,8 +238,9 @@ def _text_row(row: SymbolState) -> str:
             + f"POC {rupees(row.poc_paise):>11}  "
             + f"ref {rupees(row.reference_paise):>11}  "
             + f"{row.detail}"
+            + tail
         )
-    return head + f"{str(row.bias or '-'):<8}{row.detail or row.refusal or ''}"
+    return head + f"{str(row.bias or '-'):<8}{row.detail or row.refusal or ''}" + tail
 
 
 # --- the HTML surface --------------------------------------------------------------------------
@@ -268,7 +306,7 @@ def render_html(
         )
         add('<div class="rows">')
         for row in rows:
-            add(_html_row(row, phase))
+            add(_html_row(row, phase, now))
         add("</div></section>")
 
     add('<section class="group log"><h2><span class="chip">ALERT LOG</span>'
@@ -304,7 +342,7 @@ def render_html(
     return "\n".join(parts) + "\n"
 
 
-def _html_row(row: SymbolState, phase: str) -> str:
+def _html_row(row: SymbolState, phase: str, now: datetime) -> str:
     cells = [f'<span class="mono sym">{html.escape(row.symbol)}</span>']
     if row.side:
         cells.append(f'<span class="side">{html.escape(row.side)}</span>')
@@ -333,7 +371,27 @@ def _html_row(row: SymbolState, phase: str) -> str:
     detail = row.detail or row.refusal or ""
     if detail:
         cells.append(f'<span class="detail">{html.escape(detail)}</span>')
-    return f'<div class="row">{"".join(cells)}</div>'
+    # The freshness cell. Always present, on every row, in the muted register the other
+    # secondary numbers use -- and marked when it is old, so a stale row and a fresh one are
+    # not the same pixels (REVIEW_13 B10, DESIGN.md PART II question 3).
+    stale, behind = data_age(row, now)
+    last = "-" if row.last_stamp is None else row.last_stamp.strftime("%H:%M")
+    cells.append(
+        f'<span class="num data"><i>bars</i><b class="mono">{row.minute_count}</b></span>'
+        f'<span class="num data"><i>last</i><b class="mono">{html.escape(last)}</b></span>'
+    )
+    if stale:
+        cells.append(
+            f'<span class="flag">STALE - {behind}m behind, NOT being watched</span>'
+        )
+    if row.poc_provisional:
+        # CONTEXT 3.3 / B3's completeness flag, on the surface the trader reads.
+        cells.append(
+            f'<span class="flag">{html.escape(POC_PROVISIONAL)} '
+            f'({row.poc_missing_minutes}m absent)</span>'
+        )
+    classes = "row stale" if stale else "row"
+    return f'<div class="{classes}">{"".join(cells)}</div>'
 
 
 def _slug(phase: str) -> str:
@@ -383,6 +441,14 @@ def _css() -> str:
         ".num b{font-weight:400}",
         f".detail{{color:{t['muted']};font-size:14px}}",
         f".quiet{{color:{t['muted']}}}",
+        # The freshness cell and its flag. The flag is `error` ink on the row's own ground --
+        # not a fill and not a full-width strip, both of which the banner owns: a stale row must
+        # be unmistakable without competing with "the sweep did not complete" (DESIGN.md PART
+        # II, and REVIEW_13 B10).
+        f".data i{{color:{t['muted']}}}",
+        f".flag{{color:{t['error']};font-size:14px}}",
+        f".row.stale{{border-left:2px solid {t['error']}}}",
+        f".stale .flag{{color:{t['error']}}}",
     ]
     # The seven states. Position on the page decides first, colour second, the word third --
     # so the style below is deliberately small.
@@ -430,9 +496,11 @@ def write_dashboard(
 
 
 __all__ = [
+    "STALE_AFTER_MINUTES",
     "STATE_STYLE",
     "STATE_WORDS",
     "TOKENS",
+    "data_age",
     "render_html",
     "render_text",
     "rupees",
