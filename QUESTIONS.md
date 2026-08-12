@@ -4377,3 +4377,60 @@ corrected, because a session may not edit CONTEXT.
 ruling and nothing else. So the directed check *"4.7 verbatim against the architect's template"*
 cannot be discharged by any reviewer, now or later. If the template is pasted into QUESTIONS.md it
 becomes checkable, exactly as the ruling itself became checkable and was in fact corrected (B349).
+
+
+---
+
+## ARCHITECT'S RULINGS (08-Aug-2026, on REVIEW_13) - B3/Q-31, Q-30 and M24 - recorded VERBATIM by the chunk-13 FIX-2 session
+
+Recorded FIRST, in its own commit, before a line of code moved. The words between the quotation
+marks are the architect's; nothing outside them is. The architect's own line breaks are
+preserved, so the record is byte-reconstructable by stripping the `> ` prefix and the outer
+quotation marks and re-joining with newlines -- which is what the 06-Aug-2026 ruling (1) requires
+of anything that quotes it, and which B349 made this file's standard to the character. **No
+transliteration**: the two em dashes and the one section sign are the architect's own and they
+stay. Reconstructed and byte-checked by this session at **562 characters**, zero `--`
+substitutions.
+
+> "ARCHITECT'S RULINGS (08-Aug-2026, on REVIEW_13). B3/Q-31 §3.3: the POC is
+> fixed at 11:15 and immutable for the day; a window missing its late minutes is
+> a completeness failure — flag 'POC provisional / incomplete window' and never
+> silently re-fix. Q-30: a live morning screens the 204 SETTLED symbols only —
+> the screener alerts on what the backtester validated; the 6 quarantined
+> (APLAPOLLO, ASTRAL, IEX, NTPC, UPL, VBL) are never screened and the startup
+> banner names them excluded (closes M2). M24: the replaced test restores its
+> STOP-rule property. Architect."
+
+**What it settles, in this session's own words (outside the quotation).**
+
+* **Q-30 is CLOSED, option (a).** A live morning screens the SETTLED 204 and no others. The six
+  CONTEXT 4.6 quarantined symbols (APLAPOLLO, ASTRAL, IEX, NTPC, UPL, VBL) are excluded from the
+  live universe and NAMED at startup, so the exclusion is visible rather than inferred from a
+  count. The reason is the ruling's own: the screener alerts on what the backtester validated,
+  and the chunk-9B run walked zero of their 495,312 rows. CONTEXT v2.1 section 4.7 carries it as
+  law; `acumen.live_screener.build_live_screener` reads the chunk-5B disclosed-residual register
+  (the same register CONTEXT 4.6 makes a chunk-9 duty) and refuses to screen anything whose
+  status is not `settled`.
+* **B3 / Q-31(POC) is CLOSED.** CONTEXT 3.3's *"POC is fixed for the rest of the day once
+  computed"* is now implemented literally: the profile is computed ONCE, at the first sweep at or
+  after 11:15, and every later boundary is handed that same object. A window that was short of
+  its 120 expected minutes when it was pinned is a COMPLETENESS FAILURE and is flagged --
+  `POC provisional / incomplete window` -- on the state, on both dashboards and on every alert
+  the symbol produces. It is never silently re-fixed: a minute that arrives at 11:31 for the
+  09:15-11:14 window changes no published number, and the flag stands for the day.
+* **Q-31(1), the section-6 parity clause, is CLOSED** by CONTEXT v2.1: the clause the architect's
+  08-Aug ruling contained and section 4.7 omitted is now in the law, verbatim.
+* **Q-31(2), the disclosed line's terminal full stop, is CLOSED** by CONTEXT v2.1: section 4.7's
+  quoted sentence is trimmed to the ruling's own 68 characters and now matches
+  `acumen.live_screener.LIVE_DISCLOSURE` byte for byte.
+* **M24 is CLOSED.** The replaced safety test's STOP-rule property is restored: a live mode that
+  is unblocked without a ruling goes RED again, `BlockedByOpenQuestion` is raised, constructed
+  and asserted by a test rather than being an exit no branch has ever taken, and the day's-own-
+  master refusal is raised inside the screener's own error contract (`ScreenerError`) instead of
+  leaking a `BacktestError` through it.
+
+**What this session did NOT do.** It did not touch CONTEXT sections 3 or 4.5 -- the strategy is
+frozen and the settled-day battery is unchanged, gate for gate. No published figure moved and no
+stored day was re-gated. Q-31's third item (the "architect's template" for section 4.7 is
+recorded nowhere in this repository, so half of that directed check can be discharged by no
+reviewer) is the architect's and is NOT closed here; it is restated so it is not lost.
