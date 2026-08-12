@@ -172,6 +172,38 @@ class FlakyBarSource:
         return self.inner.fetch(symbol, day, upto)
 
 
+def duplicate_stamps(bars: Sequence[StoredBar]) -> tuple[StoredBar, ...]:
+    """The EXTRA bars in one vendor reply that reuse a stamp the same reply already served.
+
+    **REVIEW_13 B2.** CONTEXT 4.5 gate 2's first exclusion trigger is *"any duplicate stamp"*,
+    and CONTEXT 4.7 leaves gate 2 as the whole battery a live morning runs. But the screener
+    stored ``merge_bars(previous, fetched)``, which keys on the stamp and keeps the LAST copy --
+    so ``gate2.duplicates`` was structurally always 0 in live mode, the settled battery refused
+    the raw reply while the live battery passed it, and the bar that survived was the corrupt
+    twin. Measured downstream on a delivered TRIGGER: entry 200100 -> 200500, target 200700 ->
+    202300, qty 500 -> 166, on a day the settled battery refuses outright.
+
+    The unit is ONE REPLY, deliberately. The same stamp arriving again in a LATER sweep is not a
+    duplicate and must not be read as one: :class:`SmartApiBarSource` re-pulls the whole session
+    every sweep by design (it is one request either way, and it heals any bar an earlier sweep
+    missed), so a day-wide duplicate count would refuse every symbol on every day by 11:30. Two
+    rows under one stamp INSIDE one reply is the vendor contradicting itself, which is what gate
+    2 exists to catch. A stamp whose VALUES change between replies is a REVISION and is reported
+    by :meth:`acumen.live_recording.LiveRecording.revisions`.
+
+    Returns the second and later occurrences, in the order the reply gave them, so the caller
+    can hand them to the gate alongside the merged day and let the gate reach its own verdict.
+    """
+    seen: set[datetime] = set()
+    extra: list[StoredBar] = []
+    for bar in bars:
+        if bar.stamp in seen:
+            extra.append(bar)
+        else:
+            seen.add(bar.stamp)
+    return tuple(extra)
+
+
 def merge_bars(*groups: Sequence[StoredBar]) -> tuple[StoredBar, ...]:
     """Merge polls into one day, LATEST answer per stamp, oldest stamp first.
 
@@ -195,5 +227,6 @@ __all__ = [
     "SESSION_OPEN",
     "SmartApiBarSource",
     "StoredDayBarSource",
+    "duplicate_stamps",
     "merge_bars",
 ]

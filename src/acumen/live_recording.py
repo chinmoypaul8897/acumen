@@ -380,6 +380,40 @@ class LiveRecording:
             )
         return tuple(latest[stamp] for stamp in sorted(latest))
 
+    def duplicate_bars(self, symbol: str, day: date) -> tuple[StoredBar, ...]:
+        """Bars ONE reply served under a stamp that same reply had already served.
+
+        CONTEXT 4.5 gate 2's first exclusion trigger is *"any duplicate stamp"*, and both the
+        screener and the next morning's verification resolve a re-polled stamp before the gate
+        can see it -- :meth:`bars` de-duplicates exactly as ``merge_bars`` does, and it must,
+        because the engines need one bar per minute. So the twins are recoverable HERE, from the
+        append-only sequence that was written precisely so nothing would be absorbed silently
+        (REVIEW_13 **B2**).
+
+        The unit is one reply -- rows sharing both a ``sweep`` and a ``stamp``. The same stamp
+        arriving in a LATER sweep is the whole-session re-pull :class:`SmartApiBarSource` does
+        by design and is not a duplicate; a stamp whose VALUES moved between replies is a
+        revision and is :meth:`revisions`'s answer, not this one's.
+        """
+        ticker = symbol.strip().upper()
+        seen: set[tuple[str, datetime]] = set()
+        extra: list[StoredBar] = []
+        for row in self._candle_rows(ticker):
+            stamp = _parse_stamp(row["stamp"])
+            if stamp.date() != day:
+                continue
+            key = (str(row.get("sweep", "")), stamp)
+            if key in seen:
+                extra.append(StoredBar(
+                    symbol=ticker, stamp=stamp,
+                    open_paise=int(row["o"]), high_paise=int(row["h"]),
+                    low_paise=int(row["l"]), close_paise=int(row["c"]),
+                    volume=int(row["v"]),
+                ))
+            else:
+                seen.add(key)
+        return tuple(extra)
+
     def revisions(self, symbol: str) -> tuple[BarRevision, ...]:
         """Stamps the vendor served twice with DIFFERENT values, oldest first."""
         ticker = symbol.strip().upper()
