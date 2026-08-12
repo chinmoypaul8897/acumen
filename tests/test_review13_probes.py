@@ -1,15 +1,24 @@
 """REVIEW_13's kept probes -- the chunk-13 QC review of THE LIVE SCREENER.
 
-Every probe here is GREEN as committed and each one pins a REVIEW_13 finding at the place the
-finding actually lives. Most of them pin DEFECTS, which is why their names say what is wrong
-rather than what is right: a fix session must flip each one deliberately, and until it does the
-suite states the defect out loud instead of implying the chunk is whole.
+Every probe here was GREEN as committed and each one pins a REVIEW_13 finding at the place the
+finding actually lives. Five of them pinned DEFECTS, with names that said what was wrong, so
+that a fix session had to flip each one deliberately rather than let a passing suite imply the
+chunk was whole. **The FIX-2 session has flipped all five, and this docstring is the record of
+which way each one now points:**
 
-    F1  the LIVE mode cannot START on a real morning        -- test_the_LIVE_mode_CANNOT_START_*
-    F2  the recording mislabels which calendar governed     -- test_the_recording_CLAIMS_*
-    F3  the pre-open reports READY on a non-session day     -- test_the_pre_open_reports_READY_*
-    F5  the live POC is not fixed after 11:15               -- test_the_live_POC_MOVES_*
-    F6  the vendor SDK undoes the credential logging guard  -- test_the_vendor_SDK_constructor_*
+    F0/B1  the carried bias                 FLIPPED -- test_the_screener_KEEPS_the_CARRIED_bias_*
+    F1/B6  the LIVE mode cannot START       FLIPPED -- test_the_LIVE_mode_STARTS_*
+    F2/M17 the mislabelled calendar         FLIPPED -- test_the_recording_NAMES_the_calendar_*
+    F5/B3  the POC moves after 11:15        FLIPPED -- test_the_live_POC_IS_PINNED_*
+    F6/B5  the credential guard is undone   FLIPPED -- test_the_credential_guard_SURVIVES_*
+
+Each flipped probe KEEPS the defect's own measurement in its docstring and asserts the opposite
+behaviour, so the record of what was wrong survives the fix rather than being deleted with it.
+
+**F3 is NOT flipped and is not on the fix list.** The pre-open still reports READY on a day that
+is not a session (the E2 calendar check named on the chunk card is reported and never enforced).
+It is a MINOR in REVIEW_13's own list, it was not among the ten blocking findings the FIX-2
+session was given, and it stays GREEN and stated out loud until it is fixed.
 
 The rest are ordinary green pins on behaviour this review verified and wants held -- including
 the one credential check that PASSES, on the recording.
@@ -49,11 +58,11 @@ def _stores_or_skip() -> Path:
     return data_root
 
 
-# --- F0: THE SCREENER LOSES EVERY CARRIED BIAS ---------------------------------------------------
+# --- F0/B1: THE CARRIED BIAS -- FLIPPED BY THE FIX-2 SESSION -------------------------------------
 
 
-def test_the_screener_LOSES_a_CARRIED_bias_the_backtester_keeps(tmp_path: Path) -> None:
-    """REVIEW_13 finding F0 (BLOCKING, money-bearing). CONTEXT 3.2 + CONTEXT 6.
+def test_the_screener_KEEPS_the_CARRIED_bias_the_backtester_keeps(tmp_path: Path) -> None:
+    """REVIEW_13 finding F0 / **B1**, FIXED and FLIPPED. CONTEXT 3.2 + CONTEXT 6.
 
     :func:`acumen.live_screener.build_live_screener` wires the runner with
     ``bt.build_runner(symbols, day, day, seed_from=day)`` -- the bias SERIES therefore begins on
@@ -69,11 +78,15 @@ def test_the_screener_LOSES_a_CARRIED_bias_the_backtester_keeps(tmp_path: Path) 
     half, silently, with no error and no banner.
 
     ITC 2026-06-10 is the witness, and it is not obscure: it is in the very universe the chunk's
-    own dashboard renders, where it appears under `refused` while the ledger row for the same
+    own dashboard renders, where it appeared under `refused` while the ledger row for the same
     symbol-day reads ``bias=bearish, rule=inside-bar-carry, status=evaluated``.
 
-    GREEN while the defect stands. Passing an earlier ``seed_from`` restores the bias, which is
-    both the proof of the diagnosis and the shape of the fix.
+    **FLIPPED.** ``build_live_screener`` now seeds the bias series at
+    ``day - SEED_LOOKBACK_DAYS``, so every carried bias is present by construction and the
+    SHIPPED wiring -- no ``seed_from`` argument at all -- reaches the backtester's own answer on
+    the witness day. The old defect is still measured here, by seeding at the trade day
+    explicitly and watching the engine correctly answer "not seeded": the diagnosis is preserved
+    as a live measurement rather than as a claim in prose.
     """
     data_root = _stores_or_skip()
 
@@ -86,54 +99,58 @@ def test_the_screener_LOSES_a_CARRIED_bias_the_backtester_keeps(tmp_path: Path) 
     if not store.minutes(symbol, day):
         pytest.skip(f"{symbol} {day} is not in the local lake")
 
-    def build(seed):
+    def build(seed, tag):
         return ls.build_live_screener(
             day, (symbol,), source=StoredDayBarSource(store),
-            recording=LiveRecording.at(tmp_path / f"r{seed}"),
+            recording=LiveRecording.at(tmp_path / f"r{tag}"),
             clock=ls.VirtualClock(stamp=datetime.combine(day, datetime.min.time())),
             mode="replay", sinks=(ls.CollectingAlertSink(),), seed_from=seed,
         )
 
-    shipped = build(None)
+    shipped = build(None, "shipped")
     bias = shipped.biases.get(symbol)
     assert bias is not None and bias.rule == "inside-bar-carry"
-    assert bias.bias is None, "the shipped wiring resolves NO bias on a carry day"
-    assert shipped.states[symbol].phase == ls.PHASE_REFUSED
-
-    seeded = build(day - timedelta(days=30))
-    carried = seeded.biases[symbol]
-    assert carried.rule == "inside-bar-carry"
-    assert carried.bias == "bearish", (
-        "given history to carry from, the SAME engine reaches the backtester's own answer -- "
-        "so the divergence is the seed, not the code path"
+    assert bias.bias == "bearish", (
+        "the SHIPPED wiring now reaches the ledger's own answer on a carry day -- "
+        "ledger row: bias=bearish, rule=inside-bar-carry, status=evaluated"
     )
-    assert seeded.states[symbol].phase == ls.PHASE_WAITING
+    assert shipped.states[symbol].phase == ls.PHASE_WAITING
+    assert shipped.states[symbol].side == "short", "and a bearish day is short-only (CONTEXT 3.4)"
+
+    # The defect itself, still measurable: seed the series AT the trade day and the same engine
+    # correctly reports "not seeded" -- CONTEXT 3.2's history-start state -- and the day is lost.
+    at_the_day = build(day, "at-the-day")
+    assert at_the_day.biases[symbol].bias is None
+    assert at_the_day.states[symbol].phase == ls.PHASE_REFUSED
 
     body = inspect.getsource(ls.build_live_screener)
-    assert "seed_from=seed_from if seed_from is not None else day" in body, (
-        "the default seed IS the trade day; this is the line a fix session changes"
+    assert "seed_from if seed_from is not None else day - timedelta(days=SEED_LOOKBACK_DAYS)" \
+        in body, "the default seed is now a look-back, not the trade day itself"
+    assert ls.SEED_LOOKBACK_DAYS >= 112, (
+        "and the look-back covers the ledger's MEASURED worst carry reach (112 calendar days, "
+        "docs/evidence/chunk13_fix2_bias_stratified.md)"
     )
 
 
-# --- F1: THE LIVE MODE CANNOT START ON A REAL MORNING -------------------------------------------
+# --- F1/B6: THE LIVE MODE ON A REAL MORNING -- FLIPPED BY THE FIX-2 SESSION ----------------------
 
 
-def test_the_LIVE_mode_CANNOT_START_on_a_day_the_daily_store_has_not_ingested() -> None:
-    """REVIEW_13 finding F1 (BLOCKING). CONTEXT 4.7 unblocked the live mode; this is what stops it.
+def test_the_DERIVED_calendar_still_refuses_a_day_the_daily_store_has_not_ingested() -> None:
+    """REVIEW_13 finding F1 / **B6**'s mechanism, which is CORRECT and must stay.
 
-    ``build_live_screener(mode="live", day=D)`` calls ``bt.build_runner(symbols, D, D, ...)``,
+    ``build_live_screener(mode="live", day=D)`` called ``bt.build_runner(symbols, D, D, ...)``,
     which derives its trading calendar from the DAILY STORE over ``[D - 30, D]``. A derived
     calendar refuses a range holding a date it has never attempted (QUESTIONS.md Q-3 safeguard 1:
     a download error is never a holiday). On a real live morning D is TODAY, and today's bhavcopy
-    cannot exist during today -- that is CONTEXT 4.7's own opening sentence -- so the calendar can
-    never be derived and the screener never reaches its first sweep.
+    cannot exist during today -- that is CONTEXT 4.7's own opening sentence -- so the calendar
+    could never be derived and the screener never reached its first sweep. Reproduced by the
+    review: ``--mode live --day 2026-08-10 --preflight-only`` with the day's own master present
+    -> *"the screener cannot start: CalendarError ... 11 date(s) never attempted"*, exit 1.
 
-    The route is closed at both ends, which is what makes it structural rather than a setup gap:
-    :func:`acumen.live_refresh.refresh_daily_store` stops at the LAST COMPLETED trading day by
-    Q-19's guard, so a perfect pre-open refresh still leaves TODAY never-attempted; and
-    ``build_runner`` takes no calendar argument, so nothing may hand it one.
-
-    This probe is GREEN while the defect stands. A fix session flips it.
+    **The REFUSAL is right and is asserted here to stay right.** Q-3 safeguard 1 exists so an
+    unfinished backfill cannot become a calendar full of invented holidays, and the fix does not
+    weaken it by one date: what changed is that a LIVE morning no longer asks the derived
+    calendar a question only the published master can answer (see the probe below).
     """
     data_root = _stores_or_skip()
     store = DailyStore.at(data_root / "daily_store")
@@ -149,22 +166,60 @@ def test_the_LIVE_mode_CANNOT_START_on_a_day_the_daily_store_has_not_ingested() 
     assert "never attempted" in str(caught.value)
 
 
-def test_the_live_screener_hands_build_runner_the_LIVE_DAY_as_its_calendar_END() -> None:
-    """F1's mechanism, pinned at the source so the diagnosis cannot drift from the symptom.
+def test_the_LIVE_mode_STARTS_on_a_day_the_daily_store_can_never_have_ingested() -> None:
+    """REVIEW_13 **B6**, FIXED and FLIPPED: a live morning can be assembled on TODAY.
 
-    Two facts make the refusal structural, and both are read out of the shipped source rather
+    Two facts made the old refusal structural, and both are read out of the shipped source rather
     than asserted in prose: the screener passes the live day as BOTH ends of the runner's span,
-    and ``build_runner`` derives the calendar through that end with no injection point.
-    """
-    body = inspect.getsource(ls.build_live_screener)
-    assert "bt.build_runner(" in body
-    assert "symbols, day, day," in body, "the live day is both start and end of the runner's span"
+    and ``build_runner`` derived the calendar through that end with no injection point. The
+    second is what changed. ``build_runner`` now takes a ``calendar`` -- CONTEXT 4.7's second
+    door, closed to every historical caller by default -- and a live morning supplies the one
+    :func:`acumen.calendar.live_trading_calendar` builds: the PUBLISHED NSE holiday master for
+    the days the store cannot answer for, the store's own scan for the history behind it, which
+    is the C5 division of labour exactly.
 
-    runner_source = inspect.getsource(bt.build_runner)
-    assert "TradingCalendar.from_daily_store_range(" in runner_source
-    assert "calendar" not in inspect.signature(bt.build_runner).parameters, (
-        "there is no way to hand build_runner a calendar, so a live day cannot supply one"
+    Asserted on a date the store has NEVER attempted and structurally never will (Q-19 stops the
+    top-up strictly before today), so this probe cannot pass by accident of coverage.
+    """
+    data_root = _stores_or_skip()
+    store = DailyStore.at(data_root / "daily_store")
+    coverage = store.coverage(date(2000, 1, 1), date.today() + timedelta(days=365))
+    attempted = [
+        day for day, outcome in zip(coverage["trade_date"], coverage["outcome"]) if str(outcome)
+    ]
+    beyond = max(attempted) + timedelta(days=3)
+    while beyond.weekday() >= 5:  # a session, so the calendar has a bias pair to reach for
+        beyond += timedelta(days=1)
+
+    assert "calendar" in inspect.signature(bt.build_runner).parameters, (
+        "build_runner has an injection point now, and it is CONTEXT 4.7's door"
     )
+    runner_source = inspect.getsource(bt.build_runner)
+    assert "TradingCalendar.from_daily_store_range(" in runner_source, (
+        "and the DERIVED calendar is still what every historical caller gets"
+    )
+
+    published = cal.TradingCalendar.from_holidays(
+        [date(beyond.year, 1, 26)], covered_years=[beyond.year, beyond.year - 1]
+    )
+    live = cal.live_trading_calendar(
+        published, store=store, first_day=beyond - timedelta(days=70), day=beyond
+    )
+    assert live.is_trading_day(beyond), (
+        "the published master answers for a date the store has never attempted -- which is the "
+        "date every real live morning is"
+    )
+    assert live.trading_days is not None and live.covered_days is not None
+
+    # The history behind it is still the STORE's own reading, so the live bias pair and the
+    # backtester's bias pair are the same two days by construction (CONTEXT 6).
+    derived = cal.TradingCalendar.from_daily_store_range(
+        store, beyond - timedelta(days=70), max(attempted)
+    )
+    shared = sorted(day for day in derived.covered_days if day <= max(attempted))
+    assert shared and all(
+        live.is_trading_day(day) == derived.is_trading_day(day) for day in shared
+    ), "and it agrees with the store on every day the store can answer for"
 
 
 def test_the_Q19_guard_leaves_TODAY_permanently_unattended_in_the_daily_store() -> None:
@@ -179,73 +234,23 @@ def test_the_Q19_guard_leaves_TODAY_permanently_unattended_in_the_daily_store() 
         assert lr.last_completed_trading_day(calendar, today) < today
 
 
-def test_NOTHING_in_the_repo_builds_a_live_mode_screener_except_to_watch_it_refuse() -> None:
-    """F1's other half, and the reason 2,392 green tests did not catch it.
+def test_THE_LIVE_PATH_IS_NOW_BUILT_AND_RUN_somewhere_that_is_not_a_refusal() -> None:
+    """F1's other half, and the reason 2,392 green tests did not catch it. FLIPPED.
 
-    The live POSTURE is exercised everywhere -- but always by constructing
+    The live POSTURE was exercised everywhere -- but always by constructing
     :class:`acumen.live_screener.LiveScreener` directly (``tests.test_live_screener.make_screener``
     with ``live=True``) or by mutating a replay screener's fields
-    (``docs/evidence/chunk13_context47_walk.py``). The two places that call
-    ``build_live_screener(mode="live")`` are both in ``tests/test_live_safety.py`` and both assert
-    a REFUSAL. So no test, no evidence document and no artefact ever proves the shipped live path
-    ASSEMBLES, which is exactly where finding F1 lives.
+    (``docs/evidence/chunk13_context47_walk.py``). The two places that called
+    ``build_live_screener(mode="live")`` were both in ``tests/test_live_safety.py`` and both
+    asserted a REFUSAL. **No test, no evidence document and no artefact anywhere in the repo ever
+    successfully constructed the shipped live path**, which is exactly the coverage gap finding
+    F1 lived in and exactly why a green suite meant nothing about it.
 
-    GREEN while the defect stands. A fix session that makes a live morning startable adds the
-    positive test and flips this.
+    What this probe now requires is the thing whose absence caused the FAIL: at least one caller
+    that builds ``mode="live"`` and asserts it WORKS, and it must not be a refusal test.
     """
     callers: dict[str, int] = {}
     for path in sorted(REPO.glob("tests/*.py")) + sorted(REPO.glob("docs/evidence/*.py")):
-        text = path.read_text(encoding="utf-8")
-        tree = ast.parse(text)
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call):
-                continue
-            name = node.func.attr if isinstance(node.func, ast.Attribute) else getattr(
-                node.func, "id", ""
-            )
-            if name != "build_live_screener":
-                continue
-            for keyword in node.keywords:
-                if keyword.arg == "mode" and isinstance(keyword.value, ast.Constant) \
-                        and keyword.value.value == "live":
-                    callers[path.name] = callers.get(path.name, 0) + 1
-    assert callers == {"test_live_safety.py": 1}, (
-        f"live-mode construction now happens in {sorted(callers)} -- check whether any of it "
-        "asserts a successful start rather than a refusal, and flip this probe if so"
-    )
-
-    walk = (REPO / "docs" / "evidence" / "chunk13_context47_walk.py").read_text(encoding="utf-8")
-    assert "live.posture = se.POSTURE_LIVE" in walk, (
-        "the committed CONTEXT 4.7 walk reaches the live posture by MUTATING a replay screener"
-    )
-
-
-# --- F2: THE RECORDING MISLABELS WHICH CALENDAR GOVERNED ----------------------------------------
-
-
-def test_the_recording_CLAIMS_the_published_calendar_governs_while_carrying_the_derived_one(
-) -> None:
-    """REVIEW_13 finding F2. The C5 duty is asserted in the manifest, never computed.
-
-    ``build_live_screener`` takes ``calendar`` and ``calendar_source`` and forwards them to the
-    manifest -- but NO shipped call site passes either, so every recording ever written stamps
-    ``governing_source = "published-nse-holiday-master"`` (the parameter default) beside readings
-    taken from ``runner.calendar``, which is the DERIVED store-scan calendar. The manifest's own
-    ``calendar_source_field`` says ``"derived"`` in the same block, so the two halves of the pair
-    the code comment calls a cross-check contradict each other.
-
-    QUESTIONS.md C5: *"chunk 13 takes non-standard sessions from the published NSE calendar; the
-    store scan stays the backtest cross-check."*
-
-    GREEN while the defect stands.
-    """
-    assert ls.build_live_screener.__defaults__ is not None or True  # keyword-only; see below
-    signature = inspect.signature(ls.build_live_screener)
-    assert signature.parameters["calendar"].default is None
-    assert signature.parameters["calendar_source"].default == "published-nse-holiday-master"
-
-    call_sites = []
-    for path in sorted(REPO.glob("src/acumen/*.py")) + sorted(REPO.glob("docs/evidence/*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
@@ -253,19 +258,88 @@ def test_the_recording_CLAIMS_the_published_calendar_governs_while_carrying_the_
             name = node.func.attr if isinstance(node.func, ast.Attribute) else getattr(
                 node.func, "id", ""
             )
+            # (a) build_live_screener(mode="live") directly ...
             if name == "build_live_screener":
-                call_sites.append((path.name, {kw.arg for kw in node.keywords}))
-    assert call_sites, "the screener really is built somewhere"
-    for filename, keywords in call_sites:
-        assert "calendar" not in keywords and "calendar_source" not in keywords, (
-            f"{filename} now passes a calendar -- flip this probe, the C5 duty may be discharged"
-        )
+                for keyword in node.keywords:
+                    if keyword.arg == "mode" and isinstance(keyword.value, ast.Constant) \
+                            and keyword.value.value == "live":
+                        callers[path.name] = callers.get(path.name, 0) + 1
+            # ... or (b) the SHIPPED CLI driven with --mode live, which is stronger: it proves
+            # the whole entry point, which is the thing REVIEW_13 found reached none of the
+            # class it drives.
+            elif name == "main":
+                literals = [
+                    element.value
+                    for argument in node.args if isinstance(argument, ast.List)
+                    for element in argument.elts
+                    if isinstance(element, ast.Constant)
+                ]
+                if "--mode" in literals and "live" in literals:
+                    callers[path.name] = callers.get(path.name, 0) + 1
+
+    assert "test_review13_fix.py" in callers, (
+        "the FIX-2 session's own end-to-end live test drives the shipped live path; if it is "
+        "gone, the coverage gap that caused REVIEW_13's FAIL is back"
+    )
+    positive = {name: count for name, count in callers.items() if name != "test_live_safety.py"}
+    assert positive, (
+        "every live-mode construction in the repo is a refusal test again -- that was the gap"
+    )
+
+
+# --- F2/M17: WHICH CALENDAR GOVERNED -- FLIPPED BY THE FIX-2 SESSION -----------------------------
+
+
+def test_the_recording_NAMES_the_calendar_that_actually_governed(tmp_path: Path) -> None:
+    """REVIEW_13 finding F2 / **M17**, FIXED and FLIPPED. The C5 duty is COMPUTED, not asserted.
+
+    ``build_live_screener`` took ``calendar`` and ``calendar_source`` and forwarded them to the
+    manifest -- and NO shipped call site passed either, so every recording ever written stamped
+    ``governing_source = "published-nse-holiday-master"`` (the parameter DEFAULT) beside readings
+    taken from ``runner.calendar``, which is the DERIVED store-scan calendar. The manifest's own
+    ``calendar_source_field`` said ``"derived"`` in the same block, so the two halves of the pair
+    the code comment calls a cross-check contradicted each other, and the preflight printed the
+    false half. Demonstrated by the review on a real run (2026-02-01). C5's duty was executed in
+    ``refresh_calendar`` and then thrown away one line later, by ``del calendar``.
+
+    Both ends are closed. There is no default to fall back to (the parameter is ``None`` and the
+    source is DERIVED from the mode when nothing is supplied), and ``run_screener.main`` now
+    keeps the calendar the refresh cross-checked and hands it to the session that runs on it.
+    """
+    signature = inspect.signature(ls.build_live_screener)
+    assert signature.parameters["calendar"].default is None
+    assert signature.parameters["calendar_source"].default is None, (
+        "there is no 'published' default left to be stamped on a derived reading"
+    )
+
+    body = inspect.getsource(ls.build_live_screener)
+    assert "CALENDAR_PUBLISHED if live else CALENDAR_STORE_SCAN" in body, (
+        "the source is decided by what governs, not by a parameter nobody passes"
+    )
+
+    cli = inspect.getsource(__import__("acumen.run_screener", fromlist=["main"]).main)
+    deleted = {
+        target.id
+        for node in ast.walk(ast.parse(cli.lstrip()))
+        if isinstance(node, ast.Delete)
+        for target in node.targets
+        if isinstance(target, ast.Name)
+    }
+    assert "calendar" not in deleted, (
+        "the C5 duty is no longer executed and then thrown away one line later"
+    )
+    assert "calendar=published_calendar" in cli, (
+        "the calendar refresh_calendar fetched AND cross-checked is the calendar the session "
+        "runs on and records"
+    )
 
     manifest_body = inspect.getsource(ls._manifest)
     assert '"governing_source": calendar_source' in manifest_body
     assert '"calendar_source_field": calendar.source' in manifest_body, (
-        "the two fields come from different places, which is how they can disagree"
+        "both readings are still recorded side by side -- what changed is that the first is now "
+        "computed rather than defaulted, so they can no longer contradict each other"
     )
+    del tmp_path
 
 
 # --- F3: THE PRE-OPEN REPORTS READY ON A DAY THAT IS NOT A SESSION ------------------------------
@@ -300,12 +374,14 @@ def test_the_pre_open_reports_READY_on_a_day_that_is_NOT_a_trading_session(
     )
 
 
-# --- F5: THE LIVE POC IS NOT FIXED AFTER 11:15 --------------------------------------------------
+# --- F5/B3: THE POC AFTER 11:15 -- FLIPPED BY THE FIX-2 SESSION ---------------------------------
 
 
-def test_the_live_POC_MOVES_when_the_11_15_window_was_incomplete(tmp_path: Path) -> None:
-    """REVIEW_13 finding F5 (MAJOR, money-bearing). CONTEXT 3.3: *"POC is fixed for the rest of
-    the day once computed."* The live layer recomputes it at every boundary.
+def test_the_live_POC_IS_PINNED_at_11_15_even_when_the_window_was_incomplete(
+    tmp_path: Path,
+) -> None:
+    """REVIEW_13 finding F5 / **B3**, FIXED and FLIPPED. CONTEXT 3.3: *"POC is fixed for the rest
+    of the day once computed."* The live layer recomputed it at every boundary.
 
     :meth:`acumen.live_screener.LiveScreener._evaluate` calls the pipeline over *the bars in
     hand* at each boundary, and nothing caches the profile -- only the settled BATTERY is cached
@@ -316,13 +392,18 @@ def test_the_live_POC_MOVES_when_the_11_15_window_was_incomplete(tmp_path: Path)
     exotic one.
 
     Measured on the real lake over 290 symbol-days (20 symbols x 95 days for the arming flip):
-    the POC moves on 2.76% of symbol-days if only the 11:14 bar is late and on 14.48% if the last
-    five minutes are, and 53 real symbol-days were found where that flips the 11:15 ARMED
-    decision -- in both directions. An ARMED alert already delivered cannot be retracted, because
-    :meth:`~acumen.live_screener.LiveScreener._deliver` dedupes on ``(symbol, kind)``.
+    the POC moved on 2.76% of symbol-days if only the 11:14 bar was late and on 14.48% if the
+    last five minutes were, and 53 real symbol-days were found where that flipped the 11:15
+    ARMED decision -- in both directions.
 
-    Pinned on a REAL symbol-day, because the synthetic day's minutes are too uniform to move a
-    POC and a probe that cannot fail proves nothing. GREEN while the defect stands.
+    **FLIPPED.** The architect's 08-Aug-2026 ruling: *"the POC is fixed at 11:15 and immutable
+    for the day; a window missing its late minutes is a completeness failure -- flag 'POC
+    provisional / incomplete window' and never silently re-fix."* Both halves are asserted: the
+    POC does not move when the window heals, and the day says out loud that it was pinned short.
+
+    Run on a REAL symbol-day, because the synthetic day's minutes are too uniform to move a POC
+    and a probe that cannot fail proves nothing -- this one FAILED here before the fix, on these
+    exact inputs.
     """
     data_root = _stores_or_skip()
 
@@ -348,71 +429,115 @@ def test_the_live_POC_MOVES_when_the_11_15_window_was_incomplete(tmp_path: Path)
     if not store.minutes(symbol, day):
         pytest.skip(f"{symbol} {day} is not in the local lake")
 
-    screener = ls.build_live_screener(
-        day, (symbol,),
-        source=ShortFirstAnswer(StoredDayBarSource(store), drop),
-        recording=LiveRecording.at(tmp_path / "recording"),
-        clock=ls.VirtualClock(stamp=datetime.combine(day, datetime.min.time())),
-        mode="replay", sinks=(ls.CollectingAlertSink(),),
-    )
-    seen = []
-    for boundary in ls.boundary_stamps(day)[:3]:
-        screener.clock.set(boundary)
-        screener.sweep(boundary)
-        seen.append(screener.states[symbol].poc_paise)
+    def run(source):
+        screener = ls.build_live_screener(
+            day, (symbol,), source=source,
+            recording=LiveRecording.at(tmp_path / f"rec{id(source)}"),
+            clock=ls.VirtualClock(stamp=datetime.combine(day, datetime.min.time())),
+            mode="replay", sinks=(ls.CollectingAlertSink(),),
+        )
+        seen = []
+        for boundary in ls.boundary_stamps(day)[:3]:
+            screener.clock.set(boundary)
+            screener.sweep(boundary)
+            seen.append(screener.states[symbol].poc_paise)
+        return screener, seen
 
+    short, seen = run(ShortFirstAnswer(StoredDayBarSource(store), drop))
     assert all(poc is not None for poc in seen)
-    assert seen[0] != seen[1], (
-        "the POC computed at 11:15 on a short window differs from the one at 11:30 -- "
-        "CONTEXT 3.3 says it is fixed for the rest of the day once computed"
+    assert seen[0] == seen[1] == seen[2], (
+        "CONTEXT 3.3: the POC is fixed for the rest of the day once computed -- the healed "
+        "window at 11:30 does NOT re-fix the 11:15 answer"
     )
-    assert seen[1] == seen[2], "and it settles once the window is whole"
-
-    body = inspect.getsource(ls.LiveScreener._evaluate)
-    assert "self.pipeline.evaluate(" in body
-    assert "profile" not in body, (
-        "nothing caches the day's profile -- only the settled battery is cached, in _battery"
+    state = short.states[symbol]
+    assert state.poc_provisional is True and state.poc_missing_minutes >= drop, (
+        "and the incompleteness is FLAGGED rather than silently re-fixed (the architect's ruling)"
     )
 
+    # The unmutilated day pins the same window whole, and says so.
+    whole, whole_seen = run(StoredDayBarSource(store))
+    assert whole.states[symbol].poc_provisional is False
+    assert whole_seen[0] == whole_seen[1] == whole_seen[2]
+    assert seen[0] != whole_seen[0], (
+        "the two POCs really do differ -- so the pin is holding a DIFFERENT answer, which is "
+        "what makes 'never silently re-fix' a decision rather than a no-op"
+    )
 
-def test_an_ARMED_alert_can_never_be_corrected_once_the_POC_moves(tmp_path: Path) -> None:
-    """F5's consequence, at the alert. The dedup key is what makes it permanent.
+    events = {row["kind"] for row in short.recording.events()}
+    assert "poc-pinned" in events, "and the pinning is in the recording, with its window count"
+
+
+def test_a_corrected_ARMED_alert_IS_DELIVERED_when_the_state_it_described_changes(
+    tmp_path: Path,
+) -> None:
+    """F5's consequence at the alert, FLIPPED -- REVIEW_13 B334 / B9 / M6.
 
     ``(symbol, kind)`` is the right key for the ordinary case CONTEXT 4.4 worries about -- the
-    same trigger re-derived at seventeen boundaries must be sent once. It is the wrong key for a
-    state the tool has since changed its mind about: an ARMED alert sent against a provisional
-    POC cannot be re-sent, amended or withdrawn.
+    same trigger re-derived at seventeen boundaries must be sent once. It was the wrong key for a
+    state the tool had since changed its mind about: an ARMED alert sent against a provisional
+    POC could not be re-sent, amended or withdrawn, and because the check sat ABOVE
+    ``record_alert`` the suppressed alert left no trace anywhere either.
+
+    The key is re-cut to ``(symbol, kind, identity)``. Both properties are asserted: the same
+    answer is still sent ONCE, and a DIFFERENT answer is delivered as a correction that names
+    what it supersedes.
     """
     from test_backtest import SYMBOL  # noqa: E402 -- the suite's own synthetic world
     from test_live_screener import make_screener  # noqa: E402
 
-    screener, sink, _rec = make_screener(tmp_path)
-    first = screener._alert(ls.ALERT_ARMED, SYMBOL, datetime(2026, 7, 17, 11, 15), {"poc": 1})
-    assert screener._deliver(first) is True
-    corrected = screener._alert(ls.ALERT_ARMED, SYMBOL, datetime(2026, 7, 17, 11, 30), {"poc": 2})
-    assert screener._deliver(corrected) is False, (
-        "a corrected ARMED alert is silently dropped -- the trader keeps the first POC"
+    screener, sink, rec = make_screener(tmp_path)
+    first = screener._alert(
+        ls.ALERT_ARMED, SYMBOL, datetime(2026, 7, 17, 11, 15),
+        {"side": "long", "poc_paise": "1", "reference_paise": 10},
     )
-    assert len(sink.alerts) == 1 and sink.alerts[0].payload["poc"] == 1
+    assert screener._deliver(first) is True
+    again = screener._alert(
+        ls.ALERT_ARMED, SYMBOL, datetime(2026, 7, 17, 11, 30),
+        {"side": "long", "poc_paise": "1", "reference_paise": 10},
+    )
+    assert screener._deliver(again) is False, "the SAME answer is still sent exactly once"
+
+    corrected = screener._alert(
+        ls.ALERT_ARMED, SYMBOL, datetime(2026, 7, 17, 11, 45),
+        {"side": "long", "poc_paise": "2", "reference_paise": 10},
+    )
+    assert screener._deliver(corrected) is True, (
+        "a corrected ARMED alert reaches the trader instead of being swallowed"
+    )
+    assert len(sink.alerts) == 2
+    assert sink.alerts[-1].payload["correction"] is True
+    assert sink.alerts[-1].payload["supersedes"], "and it names the answer it replaces"
+    # ... and it is in the RECORDING, which is where a superseded alert used to leave no trace.
+    recorded = [row for row in rec.alerts() if row["kind"] == ls.ALERT_ARMED]
+    assert len(recorded) == 2 and recorded[-1]["payload"].get("correction") is True
 
 
-# --- F6: THE CREDENTIAL LOGGING GUARD IS UNDONE BY THE VENDOR SDK -------------------------------
+# --- F6/B5: THE CREDENTIAL LOGGING GUARD -- FLIPPED BY THE FIX-2 SESSION -------------------------
 
 
-def test_the_vendor_SDK_constructor_UNDOES_the_credential_logging_guard(
+def test_the_credential_guard_SURVIVES_the_vendor_SDK_constructor(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """REVIEW_13 finding F6 (BLOCKING). CLAUDE.md rule 4: never log ``.env`` contents.
+    """REVIEW_13 finding F6 / **B5**, FIXED and FLIPPED. CLAUDE.md rule 4: never LOG ``.env``.
 
-    :func:`acumen.smartapi_client._quiet_library_logging` raises logzero to CRITICAL exactly as
-    its docstring says -- and then ``_default_connect_factory`` constructs ``SmartConnect``,
-    whose own setup calls back into logzero, RESETS the level to ERROR and installs a
-    ``RotatingFileHandler`` writing ``logs/<date>/app.log``. The guard runs one line too early.
+    :func:`acumen.smartapi_client._quiet_library_logging` raised logzero to CRITICAL exactly as
+    its docstring said -- and then ``_default_connect_factory`` constructed ``SmartConnect``,
+    whose own setup calls back into logzero, RESET the level to ERROR and installed a
+    ``RotatingFileHandler`` writing ``logs/<date>/app.log``. The guard ran one line too early.
     The vendor then logs every request's headers, which carry ``X-PrivateKey: <api key>`` and
-    ``Authorization: Bearer <session jwt>``.
+    ``Authorization: Bearer <session jwt>``. Measured in isolation before the fix: level 10 ->
+    **50 after the guard** -> **40 after the constructor**, with a ``RotatingFileHandler@40``
+    attached; and on this machine's disk, 97 X-PrivateKey lines and 86 Bearer lines across six
+    files.
+
+    **FLIPPED.** The constructor still does exactly what it did -- the assertion in the middle
+    of this probe proves it, so the diagnosis stays measured rather than remembered -- and the
+    guard now runs on the FAR SIDE of it and detaches the file handler as well as raising the
+    level. A level alone would not be enough: an attached file handler is a file that can still
+    be written, and the artefact this rule is about is a file on disk.
 
     This probe never reads ``.env`` and never prints a secret -- it measures the LOGGER, which is
-    the mechanism. GREEN while the defect stands.
+    the mechanism.
     """
     logzero = pytest.importorskip("logzero")
     pytest.importorskip("SmartApi")
@@ -424,19 +549,80 @@ def test_the_vendor_SDK_constructor_UNDOES_the_credential_logging_guard(
 
     sac._quiet_library_logging()
     assert logzero.logger.level == logging.CRITICAL, "the guard does raise the threshold"
-    guarded = [type(h).__name__ for h in logzero.logger.handlers]
-    assert "RotatingFileHandler" not in guarded
+    assert not [h for h in logzero.logger.handlers if isinstance(h, logging.FileHandler)]
 
     from SmartApi import SmartConnect  # noqa: F401 -- constructing it is the point
 
     SmartConnect(api_key="DUMMY-KEY-NOT-REAL")
 
-    assert logzero.logger.level == logging.ERROR, (
-        "the vendor constructor puts the level BACK to ERROR -- the level at which it logs "
-        "full request headers, including X-PrivateKey and the Bearer session token"
+    # The vendor's behaviour is UNCHANGED, and that is the point: the fix does not depend on it.
+    assert logzero.logger.level == logging.ERROR
+    assert any(isinstance(h, logging.RotatingFileHandler if hasattr(logging, "RotatingFileHandler")
+                          else logging.FileHandler) for h in logzero.logger.handlers), (
+        "the constructor still installs a file handler at ERROR -- so the guard has to run after"
     )
-    assert any(type(h).__name__ == "RotatingFileHandler" for h in logzero.logger.handlers), (
-        "and it installs a file handler, so the spill goes to disk and not only to stderr"
+
+    sac._quiet_library_logging()  # ... which is what _default_connect_factory now does
+    assert logzero.logger.level == logging.CRITICAL, (
+        "the guard, re-run on the far side of the constructor, takes the level back above ERROR"
+    )
+    assert not [h for h in logzero.logger.handlers if isinstance(h, logging.FileHandler)], (
+        "and DETACHES the file handler: a level alone leaves a file that can still be written"
+    )
+
+    factory = inspect.getsource(sac._default_connect_factory)
+    assert factory.count("_quiet_library_logging()") == 2, (
+        "the factory guards on BOTH sides of the constructor -- that is the whole fix"
+    )
+
+
+def test_a_full_LIVE_POSTURE_session_writes_NO_credential_shaped_line_to_logs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """B5's tripwire, at the ARTEFACT rather than at ``repr()``.
+
+    REVIEW_13's instruction was explicit: *"call ``_quiet_library_logging()`` after the vendor
+    constructor as well as before, and assert it at the artefact (``logs/``), not at
+    ``repr()``."* So this drives the real vendor constructor through the real factory, inside a
+    scratch working directory, then makes the vendor's own logger try to emit exactly the line
+    that leaked -- full request headers with an ``X-PrivateKey`` and a ``Bearer`` token -- and
+    walks every byte of every file under ``logs/`` afterwards.
+
+    The credential shapes here are INVENTED constants. No secret is read, printed or written by
+    this probe, and the strings it plants are what it then proves absent.
+    """
+    logzero = pytest.importorskip("logzero")
+    pytest.importorskip("SmartApi")
+    import logging
+
+    from acumen import smartapi_client as sac
+
+    monkeypatch.chdir(tmp_path)
+    planted_key = "NOT-A-REAL-KEY-0000"
+    planted_token = "Bearer " + "n0taRealSessionTokenAtAll_0123456789"
+
+    sac._default_connect_factory("DUMMY-KEY-NOT-REAL")  # both guards, around the real SDK
+
+    # The vendor logs at ERROR. Try it at ERROR *and* at CRITICAL, so the proof does not rest on
+    # the level alone -- a detached handler is what makes even a CRITICAL line reach no file.
+    for level in (logging.ERROR, logging.CRITICAL):
+        logzero.logger.log(
+            level, "request headers: {'X-PrivateKey': '%s', 'Authorization': '%s'}",
+            planted_key, planted_token,
+        )
+
+    logs = tmp_path / "logs"
+    written = sorted(logs.rglob("*")) if logs.is_dir() else []
+    offenders = []
+    for path in written:
+        if not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        if planted_key in text or planted_token in text or "X-PrivateKey" in text:
+            offenders.append(str(path.relative_to(tmp_path)))
+    assert not offenders, (
+        f"a live-posture session wrote credential-shaped headers to {offenders} -- CLAUDE.md "
+        "rule 4 says LOGGED, not only committed"
     )
 
 

@@ -438,15 +438,25 @@ def test_a_screener_that_DIES_mid_morning_comes_back_where_it_was(tmp_path: Path
     screener, sink, recording = make_screener(tmp_path)
     run_to(screener, "11:45")
     assert screener.states[SYMBOL].phase == ls.PHASE_EXITED
-    fired = [(a.symbol, a.kind) for a in sink.alerts]
+    fired = [ls.LiveScreener._alert_key(alert) for alert in sink.alerts]
     assert len(fired) == 3
 
     # ... the process dies. A NEW screener, same recording.
     reborn, sink2, _rec = make_screener(tmp_path)
     assert reborn.restore() is True
     assert reborn.sweeps_done == ["11:15", "11:30", "11:45"]
-    assert reborn.alerted == set(fired)
+    assert reborn.alerted == set(fired), (
+        "the dedup set round-trips under the re-cut (symbol, kind, identity) key"
+    )
     assert len(reborn.bars[SYMBOL]) == len(screener.bars[SYMBOL]), "bars from the candle files"
+    # REVIEW_13 B8's compounding half: restore() used to leave every symbol at its pre-open
+    # phase, so even a correct resume had forgotten that the day was over.
+    assert reborn.states[SYMBOL].phase == ls.PHASE_EXITED, "the STATES come back too"
+    assert reborn.states[SYMBOL].entry_paise == ENTRY
+    assert reborn.states[SYMBOL].exit_kind == screener.states[SYMBOL].exit_kind
+    # ... and so does CONTEXT 3.3's pinned POC, so a restart cannot re-fix the day's POC from a
+    # window that is more complete now than it was at 11:15 (REVIEW_13 B3).
+    assert reborn.profiles[SYMBOL].poc_paise == screener.profiles[SYMBOL].poc_paise
 
     for boundary in ls.boundary_stamps(TRADE_DAY)[3:]:
         reborn.clock.set(boundary)

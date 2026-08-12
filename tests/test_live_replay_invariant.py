@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import ast
 import inspect
+import json
 from datetime import date, datetime
 from textwrap import dedent
 from pathlib import Path
@@ -310,6 +311,72 @@ def test_a_CRASH_mid_morning_resumes_to_the_same_answer(tmp_path: Path) -> None:
     )
 
 
+def test_the_invariant_holds_on_a_sample_STRATIFIED_BY_BIAS_RULE(tmp_path: Path) -> None:
+    """REVIEW_13 **B1**, and PART 3 item 1's second half, in the suite rather than in a script.
+
+    *"Then re-run the replay invariant over a day sample that is STRATIFIED BY ``bias_rule``, so
+    a carry day is in it by construction and not by luck."*
+
+    The build session's three walk days were all rule-fired (rule-3, rule-1, rule-1). That is
+    exactly why *"the invariant holds on 3 of 3 real symbol-days"* was true while the invariant
+    was broken for **62,692 of 406,488 evaluated stock-days (15.42%) and 29,121 of 188,345
+    executed trades (15.46%)** -- every one of them a day whose bias is CARRIED, which is the
+    one stratum a series seeded at the trade day cannot reach.
+
+    The sample is chosen and measured by ``docs/evidence/chunk13_fix2_bias_stratified.py``
+    (committed with its output under CLAUDE.md's git rules) and re-run HERE, so a regression
+    fails the suite rather than waiting for someone to re-run an evidence script. Only the
+    CARRIED strata are re-run in the suite -- they are the property under test, and the rule-fired
+    strata are what the named golden above already covers day by day.
+    """
+    _stores_or_skip()
+    sample_path = Path(__file__).resolve().parents[1] / "docs" / "evidence" / (
+        "chunk13_fix2_bias_stratified.json"
+    )
+    if not sample_path.is_file():
+        pytest.skip("the stratified sample has not been generated on this machine")
+    sample = json.loads(sample_path.read_text(encoding="utf-8"))
+
+    carried = [row for row in sample["sample"] if row["carried"]]
+    assert carried, "a stratified sample with no carried day proves nothing"
+    assert any(
+        row["symbol"] == "ITC" and row["day"] == "2026-06-10" for row in carried
+    ), "REVIEW_13's own named witness for B1 is in the sample"
+
+    config = load_config(include_env=False)
+    store = MinuteStore.at(config.path("data_root") / "minute_store")
+    checked = 0
+    for row in carried:
+        symbol, day = row["symbol"], date.fromisoformat(row["day"])
+        if not store.minutes(symbol, day):
+            continue
+        screener = ls.build_live_screener(
+            day, (symbol,), source=StoredDayBarSource(store),
+            recording=LiveRecording.at(tmp_path / f"{symbol}-{day.isoformat()}"),
+            clock=ls.VirtualClock(stamp=datetime.combine(day, datetime.min.time())),
+            mode="replay", sinks=(ls.CollectingAlertSink(),),
+            # NO seed_from: what is under test is the DEFAULT, which is where B1 lived.
+        )
+        screener.run_day()
+        state = screener.states[symbol]
+        bias = screener.biases.get(symbol)
+        want = row["expected"]
+        assert bias is not None, f"{symbol} {day}: the carried bias is resolved at all"
+        assert (bias.bias, bias.rule) == (want["bias"], want["bias_rule"]), (
+            f"{symbol} {day}: the SHIPPED wiring reaches the ledger's own carried bias"
+        )
+        assert (
+            None if state.poc_paise is None else str(state.poc_paise)
+        ) == want["poc_paise"]
+        for field in ("reference_paise", "entry_paise", "stop_paise", "target_paise",
+                      "exit_kind"):
+            assert getattr(state, field) == want[field], f"{symbol} {day}: {field}"
+        if want["entry_paise"] is not None:
+            assert state.qty == want["qty"], f"{symbol} {day}: qty"
+        checked += 1
+    assert checked >= 2, f"only {checked} carried day(s) were replayable from this lake"
+
+
 def test_the_recording_carries_everything_a_replay_needs(tmp_path: Path) -> None:
     """The replay contract, listed against what chunk 14 will ask for.
 
@@ -332,8 +399,19 @@ def test_the_recording_carries_everything_a_replay_needs(tmp_path: Path) -> None
     assert manifest["spec_version"] == bt.SPEC_VERSION
 
     calendar = manifest["calendar"]
-    assert calendar["governing_source"] == "published-nse-holiday-master", (
-        "the C5 duty: LIVE takes non-standard sessions from the PUBLISHED calendar"
+    # REVIEW_13 M17/F2. The C5 duty is "chunk 13 takes non-standard sessions from the PUBLISHED
+    # NSE calendar; the store scan stays the backtest cross-check" -- and this is a REPLAY,
+    # which the store-derived calendar governs, exactly as it governs the backtester. The
+    # manifest used to stamp "published-nse-holiday-master" on every recording ever written
+    # (the parameter default) beside a `calendar_source_field` of "derived" in the same block:
+    # the two halves of the pair contradicted each other, and the preflight printed the false
+    # half. What is asserted now is that the recording names the calendar that ACTUALLY
+    # governed, and the live half of the same rule is asserted in test_live_safety.py.
+    assert calendar["governing_source"] == "daily-store-scan (backtest cross-check)", (
+        "a REPLAY is governed by the store-derived calendar, and says so"
+    )
+    assert calendar["calendar_source_field"] == "derived", (
+        "the claim and the reading agree, which is what M17 found they did not"
     )
     assert "non_standard_sessions_store_scan" in calendar, (
         "and the store scan stays, as the backtest cross-check"
@@ -395,10 +473,23 @@ def test_a_RECORDING_replays_under_the_master_IT_NAMES_not_under_the_config_pin(
 
     # The resolution itself, asserted directly -- so this test fails on its OWN claim if the
     # rule is ever reverted, rather than on some downstream refusal (REVIEW_12_2 finding C5).
-    assert ls._master_for("replay", day=GOLDEN_DAY, recording=recording) == other_name
-    assert ls._master_for(
-        "live", day=GOLDEN_DAY, recording=recording
-    ) == ls.day_master_filename(GOLDEN_DAY), "and a LIVE morning takes its OWN day's dump"
+    chosen, why = ls._master_for("replay", day=GOLDEN_DAY, recording=recording)
+    assert chosen == other_name
+    assert "RECORDING'S OWN pin" in why, (
+        "and the reason the operator reads is derived from the FILE, not from the mode "
+        "(REVIEW_13 M9)"
+    )
+    live_master, live_why = ls._master_for("live", day=GOLDEN_DAY, recording=recording)
+    assert live_master == ls.day_master_filename(GOLDEN_DAY), (
+        "and a LIVE morning takes its OWN day's dump"
+    )
+    assert "THIS DAY'S OWN dump" in live_why
+
+    # REVIEW_13 M9: `master_file` is FENCED. A live caller may name only the day's own dump --
+    # the bypass that let a live session run on the Q-20 pin while the preflight printed "THIS
+    # DAY'S OWN dump" is closed at the resolution rather than by convention.
+    with pytest.raises(ls.ScreenerError, match="may run only on THE DAY'S OWN"):
+        ls._master_for("live", day=GOLDEN_DAY, recording=recording, master_file=other_name)
 
     screener = ls.build_live_screener(
         GOLDEN_DAY, (GOLDEN_SYMBOL,),
