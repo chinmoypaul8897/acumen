@@ -35,7 +35,7 @@ from . import live_dashboard as dash
 from . import live_screener as ls
 from .config import load_config
 from .daily_store import DailyStore
-from .live_recording import LiveRecording
+from .live_recording import CALENDAR_PUBLISHED, LiveRecording
 from .live_refresh import morning_refresh
 from .live_source import StoredDayBarSource
 from .minute_store import MinuteStore
@@ -89,6 +89,7 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     verification = None
+    published_calendar = None
     if args.refresh:
         calendar, universe, report = morning_refresh(
             today=day,
@@ -103,7 +104,11 @@ def main(argv: list[str] | None = None) -> int:
         if not report.ok:
             return 1
         symbols = symbols or universe
-        del calendar
+        # REVIEW_13 M17: the C5 duty is EXECUTED in refresh_calendar and used to be thrown away
+        # one line later (`del calendar`), so every recording ever written stamped
+        # "published-nse-holiday-master" beside readings taken from the derived store scan. The
+        # calendar the refresh cross-checked is the calendar the session runs and records.
+        published_calendar = calendar
 
     if not symbols:
         print("no symbols: pass --symbols, or --refresh to take the F&O universe")
@@ -141,8 +146,13 @@ def main(argv: list[str] | None = None) -> int:
             # and the instrument-master cache come from the file the operator named.
             data_dir=data_root,
             cache_dir=config.path("cache_root"),
+            # REVIEW_13 M17 / F2: whichever calendar this session really ran on, named.
+            calendar=published_calendar,
+            calendar_source=None if published_calendar is None else CALENDAR_PUBLISHED,
         )
-    except ls.BlockedByOpenQuestion as exc:  # pragma: no cover -- nothing raises it today
+    except ls.BlockedByOpenQuestion as exc:
+        # The STOP rule, at the operator's screen. Empty today (ls.LIVE_BLOCKING_QUESTIONS), and
+        # kept reachable because the next class-A hole a live session meets needs this exit.
         print("THE SCREENER IS BLOCKED, and this is not a bug:")
         print("")
         print(str(exc))
@@ -160,9 +170,20 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     print("", flush=True)
 
+    # REVIEW_13 B8: crash-safe resume, through the shipped entry point. `restore()` existed,
+    # worked and round-tripped the dedup set -- and had no caller in src/, so after any death
+    # the set started empty and every alert of the day went out a second time, TRIGGER included
+    # (measured: a real terminate() and restart re-sent four alerts). plan.md's chunk-13 card
+    # requires "state persistence (crash-safe resume intra-day)"; this is the line that
+    # delivers it to the operator rather than to the class.
+    if screener.restore():
+        print(
+            f"RESUMED from {recording.root}: {len(screener.sweeps_done)} sweep(s) already done, "
+            f"{len(screener.alerted)} alert(s) already delivered and NOT re-sent.",
+            flush=True,
+        )
+
     def after(report: ls.SweepReport) -> None:
-        if not live:
-            clock.set(report.boundary)
         dash.write_dashboard(
             recording.root, day=day, now=report.boundary,
             grouped=screener.by_phase(), alerts=tuple(collected.alerts),
@@ -170,23 +191,51 @@ def main(argv: list[str] | None = None) -> int:
             disclosure=screener.disclosure, verification=verification,
         )
 
-    for boundary in ls.boundary_stamps(day):
-        if live:
-            if not args.no_wait:
-                ls.wait_for_boundary(clock, boundary)
-        else:
+    def before(boundary: datetime) -> None:
+        """Reach the boundary. A live morning WAITS for the candle; a replay just moves."""
+        if not live:
             clock.set(boundary)
-        after(screener.sweep(boundary))
+        elif not args.no_wait:
+            ls.wait_for_boundary(clock, boundary)
+
+    # REVIEW_13 B4 + B8: the CLI CALLS the loop instead of re-implementing it. run_day() sweeps
+    # every boundary AND calls close_day(), whose 15:30 poll is what makes the recording a whole
+    # 375-minute session -- without it every real recording stopped at 15:14 and CONTEXT 4.7's
+    # next-morning verification flipped 22.05% of oracle-passing days to REFUSED, so its loud
+    # banner would have fired on roughly one alerted day in five.
+    reports = screener.run_day(on_sweep=after, before_sweep=before)
+
+    if live:
+        # The session token dies at midnight either way; ending it here means a leaked or
+        # logged token is not still valid for the rest of the trading day (REVIEW_13 B5).
+        _logout(screener.source)
 
     print("")
     print(dash.render_text(
-        day=day, now=ls.boundary_stamps(day)[-1], grouped=screener.by_phase(),
+        day=day, now=reports[-1].boundary, grouped=screener.by_phase(),
         alerts=tuple(collected.alerts), banner=screener.banner, dry_run=screener.dry_run,
         disclosure=screener.disclosure, verification=verification,
     ))
     print(f"recording: {recording.root}")
     print(f"dashboard: {recording.root / 'dashboard.html'}")
     return 0
+
+
+def _logout(source) -> None:
+    """End the broker session if this one opened it. Best-effort, never fatal.
+
+    A read-only session that is simply abandoned stays valid until midnight. REVIEW_13 B5
+    measured the API key and bearer token being written to ``logs/`` on this machine; the guard
+    that stops the writing is in :mod:`acumen.smartapi_client`, and this is the other half --
+    the token a leak might have carried is dead by the time the operator reads the log.
+    """
+    client = getattr(source, "client", None)
+    if client is None:
+        return
+    try:
+        client.logout()
+    except Exception:  # pragma: no cover -- a logout that fails changes nothing
+        pass
 
 
 def _bar_source(live: bool, config, data_root: Path, *, allow_network: bool):
@@ -247,10 +296,10 @@ def _preflight_lines(screener: ls.LiveScreener, recording: LiveRecording, mode: 
         f"CONTEXT 4.6's FULL battery: {gated} symbol-day(s) measured from the STORED whole day "
         f"(the backtester's own verdict)"
     )
-    why_master = (
-        "THIS DAY'S OWN dump (CONTEXT 4.7 / Q-29 -- the trader's chart as of this morning)"
-        if live else "the recording's own pin, or the Q-20 config pin (CONTEXT 4.7)"
-    )
+    # REVIEW_13 M9: the provenance line is derived from the FILE that was actually resolved,
+    # not from the mode flag. It used to say "THIS DAY'S OWN dump" whenever the mode was live,
+    # including when `master_file` had walked around the resolution entirely.
+    why_master = screener.master_reason or manifest.get("master_reason") or "unrecorded"
     lines = [
         "=" * 78,
         f"ACUMEN SCREENER PREFLIGHT   {screener.day.isoformat()}   mode={mode}",
@@ -262,8 +311,10 @@ def _preflight_lines(screener: ls.LiveScreener, recording: LiveRecording, mode: 
         f"row size             {manifest.get('row_size')}",
         f"risk / cost (paise)  {manifest.get('risk_per_trade_paise')} / "
         f"{manifest.get('cost_paise')}",
-        f"symbols              {len(screener.symbols)}",
+        f"symbols              {len(screener.symbols)} screened",
         f"biases resolved      {len(screener.biases)}",
+        f"bias series seeded   {manifest.get('seed_from')} "
+        f"(CONTEXT 3.2's carry needs history to carry from)",
         f"gate battery         {battery}",
         f"calendar             {calendar.get('governing_source')} governs; "
         f"trading day = {calendar.get('is_trading_day')}, "
@@ -275,8 +326,18 @@ def _preflight_lines(screener: ls.LiveScreener, recording: LiveRecording, mode: 
         f"alerts               {'DRY RUN (log only)' if screener.dry_run else 'LIVE'}"
         + (f"   [{screener.disclosure}]" if screener.disclosure else ""),
         f"recording            {recording.root}",
-        "=" * 78,
     ]
+    if screener.excluded:
+        # CONTEXT 4.7 / QUESTIONS.md Q-30, the architect's 08-Aug-2026 ruling: the quarantined
+        # symbols are never screened AND the startup banner names them excluded. A universe six
+        # short with nothing on screen to say which six is REVIEW_13 M2.
+        lines.append(
+            f"EXCLUDED             {len(screener.excluded)} symbol(s) NOT screened -- the "
+            "screener alerts on what the backtester validated (CONTEXT 4.7 / Q-30):"
+        )
+        for symbol, reason in screener.excluded:
+            lines.append(f"                     {symbol:<14} {reason}")
+    lines.append("=" * 78)
     return lines
 
 
