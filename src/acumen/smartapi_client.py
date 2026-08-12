@@ -283,14 +283,30 @@ class Credentials:
 
 
 def _quiet_library_logging() -> None:
-    """Silence the SmartApi library's own logging (CLAUDE.md rule 4).
+    """Silence the SmartApi library's own logging (CLAUDE.md rule 4). **Idempotent, by design.**
 
     The vendor ``SmartConnect`` logs via ``logzero`` at ERROR level on a failed request, and
     that error line includes the FULL request headers -- ``Authorization: Bearer <jwt>`` and
     ``X-PrivateKey: <api key>``. A transient timeout (NORMAL, CONTEXT 4.3) would otherwise spill
-    a session token and the API key to stderr / any run log. We raise its threshold above ERROR
-    so the credential-bearing lines are never emitted. Best-effort: if logzero is absent (tests
-    never build a real connect) this is a no-op.
+    a session token and the API key to stderr and to any run log.
+
+    **REVIEW_13 B5.** Raising the threshold once, before the constructor, is not enough and was
+    never enough: ``SmartConnect.__init__`` itself calls ``logzero.logfile(path,
+    loglevel=ERROR)``, whose last two lines put the level straight BACK to ERROR and install a
+    ``RotatingFileHandler`` writing ``logs/<date>/app.log``. Measured on this machine before the
+    fix: level 10 -> 50 after the guard -> 40 after the constructor, with a file handler
+    attached, and 97 ``X-PrivateKey`` lines plus 86 ``Authorization: Bearer`` lines already on
+    disk across six files.
+
+    So this function does BOTH halves and is called on BOTH sides of the constructor:
+
+    * it raises every logger the vendor writes through to CRITICAL, and
+    * it DETACHES any file handler the vendor installed. A level alone is not a guarantee -- an
+      attached file handler is a file that can still be written, by the vendor or by anything
+      else that reaches that logger -- and the artefact this rule is about is a file on disk.
+
+    Best-effort with respect to the package being absent: if logzero is not installed (the
+    offline suite never builds a real connect) this is a no-op.
     """
     import logging
 
@@ -298,10 +314,20 @@ def _quiet_library_logging() -> None:
         logging.getLogger(name).setLevel(logging.CRITICAL)
     try:
         import logzero
-
-        logzero.loglevel(logging.CRITICAL)  # the default logger SmartConnect actually uses
     except Exception:
-        pass
+        return
+    logzero.loglevel(logging.CRITICAL)  # the default logger SmartConnect actually uses
+    logger = getattr(logzero, "logger", None)
+    if logger is None:  # pragma: no cover -- a logzero without its default logger
+        return
+    for handler in list(getattr(logger, "handlers", ())):
+        if isinstance(handler, logging.FileHandler):
+            logger.removeHandler(handler)
+            try:
+                handler.close()
+            except Exception:  # pragma: no cover -- closing a handler cannot be allowed to raise
+                pass
+    logger.setLevel(logging.CRITICAL)
 
 
 def _default_connect_factory(api_key: str) -> Any:
@@ -309,7 +335,13 @@ def _default_connect_factory(api_key: str) -> Any:
     _quiet_library_logging()  # before anything the library might log a credential (rule 4)
     from SmartApi import SmartConnect  # type: ignore[import-not-found]
 
-    return SmartConnect(api_key=api_key)
+    connect = SmartConnect(api_key=api_key)
+    # AND AFTER (REVIEW_13 B5): the constructor's own logzero.logfile() call lowers the level
+    # back to ERROR and attaches a RotatingFileHandler. The guard has to run on the far side of
+    # it or it guards nothing -- which is exactly what the six spilled log files on this machine
+    # were the evidence of.
+    _quiet_library_logging()
+    return connect
 
 
 def _default_totp(secret: str) -> str:
