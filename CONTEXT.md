@@ -1,6 +1,6 @@
 # CONTEXT.md — ACUMEN INTELLIGENCE · Master Specification
 
-**Version 2.0 · 8 August 2026 · THIS FILE IS LAW.**
+**Version 2.1 · 8 August 2026 · THIS FILE IS LAW.**
 Every build/review session reads this before touching code. Nothing here may be changed by any Claude Code session — spec changes flow only through the architect (the Cowork chat), arrive as a new version of this file, and are logged in §10. If reality and this file disagree, STOP and write it to QUESTIONS.md.
 
 ## Table of contents
@@ -257,7 +257,7 @@ Corrupt days are refused, never repaired.
 
 ## 4.7 LIVE-MODE VALIDITY (v2.0 — the Q-28 and Q-29 rulings, 08-Aug-2026)
 
-A live trading day has no bhavcopy oracle until evening. Live sweeps therefore run the ORACLE-FREE battery — gate 2 (with the open test), Q-17 candle-level drops, candle validity — per sweep; gates 1 and 1P are structurally inapplicable to same-day data (they detect rewritten history). Every live alert carries: "live feed, not yet verified against the exchange's end-of-day record." The next pre-open runs the FULL battery on the prior recording against the published bhavcopy and reports both verdicts; a live-alerted day the oracle refuses is named loudly. Measured residual: 0.5229% of settled symbol-days (2,187/418,275 over the ten-year ledger) failed gate 1 alone — the frequency a live morning accepts and discloses. A live morning uses the DAY'S OWN instrument master, fetched pre-open, named and hashed into the recording; replay consumes the recording's pin (§6 holds per day); the backtest's Q-20 pin governs the historical ledger only.
+A live trading day has no bhavcopy oracle until evening. Live sweeps therefore run the ORACLE-FREE battery — gate 2 (with the open test), Q-17 candle-level drops, candle validity — per sweep; gates 1 and 1P are structurally inapplicable to same-day data (they detect rewritten history). Every live alert carries: "live feed, not yet verified against the exchange's end-of-day record". The next pre-open runs the FULL battery on the prior recording against the published bhavcopy and reports both verdicts; a live-alerted day the oracle refuses is named loudly. Section 6 parity is judged on oracle-passing days; a live-alerted day the oracle later refuses is the disclosed, bounded difference (live cannot see tomorrow). Measured residual: 0.5229% of settled symbol-days (2,187/418,275 over the ten-year ledger) failed gate 1 alone — the frequency a live morning accepts and discloses. A live morning uses the DAY'S OWN instrument master, fetched pre-open, named and hashed into the recording; replay consumes the recording's pin (§6 holds per day); the backtest's Q-20 pin governs the historical ledger only. A live morning screens the settled universe (204); the quarantined symbols are excluded and named at startup.
 
 ## 5. TradingView replication facts (why our POC = his POC)
 
@@ -339,6 +339,7 @@ Precedence if conflict is ever found: trader's R2 answers > R1 answers > PDF tex
 
 | Version | Date | Change |
 |---|---|---|
+| 2.1 | 08-Aug-2026 | §4.7 gains the section-6 parity clause (Q-31), the settled-universe rule (Q-30), the disclosed-line byte fix; POC-immutability restated (B3) |
 | 2.0e | 08-Aug-2026 | table of contents gains 4.6 and 4.7 (omitted since v1.3) |
 | 2.0 | 08-Aug-2026 | The live era: §4.7 live-mode validity (Q-28 oracle-free battery + next-morning verification + measured residual; Q-29 day's-own master per recording); live mode unblocked |
 | 1.9e | 07-Aug-2026 | §9 OPEN-6 aligned with the Round-4 flags retirement |
