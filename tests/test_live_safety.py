@@ -103,27 +103,56 @@ def literal_offenders(text: str, label: str) -> list[str]:
     return found
 
 
-def _folded_strings(node: ast.AST) -> list[str]:
+def _folded_strings(node: ast.AST, bindings: dict[str, str] | None = None) -> list[str]:
     """Every string a constant-folding expression can produce, best-effort.
 
-    ``"place" + "Order"``, an f-string whose parts are constants, and a list/tuple of constants
-    that something will join -- the three shapes that turn a name the AST never sees as one
-    piece into a name the interpreter does.
+    ``"place" + "Order"``, an f-string whose parts are constants, a list/tuple of constants that
+    something will join, and a NAME the file bound to a string earlier -- the shapes that turn a
+    name the AST never sees as one piece into a name the interpreter does. The last is what
+    reaches an evasion split across two LINES, which a line scan cannot see by construction.
     """
+    bindings = bindings or {}
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         return [node.value]
+    if isinstance(node, ast.Name) and node.id in bindings:
+        return [bindings[node.id]]
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
-        left, right = _folded_strings(node.left), _folded_strings(node.right)
+        left = _folded_strings(node.left, bindings)
+        right = _folded_strings(node.right, bindings)
         return ["".join(left) + "".join(right)] if left and right else []
     if isinstance(node, ast.FormattedValue):
-        return _folded_strings(node.value)
+        return _folded_strings(node.value, bindings)
     if isinstance(node, ast.JoinedStr):
-        parts = [part for value in node.values for part in _folded_strings(value)]
+        parts = [part for value in node.values for part in _folded_strings(value, bindings)]
         return ["".join(parts)] if parts else []
     if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
-        parts = [part for element in node.elts for part in _folded_strings(element)]
+        parts = [part for element in node.elts for part in _folded_strings(element, bindings)]
         return parts + (["".join(parts)] if len(parts) > 1 else [])
     return []
+
+
+def _string_bindings(tree: ast.AST) -> dict[str, str]:
+    """Names this file bound to a string, so a two-line evasion folds like a one-line one.
+
+    Two passes, because an assignment may use a name bound later in the file; two is enough for
+    every shape in the corpus and the scan is a tripwire rather than an interpreter.
+    """
+    bindings: dict[str, str] = {}
+    for _ in range(2):
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+                continue
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            value = node.value
+            if value is None:
+                continue
+            folded = _folded_strings(value, bindings)
+            if not folded:
+                continue
+            for target in targets:
+                if isinstance(target, ast.Name):
+                    bindings[target.id] = folded[-1]
+    return bindings
 
 
 def candidate_names(tree: ast.AST) -> set[str]:
@@ -143,7 +172,8 @@ def candidate_names(tree: ast.AST) -> set[str]:
     * every import name AND alias, so ``from x import placeOrder as ship_it`` is caught by the
       name even though the alias is innocent.
     """
-    names: set[str] = set()
+    bindings = _string_bindings(tree)
+    names: set[str] = set(bindings.values())
     for node in ast.walk(tree):
         if isinstance(node, ast.Attribute):
             names.add(node.attr)
@@ -155,7 +185,7 @@ def candidate_names(tree: ast.AST) -> set[str]:
             if isinstance(node, ast.ImportFrom) and node.module:
                 names.add(node.module)
         else:
-            names.update(_folded_strings(node))
+            names.update(_folded_strings(node, bindings))
     return names
 
 
@@ -250,6 +280,16 @@ EVASIONS: tuple[tuple[str, str], ...] = (
     ("gtt built", 'getattr(connect, "gtt" + "CreateRule")(params)\n'),
     ("convert position", "connect.convertPosition(params)\n"),
     ("in a docstring", '"""Pasted from the vendor docs: placeOrder(variety, ...)."""\n'),
+    # --- split across LINES: no single line carries the name, so a line scan cannot see these
+    # at all, however it normalises. These are the AST half's own catches.
+    ("two names, two lines", 'HEAD = "place"\nTAIL = "Order"\ngetattr(connect, HEAD + TAIL)\n'),
+    ("list across lines", 'PARTS = [\n    "place",\n    "Order",\n]\n'
+                          'getattr(connect, "".join(PARTS))\n'),
+    ("bound then f-string", 'TAIL = "Order"\ngetattr(connect, f"place{TAIL}")\n'),
+    ("bound then attribute", 'WHAT = "cancel"\nHOW = "Order"\nmethod = WHAT + HOW\n'),
+    # ... and one the AST cannot see at all, because Python throws comments away before the tree
+    # exists. This is why BOTH halves are kept rather than the stronger one alone.
+    ("in a comment", "# TODO: switch this to connect.placeOrder once the desk approves\n"),
 )
 
 
@@ -298,14 +338,23 @@ def test_the_order_tripwire_CATCHES_EVERY_EVASION_the_review_walked_past() -> No
         "the corpus must contain variants the shipped scan missed, or it proves nothing"
     )
 
-    # The AST half must now EARN its place: at least one variant that the literal half cannot
-    # see must be caught by it. (The reverse also holds -- a bare `exec` string is a literal
-    # catch -- which is why both halves are kept.)
+    # BOTH halves must EARN their place, and each one catches something the other cannot.
     ast_only = [
         label for label, source in EVASIONS
         if not literal_offenders(source, label) and ast_offenders(ast.parse(source), label)
     ]
-    assert ast_only, "the AST half adds nothing over the literal scan -- that was the finding"
+    literal_only = [
+        label for label, source in EVASIONS
+        if literal_offenders(source, label) and not ast_offenders(ast.parse(source), label)
+    ]
+    assert len(ast_only) >= 4, (
+        f"the AST half adds only {len(ast_only)} catch(es) over the literal scan -- 'it adds "
+        "ZERO' was the finding, and an evasion split across two LINES is what it is for"
+    )
+    assert literal_only, (
+        "and the literal half is not redundant: Python throws comments away before the tree "
+        "exists, so an endpoint pasted into a comment is a literal-scan catch only"
+    )
 
 
 def test_the_broker_connection_is_only_ever_asked_for_candles_or_a_session() -> None:
