@@ -61,6 +61,7 @@ from __future__ import annotations
 import time as _time
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, time, timedelta
+from decimal import Decimal
 from fractions import Fraction
 from pathlib import Path
 from typing import Callable, Iterable, Mapping, Protocol, Sequence
@@ -74,6 +75,7 @@ from .calendar import TradingCalendar
 from .instrument_master import InstrumentMaster
 from .live_recording import (
     CALENDAR_PUBLISHED,
+    CALENDAR_STORE_SCAN,
     FETCH_EMPTY,
     FETCH_ERROR,
     FETCH_OK,
@@ -82,8 +84,9 @@ from .live_recording import (
     LiveRecording,
     RecordedAlert,
 )
-from .live_source import BarSource, merge_bars
+from .live_source import BarSource, duplicate_stamps, merge_bars
 from .minute_store import StoredBar
+from .poc import POC_OK, SPEC_WINDOW, DayProfile, ProfileWindow
 from .signal_engine import (
     POSTURE_LIVE,
     POSTURE_SETTLED,
@@ -107,6 +110,37 @@ PHASES: tuple[str, ...] = (
     PHASE_TRIGGERED, PHASE_IN_TRADE, PHASE_ARMED, PHASE_WAITING,
     PHASE_EXITED, PHASE_SKIPPED, PHASE_REFUSED,
 )
+
+#: How far through its day a symbol has got. **The phase machine is MONOTONIC** (REVIEW_13 M3):
+#: a re-evaluation may only move a symbol FORWARD along this ladder, never back. CONTEXT 3.4-2
+#: is the reason -- *"the first qualifying cross CONSUMES the stock-day ... no later entry that
+#: day ... no re-entry after any exit"* -- so a vendor revision that walks an EXITED symbol back
+#: to IN-TRADE is not a correction, it is a state the strategy does not have. Demonstrated
+#: before the fix: the only exit the trader received said stop-loss 199900 while the screener's
+#: own final state said target 200700, a 4,000-rupee swing at qty 500.
+#:
+#: ``skipped`` and ``refused`` are OFF the ladder and carry no rank: the first is a sweep
+#: outcome (the symbol keeps its real state underneath) and the second is a verdict about the
+#: day, both of which are handled explicitly where they arise.
+PHASE_RANK: Mapping[str, int] = {
+    PHASE_WAITING: 0,
+    PHASE_ARMED: 1,
+    PHASE_TRIGGERED: 2,
+    PHASE_IN_TRADE: 2,
+    PHASE_EXITED: 3,
+}
+
+#: CONTEXT 3.3 + the architect's 08-Aug-2026 ruling on REVIEW_13 B3: *"the POC is fixed at 11:15
+#: and immutable for the day; a window missing its late minutes is a completeness failure --
+#: flag 'POC provisional / incomplete window' and never silently re-fix."* This is that flag, in
+#: the ruling's own words, and it travels on the state, on both dashboards and on every alert
+#: the symbol produces.
+POC_PROVISIONAL: str = "POC provisional / incomplete window"
+
+#: How a dedup key is flattened into ``state.json``. A vertical bar cannot occur in a symbol, a
+#: kind or any identity component (they are stamps, integers and engine words), so the round
+#: trip is exact -- and a resume that misread its own dedup set would re-send the morning.
+_ALERT_KEY_SEP: str = "|"
 
 # --- alert kinds ------------------------------------------------------------------------------
 
@@ -145,11 +179,41 @@ class ScreenerError(RuntimeError):
 class BlockedByOpenQuestion(ScreenerError):
     """A class-A spec hole stands between this session and a correct answer. See QUESTIONS.md.
 
-    Nothing raises this today -- Q-28, the hole it was written for, was ruled on 08-Aug-2026 and
-    is CONTEXT 4.7. It is KEPT, and kept exported, because the next class-A hole a live session
-    walks into needs the same exit: refuse to start, in the question's own words, rather than
-    start and produce a number nobody may rely on.
+    Raised by :func:`build_live_screener` for every entry in
+    :data:`LIVE_BLOCKING_QUESTIONS`, which is EMPTY today because every class-A question a live
+    morning has met so far has been ruled on (Q-28 and Q-29 on 08-Aug-2026, Q-30 with
+    REVIEW_13). The exit is kept, and kept exercised by a test that registers a question and
+    watches the mode refuse, because the next class-A hole a live session walks into needs it:
+    refuse to start, in the question's own words, rather than start and produce a number nobody
+    may rely on.
     """
+
+
+#: The class-A questions that BLOCK a live morning, as ``(id, the question's own words)``.
+#:
+#: **This tuple is the STOP rule in executable form** (REVIEW_13 M24). Until 08-Aug-2026 that
+#: rule lived as a hard-coded refusal carrying Q-28's text, and a test asserted it; the ruling
+#: retired the refusal, its successor asserted a different refusal entirely, and the STOP
+#: property was lost with it -- nothing went red if a future session unblocked a live mode
+#: without a ruling, and :class:`BlockedByOpenQuestion` became a branch no test had ever taken.
+#: Registering the block here restores the property AND generalises it: a session that meets a
+#: class-A hole on the live path adds one row, and the mode refuses in the question's own words
+#: until the architect rules.
+#:
+#: EMPTY today. Q-28 and Q-29 are CONTEXT 4.7; Q-30 is the architect's 08-Aug-2026 ruling on
+#: REVIEW_13 and is executed by the settled-universe filter in :func:`build_live_screener`;
+#: Q-31 is a CONTEXT edit and never blocked anything.
+LIVE_BLOCKING_QUESTIONS: tuple[tuple[str, str], ...] = ()
+
+#: The refusal a live morning gives when THE DAY'S OWN instrument master is not in the cache.
+#: A module constant so a test can assert the contract by EQUALITY rather than by three
+#: substrings (REVIEW_13 M24), and so the sentence cannot drift from the ruling it executes.
+MASTER_MISSING_REFUSAL: str = (
+    "a LIVE morning runs on THE DAY'S OWN instrument master (CONTEXT 4.7 / QUESTIONS.md Q-29), "
+    "fetched pre-open. The tick sizes CONTEXT 3.3's profile row grid, hence the POC, hence every "
+    "entry, stop and target -- so the day's dump is a prerequisite of the morning, not something "
+    "to substitute around"
+)
 
 
 #: CONTEXT 4.7, the architect's own words, carried on **every live alert** and on the dashboard
@@ -157,6 +221,24 @@ class BlockedByOpenQuestion(ScreenerError):
 #: unverified feed. It is not a caveat about the software; it is a fact about the data: no
 #: exchange record exists for today until the evening's bhavcopy is published.
 LIVE_DISCLOSURE: str = "live feed, not yet verified against the exchange's end-of-day record"
+
+#: The measured price of the live posture, as a BRACKET rather than as its narrow end.
+#:
+#: REVIEW_13 **M1**: the runtime banner printed 0.5229% -- the days refused by gate 1 ALONE --
+#: while the same ledger measures the population a live morning is blind to at 2.5141%, because
+#: gate 1P is inapplicable live too (CONTEXT 4.7's own preceding sentence says so) and its
+#: refusals are not in the narrow figure. B341's evidence
+#: (``docs/evidence/chunk13_q28_residual.md``) states both ends and its own ceiling; what the
+#: operator reads now states them too. Every figure here is quoted from that document, which
+#: this chunk's review re-derived independently from the 400 MB chunk-9B ledger.
+LIVE_RESIDUAL_BRACKET: str = (
+    "Measured residual, as a BRACKET rather than a single number (B341, re-derived by "
+    "REVIEW_13): 0.5229% of settled symbol-days (2,187/418,275 over the ten-year ledger) failed "
+    "gate 1 alone; 2.5141% (10,516 days) failed an ORACLE-ONLY gate -- gate 1 or gate 1P, both "
+    "inapplicable this morning; and the measurable ceiling, counting the 697 days whose gate-2 "
+    "trigger the ledger does not name, is 2.6808%. So the frequency this morning accepts and "
+    "discloses is 0.5229%-2.6808%, not 0.5229%."
+)
 
 #: What a live session prints before it starts, so the operator sees the posture he is running
 #: under rather than inferring it from a mode flag. CONTEXT 4.7 in the section's own terms.
@@ -168,11 +250,47 @@ LIVE_STARTUP_DISCLOSURE: str = (
     "rewritten during today. Every alert this session produces carries: '" + LIVE_DISCLOSURE +
     "'. The NEXT pre-open runs the FULL battery over this day's recording against the published "
     "bhavcopy and reports both verdicts, naming loudly any day it alerted on that the oracle "
-    "then refuses. Measured residual: 0.5229% of settled symbol-days (2,187/418,275 over the "
-    "ten-year ledger) failed gate 1 alone -- the frequency this morning accepts and discloses. "
-    "The instrument master is THIS DAY'S OWN dump (QUESTIONS.md Q-29), named and hashed into the "
-    "recording. THIS TOOL PLACES NO ORDERS."
+    "then refuses. " + LIVE_RESIDUAL_BRACKET + " Section 6 parity is judged on oracle-passing "
+    "days; a live-alerted day the oracle later refuses is that disclosed, bounded difference. "
+    "This morning screens the SETTLED UNIVERSE ONLY (CONTEXT 4.7 / QUESTIONS.md Q-30, architect "
+    "08-Aug-2026): the symbols CONTEXT 4.6 quarantined are NOT screened and are named below, "
+    "because the screener alerts on what the backtester validated. The instrument master is "
+    "THIS DAY'S OWN dump (QUESTIONS.md Q-29), named and hashed into the recording. "
+    "THIS TOOL PLACES NO ORDERS."
 )
+
+#: How far back the live bias SERIES is seeded. REVIEW_13 **B1**.
+#:
+#: CONTEXT 3.2 rule 1 (*"Inside bar ... bias unchanged (carry last known bias)"*) and rule 5
+#: (*"No rule fires -> carry last known bias"*) both need an EARLIER bias to carry, and a series
+#: seeded at the trade day itself has none: the engine correctly answers "not seeded" -- a state
+#: 3.2's Seeding paragraph reserves for HISTORY START -- and the screener refused the symbol for
+#: the whole day. Measured over the chunk-9B ten-year ledger: **62,692 of 406,488 evaluated
+#: stock-days (15.42%) and 29,121 of 188,345 executed trades (15.46%)** stand on a carried bias,
+#: every one of them invisible to the live half, silently.
+#:
+#: **The value is MEASURED, not chosen.** CONTEXT 3.2's model is one series from history start,
+#: which the backtester really does walk and a live morning cannot: seeding 204 symbols from
+#: 2016 before the bell is not a pre-open job. So the live series takes a LOOK-BACK, and the
+#: only question is how long it has to be to reach the last day a RULE fired -- because once it
+#: does, the carry resolves to the same bias the full series carries, and reaching further back
+#: cannot change it. Longer is never wrong, only slower.
+#:
+#: Streamed over all 495,312 rows of the chunk-9B ten-year ledger
+#: (``docs/evidence/chunk13_fix2_bias_stratified.md``), the distance from a day back to the most
+#: recent rule-firing day is: 84.23% zero (a rule fired that day), 99.03% within 3 calendar days,
+#: 99.98% within 7, and **112 days at the very worst** -- one stretch, FORCEMOT's missing daily
+#: candles of Dec-2023..Feb-2024, where 55 rows (0.013%) exceed 30 days. 180 days therefore
+#: covers the whole measured decade with ~60% headroom.
+#:
+#: Its price is real and is stated rather than hidden: the pre-open build costs ~13.5s per
+#: symbol at 180 days against ~4.1s at 30 (measured on the operator's machine over 20 symbols),
+#: so a 204-symbol universe is roughly 46 minutes of pre-open work instead of 14. That is
+#: affordable exactly because it is PRE-open: the first sweep is at 11:15 and nothing waits on
+#: it. It buys the 15.42% of evaluated stock-days that stand on a carried bias -- 62,680 of
+#: 406,488, and 29,121 of 188,345 executed trades -- which is what REVIEW_13 B1 measured the
+#: live half was losing silently.
+SEED_LOOKBACK_DAYS: int = 180
 
 
 def boundary_stamps(day: date) -> tuple[datetime, ...]:
@@ -332,11 +450,39 @@ def _format_alert_body(alert: RecordedAlert) -> str:
     return f"[{at}] !! {payload.get('detail', 'the screener is not answering')}"
 
 
-def _rs(paise) -> str:
+def rupees(paise) -> str:
+    """Integer (or exact Fraction) paise as rupees -- and a HALF-paise POC as it really is.
+
+    CONTEXT 3.3 lets a POC sit on half a paisa (it is a row MIDPOINT) and CONTEXT 7-E11 says
+    every comparison against it runs at full precision, integer paise internally, and NO float
+    anywhere. Two decimal places are right for money and wrong for a row midpoint: they would
+    move the POC by half a paisa on the one line whose purpose is that the trader can check it
+    against his own chart. So a value that is a whole number of paise prints in two places and
+    one that is not prints in three -- the same rule ``trader_pack._Emit.poc`` applies to the
+    validation pack, for the same reason.
+
+    **One implementation, because there were two** (REVIEW_13 M10). The dashboard rendered a
+    half-paise POC exactly (148.695) while the ALERT line -- the line the alert log shows, the
+    terminal prints and chunk 14 forwards -- converted through a binary float and printed
+    148.69. Four real 2026-06-10 POCs all moved, and the direction was IEEE-754's rather than a
+    stated rule. :func:`acumen.live_dashboard.rupees` is now this function.
+
+    Exact throughout: :class:`~fractions.Fraction` and :class:`~decimal.Decimal`, never a float.
+    """
     if paise is None:
         return "-"
-    value = Fraction(paise) / 100
-    return f"{float(value):,.2f}"
+    value = Fraction(paise)
+    if value.denominator == 1:
+        exact = (Decimal(value.numerator) / Decimal(100)).quantize(Decimal("0.01"))
+        return f"{exact:,.2f}"
+    exact = (
+        Decimal(value.numerator) / Decimal(value.denominator) / Decimal(100)
+    ).quantize(Decimal("0.001"))
+    return f"{exact:,.3f}"
+
+
+#: The alert line's own name for it. Kept so the formatter reads as it always did.
+_rs = rupees
 
 
 # --- per-symbol state -------------------------------------------------------------------------
@@ -363,6 +509,11 @@ class SymbolState:
     minute_count: int = 0
     last_stamp: datetime | None = None
     refusal: str | None = None
+    #: CONTEXT 3.3 / B3: the 09:15-11:14 window was SHORT of its 120 expected minutes at the
+    #: moment the POC was pinned. The POC is not re-fixed for it -- it is disclosed.
+    poc_provisional: bool = False
+    #: How many of the window's 120 expected minutes were missing when the POC was pinned.
+    poc_missing_minutes: int = 0
 
     def as_dict(self) -> dict:
         return {
@@ -383,7 +534,42 @@ class SymbolState:
             "minute_count": self.minute_count,
             "last_stamp": None if self.last_stamp is None else self.last_stamp.isoformat(),
             "refusal": self.refusal,
+            "poc_provisional": self.poc_provisional,
+            "poc_missing_minutes": self.poc_missing_minutes,
         }
+
+    @classmethod
+    def from_dict(cls, payload: Mapping) -> "SymbolState":
+        """Rebuild a state written by :meth:`as_dict`. The other half of a crash-safe resume.
+
+        REVIEW_13 **B8**: ``restore()`` round-tripped the dedup set and the bars and then left
+        every symbol at its pre-open phase, because nothing ever read back what ``persist()``
+        wrote. A resumed screener that has forgotten a symbol is IN TRADE is a screener that
+        will re-alert its entry and can miss its exit.
+        """
+        stamp = payload.get("last_stamp")
+        poc = payload.get("poc_paise")
+        return cls(
+            symbol=str(payload["symbol"]),
+            phase=str(payload.get("phase", PHASE_WAITING)),
+            detail=str(payload.get("detail", "")),
+            bias=payload.get("bias"),
+            bias_rule=str(payload.get("bias_rule", "")),
+            side=payload.get("side"),
+            poc_paise=None if poc is None else Fraction(str(poc)),
+            reference_paise=payload.get("reference_paise"),
+            entry_paise=payload.get("entry_paise"),
+            stop_paise=payload.get("stop_paise"),
+            target_paise=payload.get("target_paise"),
+            qty=payload.get("qty"),
+            exit_kind=payload.get("exit_kind"),
+            exit_paise=payload.get("exit_paise"),
+            minute_count=int(payload.get("minute_count", 0) or 0),
+            last_stamp=None if not stamp else datetime.fromisoformat(str(stamp)),
+            refusal=payload.get("refusal"),
+            poc_provisional=bool(payload.get("poc_provisional", False)),
+            poc_missing_minutes=int(payload.get("poc_missing_minutes", 0) or 0),
+        )
 
 
 @dataclass(frozen=True)
@@ -463,13 +649,30 @@ class LiveScreener:
     dry_run: bool = True
     posture: str = POSTURE_SETTLED
     disclosure: str = ""
+    #: Symbols the session is NOT screening, and why -- CONTEXT 4.7 / Q-30's quarantined six on
+    #: a live morning. Carried so the exclusion is NAMED at startup rather than inferred from a
+    #: count that is six short (REVIEW_13 M2).
+    excluded: tuple[tuple[str, str], ...] = ()
+    #: Why THIS master governs, decided from the file that was actually resolved rather than
+    #: from the mode flag (REVIEW_13 M9).
+    master_reason: str = ""
 
     # --- mutable session state (persisted to state.json after every sweep) ---
     bars: dict[str, tuple[StoredBar, ...]] = field(default_factory=dict)
     states: dict[str, SymbolState] = field(default_factory=dict)
-    alerted: set[tuple[str, str]] = field(default_factory=set)
+    #: The alerts already DELIVERED, keyed by ``(symbol, kind, identity)`` -- see
+    #: :meth:`_alert_key`. The third element is what REVIEW_13 B334/B9 showed ``(symbol, kind)``
+    #: was missing: the identity of the state being alerted about.
+    alerted: set[tuple[str, str, str]] = field(default_factory=set)
     banner: str = ""
     sweeps_done: list[str] = field(default_factory=list)
+    #: CONTEXT 3.3's POC, PINNED at 11:15 and immutable for the day (REVIEW_13 B3).
+    profiles: dict[str, DayProfile] = field(default_factory=dict)
+    #: Bars a single vendor reply served under a stamp it had already served in that same reply.
+    #: Kept so CONTEXT 4.5 gate 2 can SEE them (REVIEW_13 B2) -- ``merge_bars`` resolves a
+    #: re-polled stamp for the ENGINE, and resolving it before the gate is what laundered a
+    #: corrupt twin past the one gate CONTEXT 4.7 leaves standing.
+    duplicate_bars: dict[str, tuple[StoredBar, ...]] = field(default_factory=dict)
 
     # --- lifecycle ----------------------------------------------------------------
 
@@ -496,22 +699,43 @@ class LiveScreener:
             detail="waiting for the 11:15 profile",
         )
 
-    def run_day(self, *, on_sweep: Callable[[SweepReport], None] | None = None
-                ) -> tuple[SweepReport, ...]:
-        """Sweep every boundary of the day, in order, then CLOSE the day. One report per sweep."""
+    def run_day(
+        self,
+        *,
+        on_sweep: Callable[[SweepReport], None] | None = None,
+        before_sweep: Callable[[datetime], None] | None = None,
+    ) -> tuple[SweepReport, ...]:
+        """Sweep every boundary of the day, in order, then CLOSE the day. One report per sweep.
+
+        **This is the loop, and it is the only loop** (REVIEW_13 B4 + B8). ``run_screener.main``
+        used to re-implement it, which is how ``run_day``, ``close_day`` and ``restore`` all came
+        to have no caller anywhere in ``src/``: the class was crash-safe, closed its recording
+        and resumed correctly, and the only entry point an operator had reached none of it.
+
+        ``before_sweep`` is called with each boundary BEFORE it is swept, and it is what lets one
+        loop serve both modes without either of them owning a second copy of it: a live morning
+        passes a function that WAITS for the wall clock to reach the boundary (the candle has to
+        close before it can be polled for -- CONTEXT 7-E12), a replay passes one that sets the
+        virtual clock and returns at once. It is called for :meth:`close_day`'s 15:30 poll too,
+        because that poll waits exactly like the others.
+        """
         reports = []
         for boundary in boundary_stamps(self.day):
+            if before_sweep is not None:
+                before_sweep(boundary)
             report = self.sweep(boundary)
             reports.append(report)
             if on_sweep is not None:
                 on_sweep(report)
-        report = self.close_day()
+        report = self.close_day(before_sweep=before_sweep)
         reports.append(report)
         if on_sweep is not None:
             on_sweep(report)
         return tuple(reports)
 
-    def close_day(self) -> SweepReport:
+    def close_day(
+        self, *, before_sweep: Callable[[datetime], None] | None = None
+    ) -> SweepReport:
         """One last poll after 15:29, so the RECORDING holds the whole session.
 
         Not a decision boundary -- CONTEXT 3.4's last entry closes at 15:00 and its square-off at
@@ -525,6 +749,8 @@ class LiveScreener:
         something after 15:14 reached a decision and that is a defect, not a late correction.
         """
         stamp = datetime.combine(self.day, SESSION_END)
+        if before_sweep is not None:
+            before_sweep(stamp)
         before = dict(self.states)
         report = self.sweep(stamp)
         moved = [
@@ -643,12 +869,38 @@ class LiveScreener:
             elapsed = int((self.clock.now() - began) / timedelta(milliseconds=1))
             merged = merge_bars(self.bars.get(symbol, ()), bars)
             self.bars[symbol] = merged
+            # CONTEXT 4.5 gate 2's first trigger, kept VISIBLE to it (REVIEW_13 B2). The merge
+            # above resolves a re-polled stamp for the engine, which needs one bar per minute;
+            # the twins it resolved away are carried here so the battery can refuse the day.
+            twins = duplicate_stamps(bars)
+            if twins:
+                self.duplicate_bars[symbol] = self.duplicate_bars.get(symbol, ()) + twins
+                self.recording.record_event(
+                    "duplicate-stamps", at=at, sweep=label, symbol=symbol,
+                    count=len(twins),
+                    detail=(
+                        f"{len(twins)} stamp(s) served twice in one reply "
+                        f"({', '.join(bar.stamp.strftime('%H:%M') for bar in twins[:5])}); "
+                        "CONTEXT 4.5 gate 2 excludes a day carrying one"
+                    ),
+                )
             self.recording.record_bars(symbol, bars, sweep=label, at=at)
             self.recording.record_fetch(FetchOutcome(
                 symbol=symbol, sweep=label,
                 outcome=FETCH_OK if bars else FETCH_EMPTY,
                 bars=len(bars), at=at, attempt=attempt, elapsed_ms=elapsed,
             ))
+            if not bars:
+                # REVIEW_13 B10: an EMPTY answer is a not-answer, not a successful fetch. A feed
+                # replying 200 with an empty candle array used to count as complete, so no
+                # banner rose, every symbol froze on its last good prefix, and a blind screener
+                # rendered as a calm morning. It is recorded (above) and then treated exactly as
+                # a failure is: retried, deferred to the sweep's second pass, and reported.
+                last_error = "the feed answered with NO candles"
+                if tries < len(backoff):
+                    self.clock.sleep(backoff[tries])
+                    continue
+                return False
             return True
         return False
 
@@ -680,13 +932,69 @@ class LiveScreener:
             )
             return []
 
+        gates = self._battery(symbol, minutes)
         stock_day = self.pipeline.evaluate(
-            symbol, self.day, bias=bias, minutes=minutes, gates=self._battery(symbol, minutes)
+            symbol, self.day, bias=bias, minutes=minutes, gates=gates,
+            profile=self._profile(symbol, minutes, boundary, gates),
         )
         before = self.states[symbol]
         after = self._state_from(stock_day, boundary, previous=before)
         self.states[symbol] = after
-        return self._alerts_for(before, after, stock_day, boundary)
+        return self._alerts_for(after, stock_day, boundary)
+
+    def _profile(
+        self,
+        symbol: str,
+        minutes: Sequence[StoredBar],
+        boundary: datetime,
+        gates: DayGates | None,
+    ) -> DayProfile | None:
+        """CONTEXT 3.3's POC for this symbol -- computed ONCE, at 11:15, immutable thereafter.
+
+        The architect's ruling of 08-Aug-2026 on REVIEW_13 **B3**: *"the POC is fixed at 11:15
+        and immutable for the day; a window missing its late minutes is a completeness failure --
+        flag 'POC provisional / incomplete window' and never silently re-fix."* CONTEXT 3.3's
+        own last line says the same thing and the live layer did not implement it: the profile
+        was rebuilt from the bars in hand at every boundary, and :class:`SmartApiBarSource`
+        deliberately re-pulls the whole session each sweep, so the day's POC moved under alerts
+        that had already been delivered. Measured on the real lake over 290 symbol-days: it
+        moves on 2.76% of them if only the 11:14 bar is late -- the EXPECTED case, since that
+        bar closes at 11:15:00.0 and CONTEXT 4.4 measures it arriving ~0.2s later -- on 14.48%
+        if the last five minutes are, and on **53 real symbol-days a 1-5-minute-late window
+        flipped the 11:15 arming decision, in both directions**.
+
+        Pinned on the FIRST evaluation at or after 11:15 rather than at the 11:15 stamp alone,
+        because a symbol whose 11:15 poll was skipped must still get a POC; the window it is
+        built over is CONTEXT 3.3's 09:15-11:14 either way, whenever it is computed.
+
+        ``None`` before the POC boundary, which means "let the engine answer for the prefix it
+        was given" -- and before 11:15 that answer is *collecting*, not a verdict.
+        """
+        if boundary < sig.bar_close_stamp(self.day, sig.REFERENCE_BAR):
+            return None
+        pinned = self.profiles.get(symbol)
+        if pinned is not None:
+            return pinned
+        licence = None if gates is None else gates.poc_licence
+        profile = self.pipeline.profile_day(symbol, self.day, minutes, licence=licence)
+        if profile.poc_paise is None:
+            # No POC to pin yet -- a refused day, or a window with no candles at all. Nothing is
+            # cached, so a symbol whose data arrives late still gets its one honest pass.
+            return profile
+        self.profiles[symbol] = profile
+        missing = profile.missing_window_minutes
+        self.recording.record_event(
+            "poc-pinned", at=boundary, symbol=symbol,
+            poc_paise=str(profile.poc_paise),
+            window_minutes=profile.bar_count,
+            missing_minutes=missing,
+            detail=(
+                f"CONTEXT 3.3: POC fixed for the day at {boundary.strftime('%H:%M')}"
+                + (f" -- {POC_PROVISIONAL}: {missing} of "
+                   f"{profile.window.expected_minutes} window minute(s) absent" if missing else "")
+            ),
+        )
+        return profile
 
     def _battery(self, symbol: str, minutes: Sequence[StoredBar]) -> DayGates | None:
         """Which battery governs this symbol-day, and for a live morning, over these bars.
@@ -700,9 +1008,16 @@ class LiveScreener:
 
         Neither branch computes anything here: both call functions the backtester's own path
         calls, which is what keeps CONTEXT section 6 a property of the code.
+
+        **The live branch is handed the duplicate stamps too** (REVIEW_13 B2). ``merge_bars``
+        resolves a re-polled stamp so the ENGINE sees one bar per minute, which it must; running
+        the GATE over the merged day meant CONTEXT 4.5's first exclusion trigger could never
+        fire, so a vendor reply carrying two rows under one stamp passed a battery that the
+        settled battery refuses outright, and the surviving bar was the corrupt twin.
         """
         if self.posture == POSTURE_LIVE:
-            return oracle_free_battery(self.day, minutes)
+            twins = self.duplicate_bars.get(symbol, ())
+            return oracle_free_battery(self.day, tuple(minutes) + twins)
         return self.gates.get(symbol)
 
     def _state_from(
@@ -727,6 +1042,21 @@ class LiveScreener:
             # normal morning, not a verdict.
             if boundary < sig.bar_close_stamp(self.day, sig.REFERENCE_BAR):
                 return SymbolState(phase=PHASE_WAITING, detail="collecting", **base)
+            if PHASE_RANK.get(previous.phase, 0) >= PHASE_RANK[PHASE_TRIGGERED]:
+                # REVIEW_13 M5, which B2's fix makes reachable rather than theoretical: a
+                # duplicate stamp arriving at 12:00 now refuses the day, correctly -- and the
+                # symbol had an OPEN POSITION. Its four numbers must not simply leave the state:
+                # the trader is in that trade. The refusal is carried WITH them, and
+                # `_alerts_for` turns it into a loud failure alert rather than a silent
+                # disappearance from the watch list.
+                return replace(
+                    previous, phase=PHASE_REFUSED, refusal=stock_day.reason,
+                    detail=(
+                        f"the battery now REFUSES this day while a position is open: "
+                        f"{stock_day.reason}"
+                    ),
+                    minute_count=minutes, last_stamp=last_stamp,
+                )
             return SymbolState(
                 phase=PHASE_REFUSED, detail=stock_day.reason,
                 refusal=stock_day.reason, **base,
@@ -734,12 +1064,19 @@ class LiveScreener:
 
         signal = stock_day.signal
         assert signal is not None  # evaluated days always carry one
-        poc = stock_day.profile.poc_paise if stock_day.profile is not None else None
-        common = dict(base, poc_paise=poc, reference_paise=signal.reference_paise)
+        profile = stock_day.profile
+        poc = profile.poc_paise if profile is not None else None
+        missing = 0 if profile is None else profile.missing_window_minutes
+        common = dict(
+            base, poc_paise=poc, reference_paise=signal.reference_paise,
+            poc_provisional=bool(missing), poc_missing_minutes=missing,
+        )
 
         if signal.entry is None:
             phase = PHASE_ARMED if signal.final_state == sig.STATE_ARMED else PHASE_WAITING
-            return SymbolState(phase=phase, detail=_state_words(signal), **common)
+            return self._monotonic(
+                SymbolState(phase=phase, detail=_state_words(signal), **common), previous
+            )
 
         entry = signal.entry
         qty = (
@@ -764,12 +1101,46 @@ class LiveScreener:
         detail = entry.detail if phase in (PHASE_TRIGGERED, PHASE_IN_TRADE) else (
             "" if exit_event is None else exit_event.detail
         )
-        return SymbolState(
+        return self._monotonic(SymbolState(
             phase=phase, detail=detail,
             entry_paise=entry.entry_paise, stop_paise=entry.stop_paise,
             target_paise=entry.target_paise, qty=qty,
             exit_kind=exit_kind, exit_paise=exit_paise, **common,
+        ), previous)
+
+    def _monotonic(self, after: SymbolState, previous: SymbolState) -> SymbolState:
+        """Refuse a state that walks BACKWARDS along :data:`PHASE_RANK` (REVIEW_13 M3).
+
+        CONTEXT 3.4-2: *"the first qualifying cross CONSUMES the stock-day ... no re-entry after
+        any exit."* A vendor revision that turns an EXITED symbol back into IN-TRADE, or a
+        TRIGGERED one back into ARMED, is not a correction -- it is a state this strategy does
+        not have, and the alert machinery downstream then had to deal with it (the demonstrated
+        cost: the only exit the trader received said stop-loss while the screener's own final
+        state said target).
+
+        The regression is REFUSED and RECORDED, never absorbed: the earlier, further-along state
+        stands, and the recording carries the event so the morning after can see that the feed
+        contradicted itself.
+
+        The rank is read from the state's CONTENT (:func:`_reached_rank`) rather than from its
+        phase LABEL, because ``skipped`` is a sweep outcome laid over a real state: a symbol
+        that is in trade and missed one poll shows ``skipped`` while still carrying its entry,
+        and reading the label alone would let the ladder be reset by a single missed fetch.
+        """
+        was, now = _reached_rank(previous), _reached_rank(after)
+        if now >= was:
+            return after
+        self.recording.record_event(
+            "phase-regression-refused", at=self.clock.now(), symbol=after.symbol,
+            was=previous.phase, proposed=after.phase,
+            detail=(
+                f"{after.symbol}: the re-evaluation reads {after.phase!r} after {previous.phase!r}. "
+                "CONTEXT 3.4-2 consumes the stock-day at the first cross and allows no re-entry "
+                "after an exit, so the earlier state stands and the feed's disagreement is "
+                "recorded rather than acted on."
+            ),
         )
+        return previous
 
     def _square_off_bar_closed(self, boundary: datetime) -> bool:
         """Has the 15:00-15:15 candle actually closed? CONTEXT 3.4-5's square-off moment.
@@ -795,16 +1166,45 @@ class LiveScreener:
     # --- alerts -------------------------------------------------------------------
 
     def _alerts_for(
-        self, before: SymbolState, after: SymbolState, stock_day: StockDay, boundary: datetime
+        self, after: SymbolState, stock_day: StockDay, boundary: datetime
     ) -> list[RecordedAlert]:
+        """The alerts THIS STATE warrants -- derived from the state, never from the transition.
+
+        **REVIEW_13 B7 / B9 / M3 / M6 / M11.** The old rule fired on a transition INTO a phase,
+        and the TRIGGERED phase is only ever entered on the one boundary where
+        ``entry.close_stamp == boundary``. So any of CONTEXT 4.4's own normal degradations at
+        that boundary -- a failed skip-and-repoll, the hard deadline, a late vendor candle --
+        destroyed the one alert the morning exists to deliver, permanently and silently: the
+        dashboard still showed the position and the bell never rang. ARMED and EXITED
+        self-healed; TRIGGERED, the one with the four numbers on it, did not.
+
+        Stating the alerts as a function of the CURRENT state makes every one of them
+        self-healing: whatever was missed at 11:30 is derived again at 11:45, and the dedup key
+        below is what stops the same answer being sent twice. A feed that dies across an entry
+        boundary and heals now produces the alert it owes instead of a position the trader was
+        never told about (M11).
+        """
         out: list[RecordedAlert] = []
         symbol = after.symbol
-        if after.phase == PHASE_ARMED and before.phase != PHASE_ARMED:
+        entry = stock_day.signal.entry if stock_day.signal is not None else None
+
+        if after.phase == PHASE_REFUSED and after.entry_paise is not None:
+            # M5: the battery refused the day while a position is open. Loud, by name.
+            out.append(self._alert(ALERT_FAILURE, symbol, boundary, {
+                "detail": (
+                    f"{symbol}: {after.detail}. It is NOT being watched and 15:15 will not "
+                    "square it off -- the position is unmanaged by this tool."
+                ),
+                "refusal": after.refusal, "entry_paise": after.entry_paise,
+                "stop_paise": after.stop_paise, "target_paise": after.target_paise,
+                "qty": after.qty, "side": after.side,
+            }))
+        elif after.phase == PHASE_ARMED:
             out.append(self._alert(ALERT_ARMED, symbol, boundary, {
                 "side": after.side, "poc_paise": _num(after.poc_paise),
                 "reference_paise": after.reference_paise, "bias": after.bias,
             }))
-        if after.phase == PHASE_TRIGGERED and before.phase != PHASE_TRIGGERED:
+        elif after.entry_paise is not None:
             out.append(self._alert(ALERT_TRIGGER, symbol, boundary, {
                 # CONTEXT 4.4's payload, verbatim, plus the quantity CONTEXT 3.5 sizes.
                 "side": after.side,
@@ -818,10 +1218,10 @@ class LiveScreener:
                     None if after.entry_paise is None or after.stop_paise is None
                     else abs(after.entry_paise - after.stop_paise)
                 ),
-                "gap_entry": stock_day.signal.entry.gap_entry if stock_day.signal
-                and stock_day.signal.entry else None,
+                "entry_stamp": None if entry is None else entry.close_stamp.isoformat(),
+                "gap_entry": None if entry is None else entry.gap_entry,
             }))
-        if after.phase == PHASE_EXITED and before.phase != PHASE_EXITED:
+        if after.phase == PHASE_EXITED:
             kind = ALERT_SQUARE_OFF if after.exit_kind == sig.EXIT_SQUARE_OFF else ALERT_EXIT
             out.append(self._alert(kind, symbol, boundary, {
                 "exit_kind": after.exit_kind, "exit_paise": after.exit_paise,
@@ -838,15 +1238,87 @@ class LiveScreener:
             # read from -- an alert is forwarded, screenshotted and quoted, and the sentence has
             # to travel with it.
             body["disclosure"] = self.disclosure
+        state = self.states.get(symbol)
+        if state is not None and state.poc_provisional and kind in (ALERT_ARMED, ALERT_TRIGGER):
+            # CONTEXT 3.3 / B3's completeness flag, on the alert as well as on the screen: these
+            # are the two alerts whose numbers are computed off the pinned POC.
+            body["poc_note"] = POC_PROVISIONAL
+            body["poc_missing_minutes"] = state.poc_missing_minutes
         return RecordedAlert(kind=kind, symbol=symbol, at=at, payload=body)
 
+    @staticmethod
+    def _alert_key(alert: RecordedAlert) -> tuple[str, str, str]:
+        """``(symbol, kind, identity)`` -- the dedup key, re-cut (REVIEW_13 B334 / B9 / M6).
+
+        ``(symbol, kind)`` was right for the case CONTEXT 4.4 worries about -- the same trigger
+        re-derived at seventeen boundaries must be sent once -- and wrong for every case where
+        the tool has since changed its mind. It swallowed a corrected ARMED alert, the second
+        failure banner of the day, the real exit after a phase walked backwards, and a TRIGGER
+        whose entry price had moved. **The third element is the identity of the STATE being
+        alerted about**, anchored on the entry stamp for a trigger and on the four numbers that
+        stamp decides, so that:
+
+        * the same answer re-derived at every later boundary is ONE alert, as before;
+        * a DIFFERENT answer -- the entry that healed one sweep later from 2001.00/TP 2007.00/qty
+          500 to 2003.00/TP 2015.00/qty 250 -- is a second, delivered alert marked as a
+          correction, not silence;
+        * a second outage alerts (the failure key carries its own sweep), where
+          ``("-", "failure")`` was spent by the first one for the whole session.
+        """
+        payload = alert.payload
+        if alert.kind == ALERT_TRIGGER:
+            identity = "|".join(str(payload.get(name)) for name in (
+                "entry_stamp", "entry_paise", "stop_paise", "target_paise", "qty",
+            ))
+        elif alert.kind == ALERT_ARMED:
+            identity = "|".join(str(payload.get(name)) for name in (
+                "side", "poc_paise", "reference_paise",
+            ))
+        elif alert.kind in (ALERT_EXIT, ALERT_SQUARE_OFF):
+            identity = "|".join(str(payload.get(name)) for name in (
+                "exit_kind", "exit_paise", "qty",
+            ))
+        else:
+            identity = str(payload.get("sweep") or payload.get("detail", ""))
+        return (alert.symbol, alert.kind, identity)
+
     def _deliver(self, alert: RecordedAlert) -> bool:
-        """Record and deliver once. Returns False for a duplicate, which is never re-sent."""
-        key = (alert.symbol, alert.kind)
+        """Record and deliver an alert the state warrants. False when it says nothing new.
+
+        Three things happen here in a fixed order, and the order is the fix (REVIEW_13 B9, M23):
+
+        1. an alert whose identity has already been delivered is a byte-identical re-derivation
+           of the same answer, and is neither recorded nor sent -- that is the property CONTEXT
+           4.4's "no duplicate alerts" asks for, and the ONLY thing suppressed here;
+        2. an alert that SUPERSEDES an earlier one of the same kind is marked as a correction,
+           carrying what it replaces, and is **recorded before it is delivered** -- the old code
+           returned False above ``record_alert``, so a superseded trigger left no trace anywhere
+           and the recording could not show that anything had changed;
+        3. the dedup set reaches DISK before any sink fires. It used to be persisted at the end
+           of the sweep while the sinks fired in the middle of it, so a death in between left
+           ``alerts.jsonl`` holding alerts ``state.json`` did not, and even a correct resume
+           re-delivered them. The window was a whole sweep -- 75-105s over 210 symbols by
+           CONTEXT 4.4's own measurement, at the most failure-prone moment of the boundary.
+        """
+        key = self._alert_key(alert)
         if key in self.alerted:
             return False
-        self.alerted.add(key)
+        superseded = [
+            prior for prior in self.alerted
+            if prior[0] == alert.symbol and prior[1] == alert.kind
+        ]
+        if superseded:
+            alert = RecordedAlert(
+                kind=alert.kind, symbol=alert.symbol, at=alert.at,
+                payload=dict(
+                    alert.payload,
+                    correction=True,
+                    supersedes=sorted(prior[2] for prior in superseded),
+                ),
+            )
         self.recording.record_alert(alert)
+        self.alerted.add(key)
+        self.persist()
         for sink in self.sinks:
             sink.deliver(alert)
         return True
@@ -898,14 +1370,30 @@ class LiveScreener:
     # --- crash-safe resume ---------------------------------------------------------
 
     def persist(self) -> None:
-        """Write the intraday state. Called after every sweep, so a crash costs one boundary."""
+        """Write the intraday state. Called after every sweep AND before every alert is sent."""
         self.recording.write_state({
             "trade_date": self.day.isoformat(),
             "sweeps_done": list(self.sweeps_done),
             "banner": self.banner,
             "dry_run": self.dry_run,
-            "alerted": sorted(f"{symbol}|{kind}" for symbol, kind in self.alerted),
+            "alerted": sorted(
+                _ALERT_KEY_SEP.join(part) for part in self.alerted
+            ),
             "states": {symbol: state.as_dict() for symbol, state in sorted(self.states.items())},
+            # CONTEXT 3.3's POC survives the crash it was pinned before. A resume that re-pinned
+            # from a now-complete window would move the day's POC across a restart, which is the
+            # very thing B3 exists to stop -- and a restart is exactly when the window IS more
+            # complete than it was at 11:15.
+            "profiles": {
+                symbol: {
+                    "poc_paise": str(profile.poc_paise),
+                    "bar_count": profile.bar_count,
+                    "window_volume": profile.window_volume,
+                    "window_candles": profile.window.candles,
+                    "window_name": profile.window.name,
+                }
+                for symbol, profile in sorted(self.profiles.items())
+            },
         })
 
     def restore(self) -> bool:
@@ -914,6 +1402,11 @@ class LiveScreener:
         The BARS are not restored from ``state.json`` -- they are re-read from the recording's
         own candle files, which is the whole reason those files are append-only. A resumed
         screener therefore continues from the same bytes it had, not from a summary of them.
+
+        **Everything else is restored too, which it was not** (REVIEW_13 B8): the per-symbol
+        states, so a resumed screener has not forgotten that a symbol is IN TRADE; the pinned
+        POCs, so CONTEXT 3.3's fixed POC survives a restart; and the duplicate stamps the
+        recording witnessed, so a day gate 2 refused before the crash stays refused after it.
         """
         state = self.recording.read_state()
         if not state:
@@ -926,15 +1419,36 @@ class LiveScreener:
         self.sweeps_done = list(state.get("sweeps_done", ()))
         self.banner = str(state.get("banner", ""))
         self.alerted = {
-            (part.split("|", 1)[0], part.split("|", 1)[1])
-            for part in state.get("alerted", ()) if "|" in part
+            tuple(part.split(_ALERT_KEY_SEP, 2))  # type: ignore[misc]
+            for part in state.get("alerted", ())
+            if part.count(_ALERT_KEY_SEP) >= 2
         }
+        for symbol, payload in (state.get("states") or {}).items():
+            if symbol in self.states:
+                self.states[symbol] = SymbolState.from_dict(payload)
+        for symbol, payload in (state.get("profiles") or {}).items():
+            self.profiles[symbol] = DayProfile(
+                day=self.day,
+                window=ProfileWindow(
+                    name=str(payload.get("window_name", SPEC_WINDOW.name)),
+                    candles=int(payload.get("window_candles", SPEC_WINDOW.candles)),
+                ),
+                reason=POC_OK,
+                poc_paise=Fraction(str(payload["poc_paise"])),
+                bar_count=int(payload.get("bar_count", 0)),
+                window_volume=int(payload.get("window_volume", 0)),
+            )
         for symbol in self.symbols:
             self.bars[symbol] = self.recording.bars(symbol, self.day)
+            twins = self.recording.duplicate_bars(symbol, self.day)
+            if twins:
+                self.duplicate_bars[symbol] = twins
         self.recording.record_event(
             "resumed", at=self.clock.now(),
             detail=f"{len(self.sweeps_done)} sweep(s) already done; "
-                   f"{sum(1 for s in self.bars.values() if s)} symbol(s) restored from candles",
+                   f"{sum(1 for s in self.bars.values() if s)} symbol(s) restored from candles; "
+                   f"{len(self.profiles)} pinned POC(s); "
+                   f"{len(self.alerted)} alert(s) already delivered",
         )
         return True
 
@@ -972,6 +1486,23 @@ def wait_for_boundary(
         clock.sleep(nap)
         waited += nap
     return waited
+
+
+def _reached_rank(state: SymbolState) -> int:
+    """How far along :data:`PHASE_RANK` this state has actually got, read from its CONTENT.
+
+    An exit price means the day is over; an entry price means the stock-day is CONSUMED
+    (CONTEXT 3.4-2) whatever the sweep is currently able to fetch; ``armed`` is a live reading
+    of the state machine. Content rather than label, so a ``skipped`` sweep -- which keeps every
+    other field and only relabels the phase -- cannot reset the ladder.
+    """
+    if state.exit_kind is not None:
+        return PHASE_RANK[PHASE_EXITED]
+    if state.entry_paise is not None:
+        return PHASE_RANK[PHASE_TRIGGERED]
+    if state.phase == PHASE_ARMED:
+        return PHASE_RANK[PHASE_ARMED]
+    return PHASE_RANK[PHASE_WAITING]
 
 
 def _state_words(signal: sig.SignalDay) -> str:
@@ -1032,7 +1563,7 @@ def build_live_screener(
     dry_run: bool = True,
     allow_network: bool = False,
     calendar: TradingCalendar | None = None,
-    calendar_source: str = CALENDAR_PUBLISHED,
+    calendar_source: str | None = None,
     master_file: str | None = None,
 ) -> LiveScreener:
     """Wire the screener over the local stores. ``mode`` is ``"replay"`` or ``"live"``.
@@ -1061,15 +1592,55 @@ def build_live_screener(
     if mode not in ("replay", "live"):
         raise ScreenerError(f"mode must be 'replay' or 'live', got {mode!r}.")
     live = mode == "live"
-    chosen_master = master_file or _master_for(mode, day=day, recording=recording)
-
-    runner, master_path, _ca = bt.build_runner(
-        symbols, day, day, data_dir=data_dir, cache_dir=cache_dir,
-        seed_from=seed_from if seed_from is not None else day,
-        label="live-screener", allow_network=allow_network,
-        master_file=chosen_master,
+    if live and LIVE_BLOCKING_QUESTIONS:
+        raise BlockedByOpenQuestion(
+            "A class-A question stands between this morning and an answer anyone may rely on, "
+            "so the screener refuses to start rather than produce one (CLAUDE.md rule 1):\n\n"
+            + "\n\n".join(f"{name}: {text}" for name, text in LIVE_BLOCKING_QUESTIONS)
+        )
+    chosen_master, master_reason = _master_for(
+        mode, day=day, recording=recording, master_file=master_file or None
     )
-    wanted = tuple(symbol.strip().upper() for symbol in symbols)
+    if live:
+        # The CHEAPEST prerequisite, checked first and by name. Q-29 makes the day's own dump
+        # structural, and an operator whose pre-open fetch did not land should read THAT rather
+        # than whichever of the morning's other inputs happens to be resolved next.
+        _require_day_master(chosen_master, cache_dir=cache_dir)
+    seed = seed_from if seed_from is not None else day - timedelta(days=SEED_LOOKBACK_DAYS)
+    if live and calendar is None:
+        # REVIEW_13 B6: the derived calendar cannot answer for TODAY and never will be able to.
+        calendar = _live_calendar(
+            day=day, first_day=seed - timedelta(days=bt.CALENDAR_LEAD_DAYS),
+            data_dir=data_dir, cache_dir=cache_dir, allow_network=allow_network,
+        )
+        calendar_source = CALENDAR_PUBLISHED
+
+    try:
+        runner, master_path, _ca = bt.build_runner(
+            symbols, day, day, data_dir=data_dir, cache_dir=cache_dir,
+            seed_from=seed,
+            label="live-screener", allow_network=allow_network,
+            master_file=chosen_master, calendar=calendar,
+        )
+    except bt.BacktestError as exc:
+        # REVIEW_13 M24: the module's error contract does not leak. A caller that catches
+        # ScreenerError catches every way this function refuses, including the day's-own-master
+        # prerequisite -- which is the refusal the STOP-rule test now asserts by equality.
+        if chosen_master is not None and "instrument master" in str(exc):
+            raise ScreenerError(f"{MASTER_MISSING_REFUSAL}. {exc}") from exc
+        raise ScreenerError(str(exc)) from exc
+
+    supplied = tuple(symbol.strip().upper() for symbol in symbols)
+    wanted, excluded = _screened_universe(
+        supplied, live=live, data_dir=data_dir, residual=runner.residual
+    )
+    if live and not wanted:
+        raise ScreenerError(
+            "no SETTLED symbol left to screen. CONTEXT 4.7 (QUESTIONS.md Q-30, architect "
+            "08-Aug-2026) screens the settled universe only, and every symbol asked for is "
+            "quarantined or absent from the chunk-5B disclosed-residual register: "
+            + ", ".join(f"{symbol} ({why})" for symbol, why in excluded)
+        )
     biases: dict[str, DailyBias] = {}
     for symbol in wanted:
         series, _reason = runner.bias_map(symbol)
@@ -1079,11 +1650,22 @@ def build_live_screener(
     # CONTEXT 4.7: a live morning has no stored day to gate and no oracle to gate it against, so
     # the settled battery is not computed at all and the oracle-free one runs per sweep.
     gates = {} if live else full_day_gates(runner.pipeline, wanted, day)
+    governing_calendar = calendar if calendar is not None else runner.calendar
     recording.open_session(_manifest(
         runner=runner, day=day, symbols=wanted, master_path=master_path,
         mode=mode, dry_run=dry_run,
-        calendar=calendar if calendar is not None else runner.calendar,
-        calendar_source=calendar_source,
+        calendar=governing_calendar,
+        # REVIEW_13 M17/F2: the source is what ACTUALLY governed, never a parameter default. A
+        # replay is judged by the store-derived calendar the backtester itself uses, and saying
+        # "published" beside a `calendar_source_field` of "derived" was the manifest
+        # contradicting itself in one block.
+        calendar_source=(
+            calendar_source if calendar_source is not None
+            else (CALENDAR_PUBLISHED if live else CALENDAR_STORE_SCAN)
+        ),
+        excluded=excluded,
+        master_reason=master_reason,
+        seed_from=seed,
     ))
     recording.write_bias({
         symbol: {
@@ -1103,7 +1685,128 @@ def build_live_screener(
         cost_paise=runner.spec.cost_paise, dry_run=dry_run,
         posture=POSTURE_LIVE if live else POSTURE_SETTLED,
         disclosure=LIVE_DISCLOSURE if live else "",
+        excluded=excluded,
+        master_reason=master_reason,
     )
+
+
+def _require_day_master(filename: str | None, *, cache_dir: Path | None) -> Path:
+    """THE DAY'S OWN dump must be on disk before a live morning goes any further (Q-29).
+
+    Checked here rather than only inside :func:`acumen.backtest.named_master` so that the
+    refusal is the SCREENER's own -- :data:`MASTER_MISSING_REFUSAL`, asserted by equality in the
+    safety suite -- and so that it comes first, before the calendar, the factor tables or the
+    32 MB the loader would otherwise read. The file is not opened here; ``build_runner`` still
+    loads and hashes it, which is what puts its sha256 in the recording.
+    """
+    from .config import MASTER_CACHE_SUBDIR, load_config
+
+    assert filename is not None  # a live mode always resolves to the day's own dump
+    cache = Path(cache_dir) if cache_dir is not None else load_config(
+        include_env=False
+    ).path("cache_root")
+    path = cache / MASTER_CACHE_SUBDIR / filename
+    if not path.is_file():
+        raise ScreenerError(
+            f"{MASTER_MISSING_REFUSAL}. It is not at {path}. Run the pre-open refresh "
+            "(`python -m acumen.run_screener --mode live --day <today> --refresh "
+            "--allow-network`), or fetch the dump directly "
+            "(`python -m acumen.instrument_master --allow-network`)."
+        )
+    return path
+
+
+def _live_calendar(
+    *, day: date, first_day: date, data_dir: Path | None, cache_dir: Path | None,
+    allow_network: bool,
+) -> TradingCalendar:
+    """The calendar a live morning runs on -- the PUBLISHED master, over the store's history.
+
+    REVIEW_13 **B6**: ``build_runner`` derived its calendar from the daily store, which refuses
+    any range holding a date it has never attempted (Q-3 safeguard 1). On a live morning that
+    date is TODAY, whose bhavcopy cannot exist during today, and Q-19's guard stops the pre-open
+    top-up strictly before it -- so the mode failed to start on every real morning, exit 1.
+    Reproduced by this chunk's review against the real stores; the same command for a day the
+    store covers started perfectly, which isolated the cause exactly.
+
+    The holiday master is DAY-CACHED (CONTEXT 4.1's own courtesy rule), so an offline morning
+    runs on the file the pre-open refresh already pulled and nothing reaches out here.
+    """
+    from . import calendar as cal
+    from .config import load_config
+    from .daily_store import DailyStore
+
+    config = load_config(include_env=False)
+    data = Path(data_dir) if data_dir is not None else config.path("data_root")
+    cache = Path(cache_dir) if cache_dir is not None else config.path("cache_root")
+    try:
+        published = cal.fetch_calendar(
+            cache_dir=cache, today=day, allow_network=allow_network
+        )
+    except Exception as exc:
+        raise ScreenerError(
+            f"a LIVE morning takes its calendar from the PUBLISHED NSE holiday master (CONTEXT "
+            f"4.7 / QUESTIONS.md C5) and it is not available: {type(exc).__name__}: {exc}. The "
+            "store-derived calendar cannot answer for today by construction, so there is no "
+            "fallback -- run the pre-open refresh with --allow-network."
+        ) from exc
+    try:
+        return cal.live_trading_calendar(
+            published, store=DailyStore.at(data / "daily_store"),
+            first_day=first_day, day=day,
+        )
+    except Exception as exc:
+        raise ScreenerError(
+            f"the live calendar cannot be built for {day.isoformat()}: "
+            f"{type(exc).__name__}: {exc}"
+        ) from exc
+
+
+def _screened_universe(
+    symbols: Sequence[str], *, live: bool, data_dir: Path | None, residual: Mapping
+) -> tuple[tuple[str, ...], tuple[tuple[str, str], ...]]:
+    """Which symbols a session screens, and which it refuses to -- CONTEXT 4.7 / Q-30.
+
+    The architect's 08-Aug-2026 ruling on REVIEW_13, option (a): *"a live morning screens the
+    204 SETTLED symbols only -- the screener alerts on what the backtester validated; the 6
+    quarantined (APLAPOLLO, ASTRAL, IEX, NTPC, UPL, VBL) are never screened and the startup
+    banner names them excluded."*
+
+    REVIEW_13 **M2** measured what the alternative cost: a live morning swept the raw F&O list,
+    all six quarantined symbols included, and no live module read the settled register at all.
+    The backtester walked ZERO of their days -- 0 rows of 495,312 -- while their own gate-1
+    refusal rate is 22.1%-47.2% (32.8% pooled) against a disclosed 0.5229%. The sentence on
+    every live alert was calibrated to a population that excluded exactly the symbols most
+    likely to break it.
+
+    The register is the chunk-5B disclosed-residual ledger, which CONTEXT 4.6 already makes a
+    chunk-9 duty to read; ``runner.residual`` is the copy ``build_runner`` has already loaded,
+    so this decides nothing on its own and reads no second source of truth. A symbol with NO row
+    at all is excluded too, and named: it is a symbol the backtester never walked, which is the
+    ruling's own test.
+
+    A REPLAY screens whatever it is asked to. A past day has its bhavcopy and its verdict; a
+    quarantined symbol replayed deliberately is a diagnostic, not an alert anybody trades on.
+    """
+    supplied = tuple(dict.fromkeys(symbol.strip().upper() for symbol in symbols))
+    if not live:
+        return supplied, ()
+    del data_dir  # the register travels on the runner; there is no second lookup
+    screened: list[str] = []
+    excluded: list[tuple[str, str]] = []
+    for symbol in supplied:
+        entry = residual.get(symbol)
+        if entry is None:
+            excluded.append((symbol, "not in the chunk-5B register: the backtester never walked it"))
+        elif str(entry.status).strip().lower() != "settled":
+            why = entry.residual_reason.strip() or (
+                f"gate 1P proves {entry.gate1p_pass:,} of {entry.gate1p_total:,} stored days; "
+                "the chunk-9B run walked none of them"
+            )
+            excluded.append((symbol, f"{entry.status} (CONTEXT 4.6) -- {why}"))
+        else:
+            screened.append(symbol)
+    return tuple(screened), tuple(excluded)
 
 
 def day_master_filename(day: date) -> str:
@@ -1119,26 +1822,60 @@ def day_master_filename(day: date) -> str:
     return master_cache_path(".", day).name
 
 
-def _master_for(mode: str, *, day: date, recording: LiveRecording) -> str | None:
-    """Which instrument master governs this session (CONTEXT 4.7). ``None`` means the Q-20 pin.
+def _master_for(
+    mode: str, *, day: date, recording: LiveRecording, master_file: str | None = None
+) -> tuple[str | None, str]:
+    """Which instrument master governs, and WHY. ``None`` means the Q-20 pin (CONTEXT 4.7).
 
     Live: the day's own dump, always, and its absence is a refusal rather than a fallback.
     Replay: the recording's own pin when the recording already names one -- which is what makes
     section 6's guarantee hold PER DAY -- and otherwise the config pin, which is the law for
     every historical day.
+
+    **``master_file`` is FENCED to the two cases CONTEXT 4.7 licenses** (REVIEW_13 **M9**). It
+    used to short-circuit this resolution entirely -- ``master_file or _master_for(...)`` -- for
+    ``mode="live"`` too, so a live session could run on the Q-20 pin while the preflight, which
+    derived its provenance line from the MODE rather than from the FILE, printed "THIS DAY'S OWN
+    dump". B344's refusal had an unguarded bypass straight through it. A live caller may now
+    name only the day's own dump; anything else is refused by name.
+
+    The REASON is returned beside the filename for the same finding's other half: the sentence
+    the operator reads is now derived from the file that was actually resolved.
     """
     if mode == "live":
-        return day_master_filename(day)
+        wanted = day_master_filename(day)
+        if master_file is not None and master_file != wanted:
+            raise ScreenerError(
+                f"a LIVE morning may run only on THE DAY'S OWN instrument master "
+                f"({wanted}); {master_file!r} was named instead. CONTEXT 4.7 / QUESTIONS.md "
+                "Q-29 licenses master_file for exactly two things -- this morning's own "
+                "pre-open dump, and the master a live RECORDING was made under when that "
+                "recording is replayed -- and the Q-20 pin governs the historical ledger, "
+                "never a live session."
+            )
+        return wanted, (
+            "THIS DAY'S OWN dump (CONTEXT 4.7 / Q-29 -- the trader's chart as of this morning)"
+        )
+    if master_file is not None:
+        return master_file, (
+            f"{master_file}, named explicitly by the replay's caller (CONTEXT 4.7: the master "
+            "a recording was made under)"
+        )
     if recording.exists():
         recorded = recording.read_manifest().get("master_file")
         if recorded:
-            return str(recorded)
-    return None
+            return str(recorded), (
+                f"{recorded}, the RECORDING'S OWN pin -- a day is replayed under the ticks it "
+                "ran on (CONTEXT 4.7 / Q-29), so section 6 holds per day"
+            )
+    return None, "the Q-20 config pin, which is the law for every historical day"
 
 
 def _manifest(
     *, runner, day: date, symbols: Sequence[str], master_path: Path, mode: str,
     dry_run: bool, calendar: TradingCalendar, calendar_source: str,
+    excluded: Sequence[tuple[str, str]] = (), master_reason: str = "",
+    seed_from: date | None = None,
 ) -> dict:
     """Everything the replay needs to know about the machine this day ran on."""
     spec = runner.spec
@@ -1147,6 +1884,15 @@ def _manifest(
         "mode": mode,
         "dry_run": dry_run,
         "spec_version": bt.SPEC_VERSION,
+        # CONTEXT 4.7 / Q-30: which symbols were NOT screened, and why. A universe six short
+        # with no record of which six is a universe nobody can check (REVIEW_13 M2).
+        "excluded_symbols": [
+            {"symbol": symbol, "reason": reason} for symbol, reason in excluded
+        ],
+        "master_reason": master_reason,
+        # CONTEXT 3.2's carry needs history to carry FROM (REVIEW_13 B1). Recorded so a replay
+        # can prove which bias series the morning ran on.
+        "seed_from": None if seed_from is None else seed_from.isoformat(),
         "code_sha": spec.code_sha,
         "config_digest": spec.digest(),
         "master_file": master_path.name,
@@ -1204,6 +1950,12 @@ def master_tick_divergence(
 
 
 __all__ = [
+    "LIVE_BLOCKING_QUESTIONS",
+    "LIVE_RESIDUAL_BRACKET",
+    "MASTER_MISSING_REFUSAL",
+    "PHASE_RANK",
+    "POC_PROVISIONAL",
+    "SEED_LOOKBACK_DAYS",
     "ALERT_ARMED",
     "ALERT_EXIT",
     "ALERT_FAILURE",
