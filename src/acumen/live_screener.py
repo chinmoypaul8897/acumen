@@ -1831,7 +1831,15 @@ def full_day_gates(
     for symbol in symbols:
         minutes: tuple[StoredBar, ...] = tuple(pipeline.minute_store.minutes(symbol, day))
         if not minutes and source is not None:
-            minutes = whole_day_from_source(source, symbol, day)
+            try:
+                minutes = whole_day_from_source(source, symbol, day)
+            except Exception:
+                # A source that cannot answer here is not an error: ``--preflight-only`` runs on
+                # a source that REFUSES to be used at all, and a bar source is allowed to fail
+                # (CONTEXT 4.3 calls a transient failure normal). The symbol simply has no
+                # whole-day battery, which :meth:`LiveScreener._evaluate` then refuses BY NAME
+                # rather than by gating a prefix (REVIEW_13 M22).
+                minutes = ()
         if minutes:
             out[symbol] = pipeline.gate_day(symbol, day, minutes)
     return out

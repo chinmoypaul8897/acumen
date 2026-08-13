@@ -440,6 +440,14 @@ def test_M22_a_RECORDING_supplies_the_whole_day_battery_the_lake_does_not_hold(
         "the recording holds the same session the lake does, so the battery is the same battery"
     )
 
+    # ...and a source that REFUSES to be used -- which is exactly what `--preflight-only` runs
+    # on -- leaves the symbol without a battery rather than turning a preflight into a crash.
+    from acumen.run_screener import PreflightOnlySource
+
+    assert ls.full_day_gates(
+        pipeline, (SYMBOL,), LIVE_DAY, source=PreflightOnlySource()
+    ) == {}
+
 
 # --- Q2: a gap INSIDE the history is refused ----------------------------------------------------
 
