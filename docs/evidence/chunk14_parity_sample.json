@@ -1,0 +1,6602 @@
+{
+  "generated_from": "docs/evidence/chunk14_parity.py",
+  "ledger": "C:\\Users\\chinm\\acumen-data\\backtests\\chunk9b_full\\ledger.jsonl",
+  "strata_counts": {
+    "inside-bar-carry": 62680,
+    "no-data": 2,
+    "rule-1-breakout": 276541,
+    "rule-2-sweep": 60527,
+    "rule-3-no-1min-carry": 7,
+    "rule-3-no-break-carry": 5,
+    "rule-3-outside-bar": 6664,
+    "rule-3-tie": 62
+  },
+  "summary": {
+    "days": 15,
+    "judged": 14,
+    "matched": 14,
+    "mismatched": 0,
+    "disclosed_oracle_refused": 1,
+    "mismatches": [],
+    "disclosed": [
+      {
+        "symbol": "ADANIPORTS",
+        "day": "2026-02-06",
+        "reason": "gap 52.135% is above the band [-0.1, 5.0]",
+        "live_alerts": [
+          "armed",
+          "trigger",
+          "square-off"
+        ]
+      }
+    ]
+  },
+  "days": [
+    {
+      "symbol": "360ONE",
+      "day": "2026-01-01",
+      "stratum": "bias_rule:inside-bar-carry",
+      "source": "lake",
+      "oracle_passed": true,
+      "oracle_reason": "the FULL CONTEXT 4.6 battery accepts this day",
+      "judged": true,
+      "matched": true,
+      "mismatches": [],
+      "transitions_equal": true,
+      "live_alerts": [
+        "armed",
+        "trigger",
+        "exit"
+      ],
+      "backtest_alerts": [
+        "armed",
+        "trigger",
+        "exit"
+      ],
+      "day_fields": {
+        "live": {
+          "bias": "bullish",
+          "bias_rule": "inside-bar-carry",
+          "side": "long",
+          "poc_paise": "117875",
+          "reference_paise": 117780
+        },
+        "backtest": {
+          "bias": "bullish",
+          "bias_rule": "inside-bar-carry",
+          "side": "long",
+          "poc_paise": "117875",
+          "reference_paise": 117780
+        }
+      },
+      "boundaries": [
+        {
+          "live": {
+            "boundary": "11:15",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "11:15",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "11:30",
+            "phase": "triggered",
+            "entry_paise": 117910,
+            "stop_paise": 117750,
+            "target_paise": 118390,
+            "qty": 625,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "11:30",
+            "phase": "triggered",
+            "entry_paise": 117910,
+            "stop_paise": 117750,
+            "target_paise": 118390,
+            "qty": 625,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "11:45",
+            "phase": "in-trade",
+            "entry_paise": 117910,
+            "stop_paise": 117750,
+            "target_paise": 118390,
+            "qty": 625,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "11:45",
+            "phase": "in-trade",
+            "entry_paise": 117910,
+            "stop_paise": 117750,
+            "target_paise": 118390,
+            "qty": 625,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "12:00",
+            "phase": "exited",
+            "entry_paise": 117910,
+            "stop_paise": 117750,
+            "target_paise": 118390,
+            "qty": 625,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 117750
+          },
+          "backtest": {
+            "boundary": "12:00",
+            "phase": "exited",
+            "entry_paise": 117910,
+            "stop_paise": 117750,
+            "target_paise": 118390,
+            "qty": 625,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 117750
+          }
+        },
+        {
+          "live": {
+            "boundary": "12:15",
+            "phase": "exited",
+            "entry_paise": 117910,
+            "stop_paise": 117750,
+            "target_paise": 118390,
+            "qty": 625,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 117750
+          },
+          "backtest": {
+            "boundary": "12:15",
+            "phase": "exited",
+            "entry_paise": 117910,
+            "stop_paise": 117750,
+            "target_paise": 118390,
+            "qty": 625,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 117750
+          }
+        },
+        {
+          "live": {
+            "boundary": "12:30",
+            "phase": "exited",
+            "entry_paise": 117910,
+            "stop_paise": 117750,
+            "target_paise": 118390,
+            "qty": 625,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 117750
+          },
+          "backtest": {
+            "boundary": "12:30",
+            "phase": "exited",
+            "entry_paise": 117910,
+            "stop_paise": 117750,
+            "target_paise": 118390,
+            "qty": 625,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 117750
+          }
+        },
+        {
+          "live": {
+            "boundary": "12:45",
+            "phase": "exited",
+            "entry_paise": 117910,
+            "stop_paise": 117750,
+            "target_paise": 118390,
+            "qty": 625,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 117750
+          },
+          "backtest": {
+            "boundary": "12:45",
+            "phase": "exited",
+            "entry_paise": 117910,
+            "stop_paise": 117750,
+            "target_paise": 118390,
+            "qty": 625,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 117750
+          }
+        },
+        {
+          "live": {
+            "boundary": "13:00",
+            "phase": "exited",
+            "entry_paise": 117910,
+            "stop_paise": 117750,
+            "target_paise": 118390,
+            "qty": 625,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 117750
+          },
+          "backtest": {
+            "boundary": "13:00",
+            "phase": "exited",
+            "entry_paise": 117910,
+            "stop_paise": 117750,
+            "target_paise": 118390,
+            "qty": 625,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 117750
+          }
+        },
+        {
+          "live": {
+            "boundary": "13:15",
+            "phase": "exited",
+            "entry_paise": 117910,
+            "stop_paise": 117750,
+            "target_paise": 118390,
+            "qty": 625,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 117750
+          },
+          "backtest": {
+            "boundary": "13:15",
+            "phase": "exited",
+            "entry_paise": 117910,
+            "stop_paise": 117750,
+            "target_paise": 118390,
+            "qty": 625,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 117750
+          }
+        },
+        {
+          "live": {
+            "boundary": "13:30",
+            "phase": "exited",
+            "entry_paise": 117910,
+            "stop_paise": 117750,
+            "target_paise": 118390,
+            "qty": 625,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 117750
+          },
+          "backtest": {
+            "boundary": "13:30",
+            "phase": "exited",
+            "entry_paise": 117910,
+            "stop_paise": 117750,
+            "target_paise": 118390,
+            "qty": 625,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 117750
+          }
+        },
+        {
+          "live": {
+            "boundary": "13:45",
+            "phase": "exited",
+            "entry_paise": 117910,
+            "stop_paise": 117750,
+            "target_paise": 118390,
+            "qty": 625,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 117750
+          },
+          "backtest": {
+            "boundary": "13:45",
+            "phase": "exited",
+            "entry_paise": 117910,
+            "stop_paise": 117750,
+            "target_paise": 118390,
+            "qty": 625,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 117750
+          }
+        },
+        {
+          "live": {
+            "boundary": "14:00",
+            "phase": "exited",
+            "entry_paise": 117910,
+            "stop_paise": 117750,
+            "target_paise": 118390,
+            "qty": 625,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 117750
+          },
+          "backtest": {
+            "boundary": "14:00",
+            "phase": "exited",
+            "entry_paise": 117910,
+            "stop_paise": 117750,
+            "target_paise": 118390,
+            "qty": 625,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 117750
+          }
+        },
+        {
+          "live": {
+            "boundary": "14:15",
+            "phase": "exited",
+            "entry_paise": 117910,
+            "stop_paise": 117750,
+            "target_paise": 118390,
+            "qty": 625,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 117750
+          },
+          "backtest": {
+            "boundary": "14:15",
+            "phase": "exited",
+            "entry_paise": 117910,
+            "stop_paise": 117750,
+            "target_paise": 118390,
+            "qty": 625,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 117750
+          }
+        },
+        {
+          "live": {
+            "boundary": "14:30",
+            "phase": "exited",
+            "entry_paise": 117910,
+            "stop_paise": 117750,
+            "target_paise": 118390,
+            "qty": 625,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 117750
+          },
+          "backtest": {
+            "boundary": "14:30",
+            "phase": "exited",
+            "entry_paise": 117910,
+            "stop_paise": 117750,
+            "target_paise": 118390,
+            "qty": 625,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 117750
+          }
+        },
+        {
+          "live": {
+            "boundary": "14:45",
+            "phase": "exited",
+            "entry_paise": 117910,
+            "stop_paise": 117750,
+            "target_paise": 118390,
+            "qty": 625,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 117750
+          },
+          "backtest": {
+            "boundary": "14:45",
+            "phase": "exited",
+            "entry_paise": 117910,
+            "stop_paise": 117750,
+            "target_paise": 118390,
+            "qty": 625,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 117750
+          }
+        },
+        {
+          "live": {
+            "boundary": "15:00",
+            "phase": "exited",
+            "entry_paise": 117910,
+            "stop_paise": 117750,
+            "target_paise": 118390,
+            "qty": 625,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 117750
+          },
+          "backtest": {
+            "boundary": "15:00",
+            "phase": "exited",
+            "entry_paise": 117910,
+            "stop_paise": 117750,
+            "target_paise": 118390,
+            "qty": 625,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 117750
+          }
+        },
+        {
+          "live": {
+            "boundary": "15:15",
+            "phase": "exited",
+            "entry_paise": 117910,
+            "stop_paise": 117750,
+            "target_paise": 118390,
+            "qty": 625,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 117750
+          },
+          "backtest": {
+            "boundary": "15:15",
+            "phase": "exited",
+            "entry_paise": 117910,
+            "stop_paise": 117750,
+            "target_paise": 118390,
+            "qty": 625,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 117750
+          }
+        },
+        {
+          "live": {
+            "boundary": "15:30",
+            "phase": "exited",
+            "entry_paise": 117910,
+            "stop_paise": 117750,
+            "target_paise": 118390,
+            "qty": 625,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 117750
+          },
+          "backtest": {
+            "boundary": "15:30",
+            "phase": "exited",
+            "entry_paise": 117910,
+            "stop_paise": 117750,
+            "target_paise": 118390,
+            "qty": 625,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 117750
+          }
+        }
+      ],
+      "note": ""
+    },
+    {
+      "symbol": "FORCEMOT",
+      "day": "2024-02-14",
+      "stratum": "bias_rule:no-data",
+      "source": "lake",
+      "oracle_passed": true,
+      "oracle_reason": "the FULL CONTEXT 4.6 battery accepts this day",
+      "judged": true,
+      "matched": true,
+      "mismatches": [],
+      "transitions_equal": true,
+      "live_alerts": [
+        "armed"
+      ],
+      "backtest_alerts": [
+        "armed"
+      ],
+      "day_fields": {
+        "live": {
+          "bias": "bearish",
+          "bias_rule": "no-data",
+          "side": "short",
+          "poc_paise": "440250",
+          "reference_paise": 439700
+        },
+        "backtest": {
+          "bias": "bearish",
+          "bias_rule": "no-data",
+          "side": "short",
+          "poc_paise": "440250",
+          "reference_paise": 439700
+        }
+      },
+      "boundaries": [
+        {
+          "live": {
+            "boundary": "11:15",
+            "phase": "waiting",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "11:15",
+            "phase": "waiting",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "11:30",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "11:30",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "11:45",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "11:45",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "12:00",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "12:00",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "12:15",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "12:15",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "12:30",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "12:30",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "12:45",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "12:45",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "13:00",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "13:00",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "13:15",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "13:15",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "13:30",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "13:30",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "13:45",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "13:45",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "14:00",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "14:00",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "14:15",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "14:15",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "14:30",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "14:30",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "14:45",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "14:45",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "15:00",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "15:00",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "15:15",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "15:15",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "15:30",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "15:30",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        }
+      ],
+      "note": ""
+    },
+    {
+      "symbol": "360ONE",
+      "day": "2026-01-05",
+      "stratum": "bias_rule:rule-1-breakout",
+      "source": "lake",
+      "oracle_passed": true,
+      "oracle_reason": "the FULL CONTEXT 4.6 battery accepts this day",
+      "judged": true,
+      "matched": true,
+      "mismatches": [],
+      "transitions_equal": true,
+      "live_alerts": [
+        "armed",
+        "trigger",
+        "exit"
+      ],
+      "backtest_alerts": [
+        "armed",
+        "trigger",
+        "exit"
+      ],
+      "day_fields": {
+        "live": {
+          "bias": "bullish",
+          "bias_rule": "rule-1-breakout",
+          "side": "long",
+          "poc_paise": "120435",
+          "reference_paise": 120420
+        },
+        "backtest": {
+          "bias": "bullish",
+          "bias_rule": "rule-1-breakout",
+          "side": "long",
+          "poc_paise": "120435",
+          "reference_paise": 120420
+        }
+      },
+      "boundaries": [
+        {
+          "live": {
+            "boundary": "11:15",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "11:15",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "11:30",
+            "phase": "triggered",
+            "entry_paise": 120710,
+            "stop_paise": 120260,
+            "target_paise": 122060,
+            "qty": 222,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "11:30",
+            "phase": "triggered",
+            "entry_paise": 120710,
+            "stop_paise": 120260,
+            "target_paise": 122060,
+            "qty": 222,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "11:45",
+            "phase": "in-trade",
+            "entry_paise": 120710,
+            "stop_paise": 120260,
+            "target_paise": 122060,
+            "qty": 222,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "11:45",
+            "phase": "in-trade",
+            "entry_paise": 120710,
+            "stop_paise": 120260,
+            "target_paise": 122060,
+            "qty": 222,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "12:00",
+            "phase": "exited",
+            "entry_paise": 120710,
+            "stop_paise": 120260,
+            "target_paise": 122060,
+            "qty": 222,
+            "exit_kind": "target-hit",
+            "exit_paise": 122060
+          },
+          "backtest": {
+            "boundary": "12:00",
+            "phase": "exited",
+            "entry_paise": 120710,
+            "stop_paise": 120260,
+            "target_paise": 122060,
+            "qty": 222,
+            "exit_kind": "target-hit",
+            "exit_paise": 122060
+          }
+        },
+        {
+          "live": {
+            "boundary": "12:15",
+            "phase": "exited",
+            "entry_paise": 120710,
+            "stop_paise": 120260,
+            "target_paise": 122060,
+            "qty": 222,
+            "exit_kind": "target-hit",
+            "exit_paise": 122060
+          },
+          "backtest": {
+            "boundary": "12:15",
+            "phase": "exited",
+            "entry_paise": 120710,
+            "stop_paise": 120260,
+            "target_paise": 122060,
+            "qty": 222,
+            "exit_kind": "target-hit",
+            "exit_paise": 122060
+          }
+        },
+        {
+          "live": {
+            "boundary": "12:30",
+            "phase": "exited",
+            "entry_paise": 120710,
+            "stop_paise": 120260,
+            "target_paise": 122060,
+            "qty": 222,
+            "exit_kind": "target-hit",
+            "exit_paise": 122060
+          },
+          "backtest": {
+            "boundary": "12:30",
+            "phase": "exited",
+            "entry_paise": 120710,
+            "stop_paise": 120260,
+            "target_paise": 122060,
+            "qty": 222,
+            "exit_kind": "target-hit",
+            "exit_paise": 122060
+          }
+        },
+        {
+          "live": {
+            "boundary": "12:45",
+            "phase": "exited",
+            "entry_paise": 120710,
+            "stop_paise": 120260,
+            "target_paise": 122060,
+            "qty": 222,
+            "exit_kind": "target-hit",
+            "exit_paise": 122060
+          },
+          "backtest": {
+            "boundary": "12:45",
+            "phase": "exited",
+            "entry_paise": 120710,
+            "stop_paise": 120260,
+            "target_paise": 122060,
+            "qty": 222,
+            "exit_kind": "target-hit",
+            "exit_paise": 122060
+          }
+        },
+        {
+          "live": {
+            "boundary": "13:00",
+            "phase": "exited",
+            "entry_paise": 120710,
+            "stop_paise": 120260,
+            "target_paise": 122060,
+            "qty": 222,
+            "exit_kind": "target-hit",
+            "exit_paise": 122060
+          },
+          "backtest": {
+            "boundary": "13:00",
+            "phase": "exited",
+            "entry_paise": 120710,
+            "stop_paise": 120260,
+            "target_paise": 122060,
+            "qty": 222,
+            "exit_kind": "target-hit",
+            "exit_paise": 122060
+          }
+        },
+        {
+          "live": {
+            "boundary": "13:15",
+            "phase": "exited",
+            "entry_paise": 120710,
+            "stop_paise": 120260,
+            "target_paise": 122060,
+            "qty": 222,
+            "exit_kind": "target-hit",
+            "exit_paise": 122060
+          },
+          "backtest": {
+            "boundary": "13:15",
+            "phase": "exited",
+            "entry_paise": 120710,
+            "stop_paise": 120260,
+            "target_paise": 122060,
+            "qty": 222,
+            "exit_kind": "target-hit",
+            "exit_paise": 122060
+          }
+        },
+        {
+          "live": {
+            "boundary": "13:30",
+            "phase": "exited",
+            "entry_paise": 120710,
+            "stop_paise": 120260,
+            "target_paise": 122060,
+            "qty": 222,
+            "exit_kind": "target-hit",
+            "exit_paise": 122060
+          },
+          "backtest": {
+            "boundary": "13:30",
+            "phase": "exited",
+            "entry_paise": 120710,
+            "stop_paise": 120260,
+            "target_paise": 122060,
+            "qty": 222,
+            "exit_kind": "target-hit",
+            "exit_paise": 122060
+          }
+        },
+        {
+          "live": {
+            "boundary": "13:45",
+            "phase": "exited",
+            "entry_paise": 120710,
+            "stop_paise": 120260,
+            "target_paise": 122060,
+            "qty": 222,
+            "exit_kind": "target-hit",
+            "exit_paise": 122060
+          },
+          "backtest": {
+            "boundary": "13:45",
+            "phase": "exited",
+            "entry_paise": 120710,
+            "stop_paise": 120260,
+            "target_paise": 122060,
+            "qty": 222,
+            "exit_kind": "target-hit",
+            "exit_paise": 122060
+          }
+        },
+        {
+          "live": {
+            "boundary": "14:00",
+            "phase": "exited",
+            "entry_paise": 120710,
+            "stop_paise": 120260,
+            "target_paise": 122060,
+            "qty": 222,
+            "exit_kind": "target-hit",
+            "exit_paise": 122060
+          },
+          "backtest": {
+            "boundary": "14:00",
+            "phase": "exited",
+            "entry_paise": 120710,
+            "stop_paise": 120260,
+            "target_paise": 122060,
+            "qty": 222,
+            "exit_kind": "target-hit",
+            "exit_paise": 122060
+          }
+        },
+        {
+          "live": {
+            "boundary": "14:15",
+            "phase": "exited",
+            "entry_paise": 120710,
+            "stop_paise": 120260,
+            "target_paise": 122060,
+            "qty": 222,
+            "exit_kind": "target-hit",
+            "exit_paise": 122060
+          },
+          "backtest": {
+            "boundary": "14:15",
+            "phase": "exited",
+            "entry_paise": 120710,
+            "stop_paise": 120260,
+            "target_paise": 122060,
+            "qty": 222,
+            "exit_kind": "target-hit",
+            "exit_paise": 122060
+          }
+        },
+        {
+          "live": {
+            "boundary": "14:30",
+            "phase": "exited",
+            "entry_paise": 120710,
+            "stop_paise": 120260,
+            "target_paise": 122060,
+            "qty": 222,
+            "exit_kind": "target-hit",
+            "exit_paise": 122060
+          },
+          "backtest": {
+            "boundary": "14:30",
+            "phase": "exited",
+            "entry_paise": 120710,
+            "stop_paise": 120260,
+            "target_paise": 122060,
+            "qty": 222,
+            "exit_kind": "target-hit",
+            "exit_paise": 122060
+          }
+        },
+        {
+          "live": {
+            "boundary": "14:45",
+            "phase": "exited",
+            "entry_paise": 120710,
+            "stop_paise": 120260,
+            "target_paise": 122060,
+            "qty": 222,
+            "exit_kind": "target-hit",
+            "exit_paise": 122060
+          },
+          "backtest": {
+            "boundary": "14:45",
+            "phase": "exited",
+            "entry_paise": 120710,
+            "stop_paise": 120260,
+            "target_paise": 122060,
+            "qty": 222,
+            "exit_kind": "target-hit",
+            "exit_paise": 122060
+          }
+        },
+        {
+          "live": {
+            "boundary": "15:00",
+            "phase": "exited",
+            "entry_paise": 120710,
+            "stop_paise": 120260,
+            "target_paise": 122060,
+            "qty": 222,
+            "exit_kind": "target-hit",
+            "exit_paise": 122060
+          },
+          "backtest": {
+            "boundary": "15:00",
+            "phase": "exited",
+            "entry_paise": 120710,
+            "stop_paise": 120260,
+            "target_paise": 122060,
+            "qty": 222,
+            "exit_kind": "target-hit",
+            "exit_paise": 122060
+          }
+        },
+        {
+          "live": {
+            "boundary": "15:15",
+            "phase": "exited",
+            "entry_paise": 120710,
+            "stop_paise": 120260,
+            "target_paise": 122060,
+            "qty": 222,
+            "exit_kind": "target-hit",
+            "exit_paise": 122060
+          },
+          "backtest": {
+            "boundary": "15:15",
+            "phase": "exited",
+            "entry_paise": 120710,
+            "stop_paise": 120260,
+            "target_paise": 122060,
+            "qty": 222,
+            "exit_kind": "target-hit",
+            "exit_paise": 122060
+          }
+        },
+        {
+          "live": {
+            "boundary": "15:30",
+            "phase": "exited",
+            "entry_paise": 120710,
+            "stop_paise": 120260,
+            "target_paise": 122060,
+            "qty": 222,
+            "exit_kind": "target-hit",
+            "exit_paise": 122060
+          },
+          "backtest": {
+            "boundary": "15:30",
+            "phase": "exited",
+            "entry_paise": 120710,
+            "stop_paise": 120260,
+            "target_paise": 122060,
+            "qty": 222,
+            "exit_kind": "target-hit",
+            "exit_paise": 122060
+          }
+        }
+      ],
+      "note": ""
+    },
+    {
+      "symbol": "360ONE",
+      "day": "2026-01-06",
+      "stratum": "bias_rule:rule-2-sweep",
+      "source": "lake",
+      "oracle_passed": true,
+      "oracle_reason": "the FULL CONTEXT 4.6 battery accepts this day",
+      "judged": true,
+      "matched": true,
+      "mismatches": [],
+      "transitions_equal": true,
+      "live_alerts": [
+        "armed",
+        "trigger",
+        "exit"
+      ],
+      "backtest_alerts": [
+        "armed",
+        "trigger",
+        "exit"
+      ],
+      "day_fields": {
+        "live": {
+          "bias": "bearish",
+          "bias_rule": "rule-2-sweep",
+          "side": "short",
+          "poc_paise": "120560",
+          "reference_paise": 120510
+        },
+        "backtest": {
+          "bias": "bearish",
+          "bias_rule": "rule-2-sweep",
+          "side": "short",
+          "poc_paise": "120560",
+          "reference_paise": 120510
+        }
+      },
+      "boundaries": [
+        {
+          "live": {
+            "boundary": "11:15",
+            "phase": "waiting",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "11:15",
+            "phase": "waiting",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "11:30",
+            "phase": "waiting",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "11:30",
+            "phase": "waiting",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "11:45",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "11:45",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "12:00",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "12:00",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "12:15",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "12:15",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "12:30",
+            "phase": "triggered",
+            "entry_paise": 120540,
+            "stop_paise": 120700,
+            "target_paise": 120060,
+            "qty": 625,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "12:30",
+            "phase": "triggered",
+            "entry_paise": 120540,
+            "stop_paise": 120700,
+            "target_paise": 120060,
+            "qty": 625,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "12:45",
+            "phase": "in-trade",
+            "entry_paise": 120540,
+            "stop_paise": 120700,
+            "target_paise": 120060,
+            "qty": 625,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "12:45",
+            "phase": "in-trade",
+            "entry_paise": 120540,
+            "stop_paise": 120700,
+            "target_paise": 120060,
+            "qty": 625,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "13:00",
+            "phase": "exited",
+            "entry_paise": 120540,
+            "stop_paise": 120700,
+            "target_paise": 120060,
+            "qty": 625,
+            "exit_kind": "target-hit",
+            "exit_paise": 120060
+          },
+          "backtest": {
+            "boundary": "13:00",
+            "phase": "exited",
+            "entry_paise": 120540,
+            "stop_paise": 120700,
+            "target_paise": 120060,
+            "qty": 625,
+            "exit_kind": "target-hit",
+            "exit_paise": 120060
+          }
+        },
+        {
+          "live": {
+            "boundary": "13:15",
+            "phase": "exited",
+            "entry_paise": 120540,
+            "stop_paise": 120700,
+            "target_paise": 120060,
+            "qty": 625,
+            "exit_kind": "target-hit",
+            "exit_paise": 120060
+          },
+          "backtest": {
+            "boundary": "13:15",
+            "phase": "exited",
+            "entry_paise": 120540,
+            "stop_paise": 120700,
+            "target_paise": 120060,
+            "qty": 625,
+            "exit_kind": "target-hit",
+            "exit_paise": 120060
+          }
+        },
+        {
+          "live": {
+            "boundary": "13:30",
+            "phase": "exited",
+            "entry_paise": 120540,
+            "stop_paise": 120700,
+            "target_paise": 120060,
+            "qty": 625,
+            "exit_kind": "target-hit",
+            "exit_paise": 120060
+          },
+          "backtest": {
+            "boundary": "13:30",
+            "phase": "exited",
+            "entry_paise": 120540,
+            "stop_paise": 120700,
+            "target_paise": 120060,
+            "qty": 625,
+            "exit_kind": "target-hit",
+            "exit_paise": 120060
+          }
+        },
+        {
+          "live": {
+            "boundary": "13:45",
+            "phase": "exited",
+            "entry_paise": 120540,
+            "stop_paise": 120700,
+            "target_paise": 120060,
+            "qty": 625,
+            "exit_kind": "target-hit",
+            "exit_paise": 120060
+          },
+          "backtest": {
+            "boundary": "13:45",
+            "phase": "exited",
+            "entry_paise": 120540,
+            "stop_paise": 120700,
+            "target_paise": 120060,
+            "qty": 625,
+            "exit_kind": "target-hit",
+            "exit_paise": 120060
+          }
+        },
+        {
+          "live": {
+            "boundary": "14:00",
+            "phase": "exited",
+            "entry_paise": 120540,
+            "stop_paise": 120700,
+            "target_paise": 120060,
+            "qty": 625,
+            "exit_kind": "target-hit",
+            "exit_paise": 120060
+          },
+          "backtest": {
+            "boundary": "14:00",
+            "phase": "exited",
+            "entry_paise": 120540,
+            "stop_paise": 120700,
+            "target_paise": 120060,
+            "qty": 625,
+            "exit_kind": "target-hit",
+            "exit_paise": 120060
+          }
+        },
+        {
+          "live": {
+            "boundary": "14:15",
+            "phase": "exited",
+            "entry_paise": 120540,
+            "stop_paise": 120700,
+            "target_paise": 120060,
+            "qty": 625,
+            "exit_kind": "target-hit",
+            "exit_paise": 120060
+          },
+          "backtest": {
+            "boundary": "14:15",
+            "phase": "exited",
+            "entry_paise": 120540,
+            "stop_paise": 120700,
+            "target_paise": 120060,
+            "qty": 625,
+            "exit_kind": "target-hit",
+            "exit_paise": 120060
+          }
+        },
+        {
+          "live": {
+            "boundary": "14:30",
+            "phase": "exited",
+            "entry_paise": 120540,
+            "stop_paise": 120700,
+            "target_paise": 120060,
+            "qty": 625,
+            "exit_kind": "target-hit",
+            "exit_paise": 120060
+          },
+          "backtest": {
+            "boundary": "14:30",
+            "phase": "exited",
+            "entry_paise": 120540,
+            "stop_paise": 120700,
+            "target_paise": 120060,
+            "qty": 625,
+            "exit_kind": "target-hit",
+            "exit_paise": 120060
+          }
+        },
+        {
+          "live": {
+            "boundary": "14:45",
+            "phase": "exited",
+            "entry_paise": 120540,
+            "stop_paise": 120700,
+            "target_paise": 120060,
+            "qty": 625,
+            "exit_kind": "target-hit",
+            "exit_paise": 120060
+          },
+          "backtest": {
+            "boundary": "14:45",
+            "phase": "exited",
+            "entry_paise": 120540,
+            "stop_paise": 120700,
+            "target_paise": 120060,
+            "qty": 625,
+            "exit_kind": "target-hit",
+            "exit_paise": 120060
+          }
+        },
+        {
+          "live": {
+            "boundary": "15:00",
+            "phase": "exited",
+            "entry_paise": 120540,
+            "stop_paise": 120700,
+            "target_paise": 120060,
+            "qty": 625,
+            "exit_kind": "target-hit",
+            "exit_paise": 120060
+          },
+          "backtest": {
+            "boundary": "15:00",
+            "phase": "exited",
+            "entry_paise": 120540,
+            "stop_paise": 120700,
+            "target_paise": 120060,
+            "qty": 625,
+            "exit_kind": "target-hit",
+            "exit_paise": 120060
+          }
+        },
+        {
+          "live": {
+            "boundary": "15:15",
+            "phase": "exited",
+            "entry_paise": 120540,
+            "stop_paise": 120700,
+            "target_paise": 120060,
+            "qty": 625,
+            "exit_kind": "target-hit",
+            "exit_paise": 120060
+          },
+          "backtest": {
+            "boundary": "15:15",
+            "phase": "exited",
+            "entry_paise": 120540,
+            "stop_paise": 120700,
+            "target_paise": 120060,
+            "qty": 625,
+            "exit_kind": "target-hit",
+            "exit_paise": 120060
+          }
+        },
+        {
+          "live": {
+            "boundary": "15:30",
+            "phase": "exited",
+            "entry_paise": 120540,
+            "stop_paise": 120700,
+            "target_paise": 120060,
+            "qty": 625,
+            "exit_kind": "target-hit",
+            "exit_paise": 120060
+          },
+          "backtest": {
+            "boundary": "15:30",
+            "phase": "exited",
+            "entry_paise": 120540,
+            "stop_paise": 120700,
+            "target_paise": 120060,
+            "qty": 625,
+            "exit_kind": "target-hit",
+            "exit_paise": 120060
+          }
+        }
+      ],
+      "note": ""
+    },
+    {
+      "symbol": "AMBER",
+      "day": "2021-01-27",
+      "stratum": "bias_rule:rule-3-no-1min-carry",
+      "source": "lake",
+      "oracle_passed": true,
+      "oracle_reason": "the FULL CONTEXT 4.6 battery accepts this day",
+      "judged": true,
+      "matched": true,
+      "mismatches": [],
+      "transitions_equal": true,
+      "live_alerts": [
+        "armed"
+      ],
+      "backtest_alerts": [
+        "armed"
+      ],
+      "day_fields": {
+        "live": {
+          "bias": "bearish",
+          "bias_rule": "rule-3-no-1min-carry",
+          "side": "short",
+          "poc_paise": "253395",
+          "reference_paise": 253215
+        },
+        "backtest": {
+          "bias": "bearish",
+          "bias_rule": "rule-3-no-1min-carry",
+          "side": "short",
+          "poc_paise": "253395",
+          "reference_paise": 253215
+        }
+      },
+      "boundaries": [
+        {
+          "live": {
+            "boundary": "11:15",
+            "phase": "waiting",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "11:15",
+            "phase": "waiting",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "11:30",
+            "phase": "waiting",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "11:30",
+            "phase": "waiting",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "11:45",
+            "phase": "waiting",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "11:45",
+            "phase": "waiting",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "12:00",
+            "phase": "waiting",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "12:00",
+            "phase": "waiting",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "12:15",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "12:15",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "12:30",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "12:30",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "12:45",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "12:45",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "13:00",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "13:00",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "13:15",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "13:15",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "13:30",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "13:30",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "13:45",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "13:45",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "14:00",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "14:00",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "14:15",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "14:15",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "14:30",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "14:30",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "14:45",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "14:45",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "15:00",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "15:00",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "15:15",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "15:15",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "15:30",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "15:30",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        }
+      ],
+      "note": ""
+    },
+    {
+      "symbol": "ASIANPAINT",
+      "day": "2017-07-11",
+      "stratum": "bias_rule:rule-3-no-break-carry",
+      "source": "lake",
+      "oracle_passed": true,
+      "oracle_reason": "the FULL CONTEXT 4.6 battery accepts this day",
+      "judged": true,
+      "matched": true,
+      "mismatches": [],
+      "transitions_equal": true,
+      "live_alerts": [
+        "armed"
+      ],
+      "backtest_alerts": [
+        "armed"
+      ],
+      "day_fields": {
+        "live": {
+          "bias": "bearish",
+          "bias_rule": "rule-3-no-break-carry",
+          "side": "short",
+          "poc_paise": "112535",
+          "reference_paise": 113105
+        },
+        "backtest": {
+          "bias": "bearish",
+          "bias_rule": "rule-3-no-break-carry",
+          "side": "short",
+          "poc_paise": "112535",
+          "reference_paise": 113105
+        }
+      },
+      "boundaries": [
+        {
+          "live": {
+            "boundary": "11:15",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "11:15",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "11:30",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "11:30",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "11:45",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "11:45",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "12:00",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "12:00",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "12:15",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "12:15",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "12:30",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "12:30",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "12:45",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "12:45",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "13:00",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "13:00",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "13:15",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "13:15",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "13:30",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "13:30",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "13:45",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "13:45",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "14:00",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "14:00",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "14:15",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "14:15",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "14:30",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "14:30",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "14:45",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "14:45",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "15:00",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "15:00",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "15:15",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "15:15",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "15:30",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "15:30",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        }
+      ],
+      "note": ""
+    },
+    {
+      "symbol": "360ONE",
+      "day": "2026-04-22",
+      "stratum": "bias_rule:rule-3-outside-bar",
+      "source": "lake",
+      "oracle_passed": true,
+      "oracle_reason": "the FULL CONTEXT 4.6 battery accepts this day",
+      "judged": true,
+      "matched": true,
+      "mismatches": [],
+      "transitions_equal": true,
+      "live_alerts": [
+        "armed",
+        "trigger",
+        "square-off"
+      ],
+      "backtest_alerts": [
+        "armed",
+        "trigger",
+        "square-off"
+      ],
+      "day_fields": {
+        "live": {
+          "bias": "bullish",
+          "bias_rule": "rule-3-outside-bar",
+          "side": "long",
+          "poc_paise": "105075",
+          "reference_paise": 105340
+        },
+        "backtest": {
+          "bias": "bullish",
+          "bias_rule": "rule-3-outside-bar",
+          "side": "long",
+          "poc_paise": "105075",
+          "reference_paise": 105340
+        }
+      },
+      "boundaries": [
+        {
+          "live": {
+            "boundary": "11:15",
+            "phase": "waiting",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "11:15",
+            "phase": "waiting",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "11:30",
+            "phase": "waiting",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "11:30",
+            "phase": "waiting",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "11:45",
+            "phase": "waiting",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "11:45",
+            "phase": "waiting",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "12:00",
+            "phase": "waiting",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "12:00",
+            "phase": "waiting",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "12:15",
+            "phase": "waiting",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "12:15",
+            "phase": "waiting",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "12:30",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "12:30",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "12:45",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "12:45",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "13:00",
+            "phase": "triggered",
+            "entry_paise": 105490,
+            "stop_paise": 104800,
+            "target_paise": 107560,
+            "qty": 144,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "13:00",
+            "phase": "triggered",
+            "entry_paise": 105490,
+            "stop_paise": 104800,
+            "target_paise": 107560,
+            "qty": 144,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "13:15",
+            "phase": "in-trade",
+            "entry_paise": 105490,
+            "stop_paise": 104800,
+            "target_paise": 107560,
+            "qty": 144,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "13:15",
+            "phase": "in-trade",
+            "entry_paise": 105490,
+            "stop_paise": 104800,
+            "target_paise": 107560,
+            "qty": 144,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "13:30",
+            "phase": "in-trade",
+            "entry_paise": 105490,
+            "stop_paise": 104800,
+            "target_paise": 107560,
+            "qty": 144,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "13:30",
+            "phase": "in-trade",
+            "entry_paise": 105490,
+            "stop_paise": 104800,
+            "target_paise": 107560,
+            "qty": 144,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "13:45",
+            "phase": "in-trade",
+            "entry_paise": 105490,
+            "stop_paise": 104800,
+            "target_paise": 107560,
+            "qty": 144,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "13:45",
+            "phase": "in-trade",
+            "entry_paise": 105490,
+            "stop_paise": 104800,
+            "target_paise": 107560,
+            "qty": 144,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "14:00",
+            "phase": "in-trade",
+            "entry_paise": 105490,
+            "stop_paise": 104800,
+            "target_paise": 107560,
+            "qty": 144,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "14:00",
+            "phase": "in-trade",
+            "entry_paise": 105490,
+            "stop_paise": 104800,
+            "target_paise": 107560,
+            "qty": 144,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "14:15",
+            "phase": "in-trade",
+            "entry_paise": 105490,
+            "stop_paise": 104800,
+            "target_paise": 107560,
+            "qty": 144,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "14:15",
+            "phase": "in-trade",
+            "entry_paise": 105490,
+            "stop_paise": 104800,
+            "target_paise": 107560,
+            "qty": 144,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "14:30",
+            "phase": "in-trade",
+            "entry_paise": 105490,
+            "stop_paise": 104800,
+            "target_paise": 107560,
+            "qty": 144,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "14:30",
+            "phase": "in-trade",
+            "entry_paise": 105490,
+            "stop_paise": 104800,
+            "target_paise": 107560,
+            "qty": 144,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "14:45",
+            "phase": "in-trade",
+            "entry_paise": 105490,
+            "stop_paise": 104800,
+            "target_paise": 107560,
+            "qty": 144,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "14:45",
+            "phase": "in-trade",
+            "entry_paise": 105490,
+            "stop_paise": 104800,
+            "target_paise": 107560,
+            "qty": 144,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "15:00",
+            "phase": "in-trade",
+            "entry_paise": 105490,
+            "stop_paise": 104800,
+            "target_paise": 107560,
+            "qty": 144,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "15:00",
+            "phase": "in-trade",
+            "entry_paise": 105490,
+            "stop_paise": 104800,
+            "target_paise": 107560,
+            "qty": 144,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "15:15",
+            "phase": "exited",
+            "entry_paise": 105490,
+            "stop_paise": 104800,
+            "target_paise": 107560,
+            "qty": 144,
+            "exit_kind": "square-off-at-the-15:15-close",
+            "exit_paise": 105530
+          },
+          "backtest": {
+            "boundary": "15:15",
+            "phase": "exited",
+            "entry_paise": 105490,
+            "stop_paise": 104800,
+            "target_paise": 107560,
+            "qty": 144,
+            "exit_kind": "square-off-at-the-15:15-close",
+            "exit_paise": 105530
+          }
+        },
+        {
+          "live": {
+            "boundary": "15:30",
+            "phase": "exited",
+            "entry_paise": 105490,
+            "stop_paise": 104800,
+            "target_paise": 107560,
+            "qty": 144,
+            "exit_kind": "square-off-at-the-15:15-close",
+            "exit_paise": 105530
+          },
+          "backtest": {
+            "boundary": "15:30",
+            "phase": "exited",
+            "entry_paise": 105490,
+            "stop_paise": 104800,
+            "target_paise": 107560,
+            "qty": 144,
+            "exit_kind": "square-off-at-the-15:15-close",
+            "exit_paise": 105530
+          }
+        }
+      ],
+      "note": ""
+    },
+    {
+      "symbol": "BDL",
+      "day": "2026-03-04",
+      "stratum": "bias_rule:rule-3-tie",
+      "source": "lake",
+      "oracle_passed": true,
+      "oracle_reason": "the FULL CONTEXT 4.6 battery accepts this day",
+      "judged": true,
+      "matched": true,
+      "mismatches": [],
+      "transitions_equal": true,
+      "live_alerts": [
+        "armed",
+        "trigger",
+        "exit"
+      ],
+      "backtest_alerts": [
+        "armed",
+        "trigger",
+        "exit"
+      ],
+      "day_fields": {
+        "live": {
+          "bias": "bullish",
+          "bias_rule": "rule-3-tie",
+          "side": "long",
+          "poc_paise": "126815",
+          "reference_paise": 127560
+        },
+        "backtest": {
+          "bias": "bullish",
+          "bias_rule": "rule-3-tie",
+          "side": "long",
+          "poc_paise": "126815",
+          "reference_paise": 127560
+        }
+      },
+      "boundaries": [
+        {
+          "live": {
+            "boundary": "11:15",
+            "phase": "waiting",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "11:15",
+            "phase": "waiting",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "11:30",
+            "phase": "waiting",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "11:30",
+            "phase": "waiting",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "11:45",
+            "phase": "waiting",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "11:45",
+            "phase": "waiting",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "12:00",
+            "phase": "waiting",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "12:00",
+            "phase": "waiting",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "12:15",
+            "phase": "waiting",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "12:15",
+            "phase": "waiting",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "12:30",
+            "phase": "waiting",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "12:30",
+            "phase": "waiting",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "12:45",
+            "phase": "waiting",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "12:45",
+            "phase": "waiting",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "13:00",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "13:00",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "13:15",
+            "phase": "triggered",
+            "entry_paise": 126890,
+            "stop_paise": 126460,
+            "target_paise": 128180,
+            "qty": 232,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "13:15",
+            "phase": "triggered",
+            "entry_paise": 126890,
+            "stop_paise": 126460,
+            "target_paise": 128180,
+            "qty": 232,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "13:30",
+            "phase": "exited",
+            "entry_paise": 126890,
+            "stop_paise": 126460,
+            "target_paise": 128180,
+            "qty": 232,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 126460
+          },
+          "backtest": {
+            "boundary": "13:30",
+            "phase": "exited",
+            "entry_paise": 126890,
+            "stop_paise": 126460,
+            "target_paise": 128180,
+            "qty": 232,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 126460
+          }
+        },
+        {
+          "live": {
+            "boundary": "13:45",
+            "phase": "exited",
+            "entry_paise": 126890,
+            "stop_paise": 126460,
+            "target_paise": 128180,
+            "qty": 232,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 126460
+          },
+          "backtest": {
+            "boundary": "13:45",
+            "phase": "exited",
+            "entry_paise": 126890,
+            "stop_paise": 126460,
+            "target_paise": 128180,
+            "qty": 232,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 126460
+          }
+        },
+        {
+          "live": {
+            "boundary": "14:00",
+            "phase": "exited",
+            "entry_paise": 126890,
+            "stop_paise": 126460,
+            "target_paise": 128180,
+            "qty": 232,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 126460
+          },
+          "backtest": {
+            "boundary": "14:00",
+            "phase": "exited",
+            "entry_paise": 126890,
+            "stop_paise": 126460,
+            "target_paise": 128180,
+            "qty": 232,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 126460
+          }
+        },
+        {
+          "live": {
+            "boundary": "14:15",
+            "phase": "exited",
+            "entry_paise": 126890,
+            "stop_paise": 126460,
+            "target_paise": 128180,
+            "qty": 232,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 126460
+          },
+          "backtest": {
+            "boundary": "14:15",
+            "phase": "exited",
+            "entry_paise": 126890,
+            "stop_paise": 126460,
+            "target_paise": 128180,
+            "qty": 232,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 126460
+          }
+        },
+        {
+          "live": {
+            "boundary": "14:30",
+            "phase": "exited",
+            "entry_paise": 126890,
+            "stop_paise": 126460,
+            "target_paise": 128180,
+            "qty": 232,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 126460
+          },
+          "backtest": {
+            "boundary": "14:30",
+            "phase": "exited",
+            "entry_paise": 126890,
+            "stop_paise": 126460,
+            "target_paise": 128180,
+            "qty": 232,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 126460
+          }
+        },
+        {
+          "live": {
+            "boundary": "14:45",
+            "phase": "exited",
+            "entry_paise": 126890,
+            "stop_paise": 126460,
+            "target_paise": 128180,
+            "qty": 232,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 126460
+          },
+          "backtest": {
+            "boundary": "14:45",
+            "phase": "exited",
+            "entry_paise": 126890,
+            "stop_paise": 126460,
+            "target_paise": 128180,
+            "qty": 232,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 126460
+          }
+        },
+        {
+          "live": {
+            "boundary": "15:00",
+            "phase": "exited",
+            "entry_paise": 126890,
+            "stop_paise": 126460,
+            "target_paise": 128180,
+            "qty": 232,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 126460
+          },
+          "backtest": {
+            "boundary": "15:00",
+            "phase": "exited",
+            "entry_paise": 126890,
+            "stop_paise": 126460,
+            "target_paise": 128180,
+            "qty": 232,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 126460
+          }
+        },
+        {
+          "live": {
+            "boundary": "15:15",
+            "phase": "exited",
+            "entry_paise": 126890,
+            "stop_paise": 126460,
+            "target_paise": 128180,
+            "qty": 232,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 126460
+          },
+          "backtest": {
+            "boundary": "15:15",
+            "phase": "exited",
+            "entry_paise": 126890,
+            "stop_paise": 126460,
+            "target_paise": 128180,
+            "qty": 232,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 126460
+          }
+        },
+        {
+          "live": {
+            "boundary": "15:30",
+            "phase": "exited",
+            "entry_paise": 126890,
+            "stop_paise": 126460,
+            "target_paise": 128180,
+            "qty": 232,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 126460
+          },
+          "backtest": {
+            "boundary": "15:30",
+            "phase": "exited",
+            "entry_paise": 126890,
+            "stop_paise": 126460,
+            "target_paise": 128180,
+            "qty": 232,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 126460
+          }
+        }
+      ],
+      "note": ""
+    },
+    {
+      "symbol": "ITC",
+      "day": "2026-06-10",
+      "stratum": "carried-witness",
+      "source": "lake",
+      "oracle_passed": true,
+      "oracle_reason": "the FULL CONTEXT 4.6 battery accepts this day",
+      "judged": true,
+      "matched": true,
+      "mismatches": [],
+      "transitions_equal": true,
+      "live_alerts": [
+        "armed"
+      ],
+      "backtest_alerts": [
+        "armed"
+      ],
+      "day_fields": {
+        "live": {
+          "bias": "bearish",
+          "bias_rule": "inside-bar-carry",
+          "side": "short",
+          "poc_paise": "56655/2",
+          "reference_paise": 28440
+        },
+        "backtest": {
+          "bias": "bearish",
+          "bias_rule": "inside-bar-carry",
+          "side": "short",
+          "poc_paise": "56655/2",
+          "reference_paise": 28440
+        }
+      },
+      "boundaries": [
+        {
+          "live": {
+            "boundary": "11:15",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "11:15",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "11:30",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "11:30",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "11:45",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "11:45",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "12:00",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "12:00",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "12:15",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "12:15",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "12:30",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "12:30",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "12:45",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "12:45",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "13:00",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "13:00",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "13:15",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "13:15",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "13:30",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "13:30",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "13:45",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "13:45",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "14:00",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "14:00",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "14:15",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "14:15",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "14:30",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "14:30",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "14:45",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "14:45",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "15:00",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "15:00",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "15:15",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "15:15",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "15:30",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "15:30",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        }
+      ],
+      "note": ""
+    },
+    {
+      "symbol": "ADANIENSOL",
+      "day": "2026-05-08",
+      "stratum": "gap-entry",
+      "source": "lake",
+      "oracle_passed": true,
+      "oracle_reason": "the FULL CONTEXT 4.6 battery accepts this day",
+      "judged": true,
+      "matched": true,
+      "mismatches": [],
+      "transitions_equal": true,
+      "live_alerts": [
+        "armed",
+        "trigger",
+        "exit"
+      ],
+      "backtest_alerts": [
+        "armed",
+        "trigger",
+        "exit"
+      ],
+      "day_fields": {
+        "live": {
+          "bias": "bearish",
+          "bias_rule": "rule-1-breakout",
+          "side": "short",
+          "poc_paise": "138155",
+          "reference_paise": 138020
+        },
+        "backtest": {
+          "bias": "bearish",
+          "bias_rule": "rule-1-breakout",
+          "side": "short",
+          "poc_paise": "138155",
+          "reference_paise": 138020
+        }
+      },
+      "boundaries": [
+        {
+          "live": {
+            "boundary": "11:15",
+            "phase": "waiting",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "11:15",
+            "phase": "waiting",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "11:30",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "11:30",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "11:45",
+            "phase": "triggered",
+            "entry_paise": 137790,
+            "stop_paise": 138160,
+            "target_paise": 136680,
+            "qty": 270,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "11:45",
+            "phase": "triggered",
+            "entry_paise": 137790,
+            "stop_paise": 138160,
+            "target_paise": 136680,
+            "qty": 270,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "12:00",
+            "phase": "exited",
+            "entry_paise": 137790,
+            "stop_paise": 138160,
+            "target_paise": 136680,
+            "qty": 270,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 138160
+          },
+          "backtest": {
+            "boundary": "12:00",
+            "phase": "exited",
+            "entry_paise": 137790,
+            "stop_paise": 138160,
+            "target_paise": 136680,
+            "qty": 270,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 138160
+          }
+        },
+        {
+          "live": {
+            "boundary": "12:15",
+            "phase": "exited",
+            "entry_paise": 137790,
+            "stop_paise": 138160,
+            "target_paise": 136680,
+            "qty": 270,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 138160
+          },
+          "backtest": {
+            "boundary": "12:15",
+            "phase": "exited",
+            "entry_paise": 137790,
+            "stop_paise": 138160,
+            "target_paise": 136680,
+            "qty": 270,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 138160
+          }
+        },
+        {
+          "live": {
+            "boundary": "12:30",
+            "phase": "exited",
+            "entry_paise": 137790,
+            "stop_paise": 138160,
+            "target_paise": 136680,
+            "qty": 270,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 138160
+          },
+          "backtest": {
+            "boundary": "12:30",
+            "phase": "exited",
+            "entry_paise": 137790,
+            "stop_paise": 138160,
+            "target_paise": 136680,
+            "qty": 270,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 138160
+          }
+        },
+        {
+          "live": {
+            "boundary": "12:45",
+            "phase": "exited",
+            "entry_paise": 137790,
+            "stop_paise": 138160,
+            "target_paise": 136680,
+            "qty": 270,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 138160
+          },
+          "backtest": {
+            "boundary": "12:45",
+            "phase": "exited",
+            "entry_paise": 137790,
+            "stop_paise": 138160,
+            "target_paise": 136680,
+            "qty": 270,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 138160
+          }
+        },
+        {
+          "live": {
+            "boundary": "13:00",
+            "phase": "exited",
+            "entry_paise": 137790,
+            "stop_paise": 138160,
+            "target_paise": 136680,
+            "qty": 270,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 138160
+          },
+          "backtest": {
+            "boundary": "13:00",
+            "phase": "exited",
+            "entry_paise": 137790,
+            "stop_paise": 138160,
+            "target_paise": 136680,
+            "qty": 270,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 138160
+          }
+        },
+        {
+          "live": {
+            "boundary": "13:15",
+            "phase": "exited",
+            "entry_paise": 137790,
+            "stop_paise": 138160,
+            "target_paise": 136680,
+            "qty": 270,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 138160
+          },
+          "backtest": {
+            "boundary": "13:15",
+            "phase": "exited",
+            "entry_paise": 137790,
+            "stop_paise": 138160,
+            "target_paise": 136680,
+            "qty": 270,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 138160
+          }
+        },
+        {
+          "live": {
+            "boundary": "13:30",
+            "phase": "exited",
+            "entry_paise": 137790,
+            "stop_paise": 138160,
+            "target_paise": 136680,
+            "qty": 270,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 138160
+          },
+          "backtest": {
+            "boundary": "13:30",
+            "phase": "exited",
+            "entry_paise": 137790,
+            "stop_paise": 138160,
+            "target_paise": 136680,
+            "qty": 270,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 138160
+          }
+        },
+        {
+          "live": {
+            "boundary": "13:45",
+            "phase": "exited",
+            "entry_paise": 137790,
+            "stop_paise": 138160,
+            "target_paise": 136680,
+            "qty": 270,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 138160
+          },
+          "backtest": {
+            "boundary": "13:45",
+            "phase": "exited",
+            "entry_paise": 137790,
+            "stop_paise": 138160,
+            "target_paise": 136680,
+            "qty": 270,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 138160
+          }
+        },
+        {
+          "live": {
+            "boundary": "14:00",
+            "phase": "exited",
+            "entry_paise": 137790,
+            "stop_paise": 138160,
+            "target_paise": 136680,
+            "qty": 270,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 138160
+          },
+          "backtest": {
+            "boundary": "14:00",
+            "phase": "exited",
+            "entry_paise": 137790,
+            "stop_paise": 138160,
+            "target_paise": 136680,
+            "qty": 270,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 138160
+          }
+        },
+        {
+          "live": {
+            "boundary": "14:15",
+            "phase": "exited",
+            "entry_paise": 137790,
+            "stop_paise": 138160,
+            "target_paise": 136680,
+            "qty": 270,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 138160
+          },
+          "backtest": {
+            "boundary": "14:15",
+            "phase": "exited",
+            "entry_paise": 137790,
+            "stop_paise": 138160,
+            "target_paise": 136680,
+            "qty": 270,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 138160
+          }
+        },
+        {
+          "live": {
+            "boundary": "14:30",
+            "phase": "exited",
+            "entry_paise": 137790,
+            "stop_paise": 138160,
+            "target_paise": 136680,
+            "qty": 270,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 138160
+          },
+          "backtest": {
+            "boundary": "14:30",
+            "phase": "exited",
+            "entry_paise": 137790,
+            "stop_paise": 138160,
+            "target_paise": 136680,
+            "qty": 270,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 138160
+          }
+        },
+        {
+          "live": {
+            "boundary": "14:45",
+            "phase": "exited",
+            "entry_paise": 137790,
+            "stop_paise": 138160,
+            "target_paise": 136680,
+            "qty": 270,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 138160
+          },
+          "backtest": {
+            "boundary": "14:45",
+            "phase": "exited",
+            "entry_paise": 137790,
+            "stop_paise": 138160,
+            "target_paise": 136680,
+            "qty": 270,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 138160
+          }
+        },
+        {
+          "live": {
+            "boundary": "15:00",
+            "phase": "exited",
+            "entry_paise": 137790,
+            "stop_paise": 138160,
+            "target_paise": 136680,
+            "qty": 270,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 138160
+          },
+          "backtest": {
+            "boundary": "15:00",
+            "phase": "exited",
+            "entry_paise": 137790,
+            "stop_paise": 138160,
+            "target_paise": 136680,
+            "qty": 270,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 138160
+          }
+        },
+        {
+          "live": {
+            "boundary": "15:15",
+            "phase": "exited",
+            "entry_paise": 137790,
+            "stop_paise": 138160,
+            "target_paise": 136680,
+            "qty": 270,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 138160
+          },
+          "backtest": {
+            "boundary": "15:15",
+            "phase": "exited",
+            "entry_paise": 137790,
+            "stop_paise": 138160,
+            "target_paise": 136680,
+            "qty": 270,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 138160
+          }
+        },
+        {
+          "live": {
+            "boundary": "15:30",
+            "phase": "exited",
+            "entry_paise": 137790,
+            "stop_paise": 138160,
+            "target_paise": 136680,
+            "qty": 270,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 138160
+          },
+          "backtest": {
+            "boundary": "15:30",
+            "phase": "exited",
+            "entry_paise": 137790,
+            "stop_paise": 138160,
+            "target_paise": 136680,
+            "qty": 270,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 138160
+          }
+        }
+      ],
+      "note": ""
+    },
+    {
+      "symbol": "ADANIPORTS",
+      "day": "2026-02-06",
+      "stratum": "oracle-refused",
+      "source": "live-posture",
+      "oracle_passed": false,
+      "oracle_reason": "gap 52.135% is above the band [-0.1, 5.0]",
+      "judged": false,
+      "matched": false,
+      "mismatches": [
+        "side: live='long' backtest=None",
+        "poc_paise: live='154520' backtest=None",
+        "reference_paise: live=154820 backtest=None",
+        "11:15 phase: live='waiting' backtest='refused'",
+        "11:30 phase: live='waiting' backtest='refused'",
+        "11:45 phase: live='waiting' backtest='refused'",
+        "12:00 phase: live='waiting' backtest='refused'",
+        "12:15 phase: live='armed' backtest='refused'",
+        "12:30 phase: live='armed' backtest='refused'",
+        "12:45 phase: live='armed' backtest='refused'",
+        "13:00 phase: live='armed' backtest='refused'",
+        "13:15 phase: live='armed' backtest='refused'",
+        "13:30 phase: live='armed' backtest='refused'",
+        "13:45 phase: live='armed' backtest='refused'",
+        "14:00 phase: live='armed' backtest='refused'",
+        "14:15 phase: live='armed' backtest='refused'",
+        "14:30 phase: live='armed' backtest='refused'",
+        "14:45 phase: live='armed' backtest='refused'",
+        "15:00 phase: live='triggered' backtest='refused'",
+        "15:00 entry_paise: live=154930 backtest=None",
+        "15:00 stop_paise: live=154260 backtest=None",
+        "15:00 target_paise: live=156940 backtest=None",
+        "15:00 qty: live=149 backtest=None",
+        "15:15 phase: live='exited' backtest='refused'",
+        "15:15 entry_paise: live=154930 backtest=None",
+        "15:15 stop_paise: live=154260 backtest=None",
+        "15:15 target_paise: live=156940 backtest=None",
+        "15:15 qty: live=149 backtest=None",
+        "15:15 exit_kind: live='square-off-at-the-15:15-close' backtest=None",
+        "15:15 exit_paise: live=155080 backtest=None",
+        "15:30 phase: live='exited' backtest='refused'",
+        "15:30 entry_paise: live=154930 backtest=None",
+        "15:30 stop_paise: live=154260 backtest=None",
+        "15:30 target_paise: live=156940 backtest=None",
+        "15:30 qty: live=149 backtest=None",
+        "15:30 exit_kind: live='square-off-at-the-15:15-close' backtest=None",
+        "15:30 exit_paise: live=155080 backtest=None",
+        "alerts: live=['armed', 'trigger', 'square-off'] backtest=[]"
+      ],
+      "transitions_equal": true,
+      "live_alerts": [
+        "armed",
+        "trigger",
+        "square-off"
+      ],
+      "backtest_alerts": [],
+      "day_fields": {
+        "live": {
+          "bias": "bullish",
+          "bias_rule": "rule-1-breakout",
+          "side": "long",
+          "poc_paise": "154520",
+          "reference_paise": 154820
+        },
+        "backtest": {
+          "bias": "bullish",
+          "bias_rule": "rule-1-breakout",
+          "side": null,
+          "poc_paise": null,
+          "reference_paise": null
+        }
+      },
+      "boundaries": [
+        {
+          "live": {
+            "boundary": "11:15",
+            "phase": "waiting",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "11:15",
+            "phase": "refused",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "11:30",
+            "phase": "waiting",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "11:30",
+            "phase": "refused",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "11:45",
+            "phase": "waiting",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "11:45",
+            "phase": "refused",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "12:00",
+            "phase": "waiting",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "12:00",
+            "phase": "refused",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "12:15",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "12:15",
+            "phase": "refused",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "12:30",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "12:30",
+            "phase": "refused",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "12:45",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "12:45",
+            "phase": "refused",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "13:00",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "13:00",
+            "phase": "refused",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "13:15",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "13:15",
+            "phase": "refused",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "13:30",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "13:30",
+            "phase": "refused",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "13:45",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "13:45",
+            "phase": "refused",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "14:00",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "14:00",
+            "phase": "refused",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "14:15",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "14:15",
+            "phase": "refused",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "14:30",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "14:30",
+            "phase": "refused",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "14:45",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "14:45",
+            "phase": "refused",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "15:00",
+            "phase": "triggered",
+            "entry_paise": 154930,
+            "stop_paise": 154260,
+            "target_paise": 156940,
+            "qty": 149,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "15:00",
+            "phase": "refused",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "15:15",
+            "phase": "exited",
+            "entry_paise": 154930,
+            "stop_paise": 154260,
+            "target_paise": 156940,
+            "qty": 149,
+            "exit_kind": "square-off-at-the-15:15-close",
+            "exit_paise": 155080
+          },
+          "backtest": {
+            "boundary": "15:15",
+            "phase": "refused",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "15:30",
+            "phase": "exited",
+            "entry_paise": 154930,
+            "stop_paise": 154260,
+            "target_paise": 156940,
+            "qty": 149,
+            "exit_kind": "square-off-at-the-15:15-close",
+            "exit_paise": 155080
+          },
+          "backtest": {
+            "boundary": "15:30",
+            "phase": "refused",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        }
+      ],
+      "note": ""
+    },
+    {
+      "symbol": "BOSCHLTD",
+      "day": "2021-05-20",
+      "stratum": "qty-zero:BOSCHLTD",
+      "source": "lake",
+      "oracle_passed": true,
+      "oracle_reason": "the FULL CONTEXT 4.6 battery accepts this day",
+      "judged": true,
+      "matched": true,
+      "mismatches": [],
+      "transitions_equal": true,
+      "live_alerts": [
+        "armed"
+      ],
+      "backtest_alerts": [
+        "armed"
+      ],
+      "day_fields": {
+        "live": {
+          "bias": "bullish",
+          "bias_rule": "rule-1-breakout",
+          "side": "long",
+          "poc_paise": "1472680",
+          "reference_paise": 1464520
+        },
+        "backtest": {
+          "bias": "bullish",
+          "bias_rule": "rule-1-breakout",
+          "side": "long",
+          "poc_paise": "1472680",
+          "reference_paise": 1464520
+        }
+      },
+      "boundaries": [
+        {
+          "live": {
+            "boundary": "11:15",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "11:15",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "11:30",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "11:30",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "11:45",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "11:45",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "12:00",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "12:00",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "12:15",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "12:15",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "12:30",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "12:30",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "12:45",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "12:45",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "13:00",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "13:00",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "13:15",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "13:15",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "13:30",
+            "phase": "refused",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": 0,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "13:30",
+            "phase": "refused",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": 0,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "13:45",
+            "phase": "refused",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": 0,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "13:45",
+            "phase": "refused",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": 0,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "14:00",
+            "phase": "refused",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": 0,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "14:00",
+            "phase": "refused",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": 0,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "14:15",
+            "phase": "refused",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": 0,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "14:15",
+            "phase": "refused",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": 0,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "14:30",
+            "phase": "refused",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": 0,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "14:30",
+            "phase": "refused",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": 0,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "14:45",
+            "phase": "refused",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": 0,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "14:45",
+            "phase": "refused",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": 0,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "15:00",
+            "phase": "refused",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": 0,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "15:00",
+            "phase": "refused",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": 0,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "15:15",
+            "phase": "refused",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": 0,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "15:15",
+            "phase": "refused",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": 0,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "15:30",
+            "phase": "refused",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": 0,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "15:30",
+            "phase": "refused",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": 0,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        }
+      ],
+      "note": ""
+    },
+    {
+      "symbol": "SHREECEM",
+      "day": "2020-03-19",
+      "stratum": "qty-zero:SHREECEM",
+      "source": "lake",
+      "oracle_passed": true,
+      "oracle_reason": "the FULL CONTEXT 4.6 battery accepts this day",
+      "judged": true,
+      "matched": true,
+      "mismatches": [],
+      "transitions_equal": true,
+      "live_alerts": [
+        "armed"
+      ],
+      "backtest_alerts": [
+        "armed"
+      ],
+      "day_fields": {
+        "live": {
+          "bias": "bearish",
+          "bias_rule": "rule-1-breakout",
+          "side": "short",
+          "poc_paise": "1777490",
+          "reference_paise": 1902470
+        },
+        "backtest": {
+          "bias": "bearish",
+          "bias_rule": "rule-1-breakout",
+          "side": "short",
+          "poc_paise": "1777490",
+          "reference_paise": 1902470
+        }
+      },
+      "boundaries": [
+        {
+          "live": {
+            "boundary": "11:15",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "11:15",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "11:30",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "11:30",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "11:45",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "11:45",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "12:00",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "12:00",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "12:15",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "12:15",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "12:30",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "12:30",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "12:45",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "12:45",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "13:00",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "13:00",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "13:15",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "13:15",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "13:30",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "13:30",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "13:45",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "13:45",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "14:00",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "14:00",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "14:15",
+            "phase": "refused",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": 0,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "14:15",
+            "phase": "refused",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": 0,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "14:30",
+            "phase": "refused",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": 0,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "14:30",
+            "phase": "refused",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": 0,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "14:45",
+            "phase": "refused",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": 0,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "14:45",
+            "phase": "refused",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": 0,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "15:00",
+            "phase": "refused",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": 0,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "15:00",
+            "phase": "refused",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": 0,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "15:15",
+            "phase": "refused",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": 0,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "15:15",
+            "phase": "refused",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": 0,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "15:30",
+            "phase": "refused",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": 0,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "15:30",
+            "phase": "refused",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": 0,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        }
+      ],
+      "note": ""
+    },
+    {
+      "symbol": "360ONE",
+      "day": "2026-07-06",
+      "stratum": "reference==POC",
+      "source": "lake",
+      "oracle_passed": true,
+      "oracle_reason": "the FULL CONTEXT 4.6 battery accepts this day",
+      "judged": true,
+      "matched": true,
+      "mismatches": [],
+      "transitions_equal": true,
+      "live_alerts": [
+        "armed",
+        "trigger",
+        "exit"
+      ],
+      "backtest_alerts": [
+        "armed",
+        "trigger",
+        "exit"
+      ],
+      "day_fields": {
+        "live": {
+          "bias": "bullish",
+          "bias_rule": "rule-1-breakout",
+          "side": "long",
+          "poc_paise": "112990",
+          "reference_paise": 112990
+        },
+        "backtest": {
+          "bias": "bullish",
+          "bias_rule": "rule-1-breakout",
+          "side": "long",
+          "poc_paise": "112990",
+          "reference_paise": 112990
+        }
+      },
+      "boundaries": [
+        {
+          "live": {
+            "boundary": "11:15",
+            "phase": "waiting",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "11:15",
+            "phase": "waiting",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "11:30",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "11:30",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "11:45",
+            "phase": "triggered",
+            "entry_paise": 113000,
+            "stop_paise": 112600,
+            "target_paise": 114200,
+            "qty": 250,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "11:45",
+            "phase": "triggered",
+            "entry_paise": 113000,
+            "stop_paise": 112600,
+            "target_paise": 114200,
+            "qty": 250,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "12:00",
+            "phase": "in-trade",
+            "entry_paise": 113000,
+            "stop_paise": 112600,
+            "target_paise": 114200,
+            "qty": 250,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "12:00",
+            "phase": "in-trade",
+            "entry_paise": 113000,
+            "stop_paise": 112600,
+            "target_paise": 114200,
+            "qty": 250,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "12:15",
+            "phase": "in-trade",
+            "entry_paise": 113000,
+            "stop_paise": 112600,
+            "target_paise": 114200,
+            "qty": 250,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "12:15",
+            "phase": "in-trade",
+            "entry_paise": 113000,
+            "stop_paise": 112600,
+            "target_paise": 114200,
+            "qty": 250,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "12:30",
+            "phase": "exited",
+            "entry_paise": 113000,
+            "stop_paise": 112600,
+            "target_paise": 114200,
+            "qty": 250,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 112600
+          },
+          "backtest": {
+            "boundary": "12:30",
+            "phase": "exited",
+            "entry_paise": 113000,
+            "stop_paise": 112600,
+            "target_paise": 114200,
+            "qty": 250,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 112600
+          }
+        },
+        {
+          "live": {
+            "boundary": "12:45",
+            "phase": "exited",
+            "entry_paise": 113000,
+            "stop_paise": 112600,
+            "target_paise": 114200,
+            "qty": 250,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 112600
+          },
+          "backtest": {
+            "boundary": "12:45",
+            "phase": "exited",
+            "entry_paise": 113000,
+            "stop_paise": 112600,
+            "target_paise": 114200,
+            "qty": 250,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 112600
+          }
+        },
+        {
+          "live": {
+            "boundary": "13:00",
+            "phase": "exited",
+            "entry_paise": 113000,
+            "stop_paise": 112600,
+            "target_paise": 114200,
+            "qty": 250,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 112600
+          },
+          "backtest": {
+            "boundary": "13:00",
+            "phase": "exited",
+            "entry_paise": 113000,
+            "stop_paise": 112600,
+            "target_paise": 114200,
+            "qty": 250,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 112600
+          }
+        },
+        {
+          "live": {
+            "boundary": "13:15",
+            "phase": "exited",
+            "entry_paise": 113000,
+            "stop_paise": 112600,
+            "target_paise": 114200,
+            "qty": 250,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 112600
+          },
+          "backtest": {
+            "boundary": "13:15",
+            "phase": "exited",
+            "entry_paise": 113000,
+            "stop_paise": 112600,
+            "target_paise": 114200,
+            "qty": 250,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 112600
+          }
+        },
+        {
+          "live": {
+            "boundary": "13:30",
+            "phase": "exited",
+            "entry_paise": 113000,
+            "stop_paise": 112600,
+            "target_paise": 114200,
+            "qty": 250,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 112600
+          },
+          "backtest": {
+            "boundary": "13:30",
+            "phase": "exited",
+            "entry_paise": 113000,
+            "stop_paise": 112600,
+            "target_paise": 114200,
+            "qty": 250,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 112600
+          }
+        },
+        {
+          "live": {
+            "boundary": "13:45",
+            "phase": "exited",
+            "entry_paise": 113000,
+            "stop_paise": 112600,
+            "target_paise": 114200,
+            "qty": 250,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 112600
+          },
+          "backtest": {
+            "boundary": "13:45",
+            "phase": "exited",
+            "entry_paise": 113000,
+            "stop_paise": 112600,
+            "target_paise": 114200,
+            "qty": 250,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 112600
+          }
+        },
+        {
+          "live": {
+            "boundary": "14:00",
+            "phase": "exited",
+            "entry_paise": 113000,
+            "stop_paise": 112600,
+            "target_paise": 114200,
+            "qty": 250,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 112600
+          },
+          "backtest": {
+            "boundary": "14:00",
+            "phase": "exited",
+            "entry_paise": 113000,
+            "stop_paise": 112600,
+            "target_paise": 114200,
+            "qty": 250,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 112600
+          }
+        },
+        {
+          "live": {
+            "boundary": "14:15",
+            "phase": "exited",
+            "entry_paise": 113000,
+            "stop_paise": 112600,
+            "target_paise": 114200,
+            "qty": 250,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 112600
+          },
+          "backtest": {
+            "boundary": "14:15",
+            "phase": "exited",
+            "entry_paise": 113000,
+            "stop_paise": 112600,
+            "target_paise": 114200,
+            "qty": 250,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 112600
+          }
+        },
+        {
+          "live": {
+            "boundary": "14:30",
+            "phase": "exited",
+            "entry_paise": 113000,
+            "stop_paise": 112600,
+            "target_paise": 114200,
+            "qty": 250,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 112600
+          },
+          "backtest": {
+            "boundary": "14:30",
+            "phase": "exited",
+            "entry_paise": 113000,
+            "stop_paise": 112600,
+            "target_paise": 114200,
+            "qty": 250,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 112600
+          }
+        },
+        {
+          "live": {
+            "boundary": "14:45",
+            "phase": "exited",
+            "entry_paise": 113000,
+            "stop_paise": 112600,
+            "target_paise": 114200,
+            "qty": 250,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 112600
+          },
+          "backtest": {
+            "boundary": "14:45",
+            "phase": "exited",
+            "entry_paise": 113000,
+            "stop_paise": 112600,
+            "target_paise": 114200,
+            "qty": 250,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 112600
+          }
+        },
+        {
+          "live": {
+            "boundary": "15:00",
+            "phase": "exited",
+            "entry_paise": 113000,
+            "stop_paise": 112600,
+            "target_paise": 114200,
+            "qty": 250,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 112600
+          },
+          "backtest": {
+            "boundary": "15:00",
+            "phase": "exited",
+            "entry_paise": 113000,
+            "stop_paise": 112600,
+            "target_paise": 114200,
+            "qty": 250,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 112600
+          }
+        },
+        {
+          "live": {
+            "boundary": "15:15",
+            "phase": "exited",
+            "entry_paise": 113000,
+            "stop_paise": 112600,
+            "target_paise": 114200,
+            "qty": 250,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 112600
+          },
+          "backtest": {
+            "boundary": "15:15",
+            "phase": "exited",
+            "entry_paise": 113000,
+            "stop_paise": 112600,
+            "target_paise": 114200,
+            "qty": 250,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 112600
+          }
+        },
+        {
+          "live": {
+            "boundary": "15:30",
+            "phase": "exited",
+            "entry_paise": 113000,
+            "stop_paise": 112600,
+            "target_paise": 114200,
+            "qty": 250,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 112600
+          },
+          "backtest": {
+            "boundary": "15:30",
+            "phase": "exited",
+            "entry_paise": 113000,
+            "stop_paise": 112600,
+            "target_paise": 114200,
+            "qty": 250,
+            "exit_kind": "stop-loss-hit",
+            "exit_paise": 112600
+          }
+        }
+      ],
+      "note": ""
+    },
+    {
+      "symbol": "HDFCBANK",
+      "day": "2026-06-10",
+      "stratum": "recording round trip",
+      "source": "recording",
+      "oracle_passed": true,
+      "oracle_reason": "the FULL CONTEXT 4.6 battery accepts this day",
+      "judged": true,
+      "matched": true,
+      "mismatches": [],
+      "transitions_equal": true,
+      "live_alerts": [
+        "armed",
+        "trigger",
+        "exit"
+      ],
+      "backtest_alerts": [
+        "armed",
+        "trigger",
+        "exit"
+      ],
+      "day_fields": {
+        "live": {
+          "bias": "bullish",
+          "bias_rule": "rule-3-outside-bar",
+          "side": "long",
+          "poc_paise": "73980",
+          "reference_paise": 73820
+        },
+        "backtest": {
+          "bias": "bullish",
+          "bias_rule": "rule-3-outside-bar",
+          "side": "long",
+          "poc_paise": "73980",
+          "reference_paise": 73820
+        }
+      },
+      "boundaries": [
+        {
+          "live": {
+            "boundary": "11:15",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "11:15",
+            "phase": "armed",
+            "entry_paise": null,
+            "stop_paise": null,
+            "target_paise": null,
+            "qty": null,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "11:30",
+            "phase": "triggered",
+            "entry_paise": 74095,
+            "stop_paise": 73810,
+            "target_paise": 74950,
+            "qty": 350,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "11:30",
+            "phase": "triggered",
+            "entry_paise": 74095,
+            "stop_paise": 73810,
+            "target_paise": 74950,
+            "qty": 350,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "11:45",
+            "phase": "in-trade",
+            "entry_paise": 74095,
+            "stop_paise": 73810,
+            "target_paise": 74950,
+            "qty": 350,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "11:45",
+            "phase": "in-trade",
+            "entry_paise": 74095,
+            "stop_paise": 73810,
+            "target_paise": 74950,
+            "qty": 350,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "12:00",
+            "phase": "in-trade",
+            "entry_paise": 74095,
+            "stop_paise": 73810,
+            "target_paise": 74950,
+            "qty": 350,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "12:00",
+            "phase": "in-trade",
+            "entry_paise": 74095,
+            "stop_paise": 73810,
+            "target_paise": 74950,
+            "qty": 350,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "12:15",
+            "phase": "in-trade",
+            "entry_paise": 74095,
+            "stop_paise": 73810,
+            "target_paise": 74950,
+            "qty": 350,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "12:15",
+            "phase": "in-trade",
+            "entry_paise": 74095,
+            "stop_paise": 73810,
+            "target_paise": 74950,
+            "qty": 350,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "12:30",
+            "phase": "in-trade",
+            "entry_paise": 74095,
+            "stop_paise": 73810,
+            "target_paise": 74950,
+            "qty": 350,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "12:30",
+            "phase": "in-trade",
+            "entry_paise": 74095,
+            "stop_paise": 73810,
+            "target_paise": 74950,
+            "qty": 350,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "12:45",
+            "phase": "in-trade",
+            "entry_paise": 74095,
+            "stop_paise": 73810,
+            "target_paise": 74950,
+            "qty": 350,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "12:45",
+            "phase": "in-trade",
+            "entry_paise": 74095,
+            "stop_paise": 73810,
+            "target_paise": 74950,
+            "qty": 350,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "13:00",
+            "phase": "in-trade",
+            "entry_paise": 74095,
+            "stop_paise": 73810,
+            "target_paise": 74950,
+            "qty": 350,
+            "exit_kind": null,
+            "exit_paise": null
+          },
+          "backtest": {
+            "boundary": "13:00",
+            "phase": "in-trade",
+            "entry_paise": 74095,
+            "stop_paise": 73810,
+            "target_paise": 74950,
+            "qty": 350,
+            "exit_kind": null,
+            "exit_paise": null
+          }
+        },
+        {
+          "live": {
+            "boundary": "13:15",
+            "phase": "exited",
+            "entry_paise": 74095,
+            "stop_paise": 73810,
+            "target_paise": 74950,
+            "qty": 350,
+            "exit_kind": "target-hit",
+            "exit_paise": 74950
+          },
+          "backtest": {
+            "boundary": "13:15",
+            "phase": "exited",
+            "entry_paise": 74095,
+            "stop_paise": 73810,
+            "target_paise": 74950,
+            "qty": 350,
+            "exit_kind": "target-hit",
+            "exit_paise": 74950
+          }
+        },
+        {
+          "live": {
+            "boundary": "13:30",
+            "phase": "exited",
+            "entry_paise": 74095,
+            "stop_paise": 73810,
+            "target_paise": 74950,
+            "qty": 350,
+            "exit_kind": "target-hit",
+            "exit_paise": 74950
+          },
+          "backtest": {
+            "boundary": "13:30",
+            "phase": "exited",
+            "entry_paise": 74095,
+            "stop_paise": 73810,
+            "target_paise": 74950,
+            "qty": 350,
+            "exit_kind": "target-hit",
+            "exit_paise": 74950
+          }
+        },
+        {
+          "live": {
+            "boundary": "13:45",
+            "phase": "exited",
+            "entry_paise": 74095,
+            "stop_paise": 73810,
+            "target_paise": 74950,
+            "qty": 350,
+            "exit_kind": "target-hit",
+            "exit_paise": 74950
+          },
+          "backtest": {
+            "boundary": "13:45",
+            "phase": "exited",
+            "entry_paise": 74095,
+            "stop_paise": 73810,
+            "target_paise": 74950,
+            "qty": 350,
+            "exit_kind": "target-hit",
+            "exit_paise": 74950
+          }
+        },
+        {
+          "live": {
+            "boundary": "14:00",
+            "phase": "exited",
+            "entry_paise": 74095,
+            "stop_paise": 73810,
+            "target_paise": 74950,
+            "qty": 350,
+            "exit_kind": "target-hit",
+            "exit_paise": 74950
+          },
+          "backtest": {
+            "boundary": "14:00",
+            "phase": "exited",
+            "entry_paise": 74095,
+            "stop_paise": 73810,
+            "target_paise": 74950,
+            "qty": 350,
+            "exit_kind": "target-hit",
+            "exit_paise": 74950
+          }
+        },
+        {
+          "live": {
+            "boundary": "14:15",
+            "phase": "exited",
+            "entry_paise": 74095,
+            "stop_paise": 73810,
+            "target_paise": 74950,
+            "qty": 350,
+            "exit_kind": "target-hit",
+            "exit_paise": 74950
+          },
+          "backtest": {
+            "boundary": "14:15",
+            "phase": "exited",
+            "entry_paise": 74095,
+            "stop_paise": 73810,
+            "target_paise": 74950,
+            "qty": 350,
+            "exit_kind": "target-hit",
+            "exit_paise": 74950
+          }
+        },
+        {
+          "live": {
+            "boundary": "14:30",
+            "phase": "exited",
+            "entry_paise": 74095,
+            "stop_paise": 73810,
+            "target_paise": 74950,
+            "qty": 350,
+            "exit_kind": "target-hit",
+            "exit_paise": 74950
+          },
+          "backtest": {
+            "boundary": "14:30",
+            "phase": "exited",
+            "entry_paise": 74095,
+            "stop_paise": 73810,
+            "target_paise": 74950,
+            "qty": 350,
+            "exit_kind": "target-hit",
+            "exit_paise": 74950
+          }
+        },
+        {
+          "live": {
+            "boundary": "14:45",
+            "phase": "exited",
+            "entry_paise": 74095,
+            "stop_paise": 73810,
+            "target_paise": 74950,
+            "qty": 350,
+            "exit_kind": "target-hit",
+            "exit_paise": 74950
+          },
+          "backtest": {
+            "boundary": "14:45",
+            "phase": "exited",
+            "entry_paise": 74095,
+            "stop_paise": 73810,
+            "target_paise": 74950,
+            "qty": 350,
+            "exit_kind": "target-hit",
+            "exit_paise": 74950
+          }
+        },
+        {
+          "live": {
+            "boundary": "15:00",
+            "phase": "exited",
+            "entry_paise": 74095,
+            "stop_paise": 73810,
+            "target_paise": 74950,
+            "qty": 350,
+            "exit_kind": "target-hit",
+            "exit_paise": 74950
+          },
+          "backtest": {
+            "boundary": "15:00",
+            "phase": "exited",
+            "entry_paise": 74095,
+            "stop_paise": 73810,
+            "target_paise": 74950,
+            "qty": 350,
+            "exit_kind": "target-hit",
+            "exit_paise": 74950
+          }
+        },
+        {
+          "live": {
+            "boundary": "15:15",
+            "phase": "exited",
+            "entry_paise": 74095,
+            "stop_paise": 73810,
+            "target_paise": 74950,
+            "qty": 350,
+            "exit_kind": "target-hit",
+            "exit_paise": 74950
+          },
+          "backtest": {
+            "boundary": "15:15",
+            "phase": "exited",
+            "entry_paise": 74095,
+            "stop_paise": 73810,
+            "target_paise": 74950,
+            "qty": 350,
+            "exit_kind": "target-hit",
+            "exit_paise": 74950
+          }
+        },
+        {
+          "live": {
+            "boundary": "15:30",
+            "phase": "exited",
+            "entry_paise": 74095,
+            "stop_paise": 73810,
+            "target_paise": 74950,
+            "qty": 350,
+            "exit_kind": "target-hit",
+            "exit_paise": 74950
+          },
+          "backtest": {
+            "boundary": "15:30",
+            "phase": "exited",
+            "entry_paise": 74095,
+            "stop_paise": 73810,
+            "target_paise": 74950,
+            "qty": 350,
+            "exit_kind": "target-hit",
+            "exit_paise": 74950
+          }
+        }
+      ],
+      "note": ""
+    }
+  ]
+}
