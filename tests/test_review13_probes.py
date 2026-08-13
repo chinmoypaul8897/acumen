@@ -626,35 +626,44 @@ def test_a_full_LIVE_POSTURE_session_writes_NO_credential_shaped_line_to_logs(
     )
 
 
-def test_the_repos_own_run_logs_carry_credential_shaped_headers() -> None:
-    """F6's outcome, measured on the machine rather than argued. Never reads ``.env``.
+def test_the_repos_own_run_logs_carry_NO_credential_shaped_headers() -> None:
+    """F6's defect pin, **FLIPPED** (chunk 14): the logs are clean and this now holds them so.
 
     ``logs/`` is gitignored, so nothing reached git -- but CLAUDE.md rule 4 says *logged*, not
     *committed*, and :mod:`acumen.run_screener` opens a broker session on every live morning, so
-    a dry-run week is five more days of this. Detection is by HEADER SHAPE, so this probe needs
-    no secret and leaks none.
+    a dry-run week would have been five more days of this. Detection is by HEADER SHAPE, so this
+    probe needs no secret and leaks none.
 
-    GREEN while the defect stands; it goes red once the guard is fixed AND the operator has
-    rotated the existing logs.
+    **The skip-vs-red one-liner, and why it mattered.** As pinned, the probe was green while the
+    defect stood and *skipped* -- ``"this machine's logs/ has been rotated since the review --
+    nothing to pin"`` -- once it was fixed. So the receipt for closing B5's outstanding operator
+    half was a SKIP, indistinguishable from "this machine has no logs directory", and REVIEW_13B
+    (*"the operator rotates the six logs/ files ... which turns its probe red"*) would have been
+    waiting for a red that could never arrive. This session made that branch ``pytest.fail``
+    first and ran it, and it went red on the sentence above -- the operator HAS rotated the six
+    files -- which is the receipt the flip is licensed by. Recorded because a pin that cannot go
+    red is not a pin.
+
+    Flipped, it is the standing guarantee: **no file under ``logs/`` carries a credential-shaped
+    header**. An absent ``logs/`` is that guarantee trivially satisfied, not a skip -- there is
+    nothing to leak in a directory that does not exist, and a clone deserves the same green.
     """
     logs = REPO / "logs"
-    if not logs.is_dir():
-        pytest.skip("no local logs/ directory")
     private_key = bearer = 0
-    files = 0
-    for path in sorted(logs.rglob("*.log")):
+    offenders: list[str] = []
+    for path in sorted(logs.rglob("*.log")) if logs.is_dir() else []:
         text = path.read_text(encoding="utf-8", errors="ignore")
         here = len(re.findall(r"'X-PrivateKey':\s*'[^']{4,}'", text))
         there = len(re.findall(r"'Authorization':\s*'Bearer [A-Za-z0-9_\-.]{20,}'", text))
         if here or there:
-            files += 1
+            offenders.append(f"{path.relative_to(REPO)}: {here} key line(s), {there} token(s)")
         private_key += here
         bearer += there
-    if not files:
-        pytest.skip("this machine's logs/ has been rotated since the review -- nothing to pin")
-    assert private_key > 0 and bearer > 0, (
-        f"{files} log file(s) carry {private_key} X-PrivateKey line(s) and {bearer} Bearer "
-        "token line(s) -- CLAUDE.md rule 4"
+    assert not offenders, (
+        f"{len(offenders)} log file(s) carry {private_key} X-PrivateKey line(s) and {bearer} "
+        "Bearer token line(s) -- CLAUDE.md rule 4 says LOGGED, not only committed. The guard is "
+        "`acumen.smartapi_client._quiet_library_logging`, called on BOTH sides of the vendor "
+        "constructor; rotate the files it already wrote.\n" + "\n".join(offenders)
     )
 
 

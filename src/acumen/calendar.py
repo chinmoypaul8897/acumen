@@ -672,6 +672,30 @@ def live_trading_calendar(
         settled_through = cursor
         cursor += timedelta(days=1)
 
+    # ...and the refusal that sentence promises, which REVIEW_13B **Q2** found was never
+    # written. The walk above stops at the FIRST hole, which is right; what was missing is that
+    # everything after the hole was then handed silently to the published master. The store's
+    # own ledger is what tells the two cases apart: evidence AFTER the hole means the hole is a
+    # gap INSIDE the history (an incomplete backfill), while no evidence after it means the
+    # store has simply reached the end of what it has attempted -- which is the ordinary live
+    # morning, because Q-19's guard stops the pre-open top-up strictly before today.
+    settled_dates = [stamp for stamp, outcome in ledger.items()
+                     if outcome in terminal and stamp < live_day]
+    last_settled = max(settled_dates) if settled_dates else None
+    if last_settled is not None and last_settled > settled_through:
+        raise CalendarError(
+            f"The daily store's outcome ledger has a GAP inside its own history: it is settled "
+            f"through {settled_through.isoformat()}, has nothing for "
+            f"{(settled_through + timedelta(days=1)).isoformat()}, and then settles dates again "
+            f"up to {last_settled.isoformat()}. A live morning takes CONTEXT 3.2's (D-1, D-2) "
+            "pair from the same store the backtester reads, so filling that hole from the "
+            "published holiday master would judge the pair on a different calendar from the "
+            "backtester's -- backtest/live drift in the one place CONTEXT section 6 forbids it. "
+            "An unattempted date inside the history is the incomplete-backfill case Q-3 "
+            "safeguard 1 refuses. Top the store up (`python scripts/backfill_daily.py`) and run "
+            "the morning again."
+        )
+
     trading: set[date] = set()
     holidays: set[date] = set(published.holidays)
     weekend_sessions: set[date] = set()

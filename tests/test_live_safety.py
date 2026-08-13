@@ -110,6 +110,14 @@ def _folded_strings(node: ast.AST, bindings: dict[str, str] | None = None) -> li
     something will join, and a NAME the file bound to a string earlier -- the shapes that turn a
     name the AST never sees as one piece into a name the interpreter does. The last is what
     reaches an evasion split across two LINES, which a line scan cannot see by construction.
+
+    **REVIEW_13B Q4** adds the two ordinary idioms that still walked past both halves:
+    ``"place%s" % "Order"`` and ``"place{}".format("Order")``. Neither is an adversary's trick
+    -- they are how a careless author writes a name in Python, which is exactly the population
+    this tripwire is for -- and the literal scan cannot see either, because its normaliser
+    leaves ``%s%`` and ``{}.format(`` sitting between the two halves. Both are folded here the
+    same way the concatenations are: only when every part is a CONSTANT (or a name already
+    bound to one), so the scan stays a tripwire and never becomes an interpreter.
     """
     bindings = bindings or {}
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
@@ -120,6 +128,35 @@ def _folded_strings(node: ast.AST, bindings: dict[str, str] | None = None) -> li
         left = _folded_strings(node.left, bindings)
         right = _folded_strings(node.right, bindings)
         return ["".join(left) + "".join(right)] if left and right else []
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mod):
+        # `"place%s" % "Order"`, and the tuple form `"%s%s" % ("place", "Order")`.
+        template = _folded_strings(node.left, bindings)
+        if not template:
+            return []
+        values = (
+            [_folded_strings(element, bindings) for element in node.right.elts]
+            if isinstance(node.right, ast.Tuple)
+            else [_folded_strings(node.right, bindings)]
+        )
+        if any(not part for part in values):
+            return []
+        try:
+            filled = template[-1] % tuple(part[-1] for part in values)
+        except (TypeError, ValueError, KeyError):  # not a shape this fold can complete
+            return []
+        return [filled]
+    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "format" and not node.keywords):
+        # `"place{}".format("Order")`, positional constants only.
+        template = _folded_strings(node.func.value, bindings)
+        args = [_folded_strings(argument, bindings) for argument in node.args]
+        if not template or any(not part for part in args):
+            return []
+        try:
+            filled = template[-1].format(*[part[-1] for part in args])
+        except (IndexError, KeyError, ValueError):  # a template this fold cannot complete
+            return []
+        return [filled]
     if isinstance(node, ast.FormattedValue):
         return _folded_strings(node.value, bindings)
     if isinstance(node, ast.JoinedStr):
@@ -287,6 +324,13 @@ EVASIONS: tuple[tuple[str, str], ...] = (
                           'getattr(connect, "".join(PARTS))\n'),
     ("bound then f-string", 'TAIL = "Order"\ngetattr(connect, f"place{TAIL}")\n'),
     ("bound then attribute", 'WHAT = "cancel"\nHOW = "Order"\nmethod = WHAT + HOW\n'),
+    # --- REVIEW_13B Q4: two ordinary idioms the widened scan still walked past. The literal
+    # half cannot see either (its normaliser leaves `%s%` and `{}.format(` between the halves),
+    # so these are AST catches by construction.
+    ("percent format", 'getattr(connect, "place%s" % "Order")(params)\n'),
+    ("percent format, tuple", 'getattr(connect, "%s%s" % ("place", "Order"))(params)\n'),
+    ("str.format", 'getattr(connect, "place{}".format("Order"))(params)\n'),
+    ("str.format across lines", 'TAIL = "Order"\ngetattr(connect, "place{}".format(TAIL))\n'),
     # ... and one the AST cannot see at all, because Python throws comments away before the tree
     # exists. This is why BOTH halves are kept rather than the stronger one alone.
     ("in a comment", "# TODO: switch this to connect.placeOrder once the desk approves\n"),

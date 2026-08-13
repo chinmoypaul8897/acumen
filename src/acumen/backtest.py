@@ -245,6 +245,11 @@ SHARD_DIRNAME: str = "symbols"
 #: for the span's first trading day (chunk-8 used the same lead).
 CALENDAR_LEAD_DAYS: int = 30
 
+#: Where the NSE corporate-action day-cache lives, relative to ``data_root``. The same directory
+#: :func:`acumen.corp_actions.default_cache_dir` resolves to -- named here so a caller's own
+#: ``data_dir`` can govern it (REVIEW_13B Q3) instead of the config file always winning.
+CA_CACHE_SUBDIR: str = "nse"
+
 
 class BacktestError(RuntimeError):
     """The run cannot be assembled, or a resume was asked for on a different run."""
@@ -1593,6 +1598,87 @@ def file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+#: What the fence says when it turned a networked corporate-action refresh into a cache read.
+#: Printed by the preflight, so a morning that did not refresh says so rather than leaving the
+#: operator to infer it from a flag he passed.
+CA_REFRESH_FENCED: str = (
+    "corporate-action refresh FENCED: the cache lives inside the stores, which a session treats "
+    "as READ-ONLY (CLAUDE.md data-store safety, Q-18 layer 2), so the day-cache was read at any "
+    "age and NOTHING was fetched or written. This changes no factor a run already holds. "
+    "Refreshing it is an operator step, taken after a snapshot and never ninety seconds before "
+    "the bell (the ingest path: `python -m acumen.ca_report --from <D> --to <D> "
+    "--allow-network`); a session may do it only under an architect-named sanction "
+    "(`sanctioned_write=`)"
+)
+
+
+def inside_the_stores(target: Path, *, data_root: Path, cache_root: Path) -> bool:
+    """Is ``target`` inside either mutable store? Path comparison only -- no I/O, no clock."""
+    resolved = Path(target).expanduser()
+    for root in (Path(data_root).expanduser(), Path(cache_root).expanduser()):
+        try:
+            resolved.relative_to(root)
+        except ValueError:
+            continue
+        return True
+    return False
+
+
+def fence_ca_cache(
+    *,
+    cache_dir: Path | None,
+    allow_network: bool,
+    sanctioned_write: str | None = None,
+    data_root: Path | None = None,
+    cache_root: Path | None = None,
+) -> tuple[Path, bool, str]:
+    """Where the corporate-action cache is, whether it may be WRITTEN, and why. PURE.
+
+    **REVIEW_13B finding Q3.** ``build_runner`` called :func:`build_factor_tables` with no
+    ``cache_dir``, so the cache resolved to :func:`acumen.corp_actions.default_cache_dir` --
+    ``<data_root>/nse`` whatever ``--config`` said -- and ``allow_network`` reached it straight
+    from the CLI flag. So ``--mode live --day <today> --refresh --allow-network``, the
+    invocation ``run_screener``'s own docstring recommends, re-fetched and rewrote **22
+    corporate-action year files inside the store the operator snapshots**, before the first
+    sweep. Measured by that review, which caused it: 22 files, +46,262 bytes, 45 seconds of
+    paced network in the pre-open, and a ``factor_digest`` that is no longer stable over time
+    for an unchanged span -- so the frozen chunk-9B run stopped being byte-regenerable from the
+    current store, and nothing anywhere disclosed it.
+
+    CLAUDE.md's data-store rule is the law here and it is not about corporate actions: *"sessions
+    treat the stores as READ-ONLY unless the architect's prompt explicitly sanctions a named
+    write"*. This function is that rule, executable:
+
+    * a cache OUTSIDE both stores may be refreshed freely -- that is what a scratch path is for;
+    * a cache INSIDE a store may be refreshed only under a NAMED sanction, which a caller has to
+      pass deliberately and which is echoed back in the reason for the record;
+    * otherwise the refresh is fenced: the flag is turned off for this fetch, the day-cache is
+      read at any age (which is what offline has always meant here -- architect, 31-Jul-2026),
+      and the caller is handed :data:`CA_REFRESH_FENCED` to print.
+
+    Nothing is raised. A live morning must still start: the factor tables it needs are the ones
+    already on disk, and the only thing it loses is a refresh it should never have been doing
+    ninety seconds before the bell.
+
+    Returns:
+        ``(resolved cache directory, may this fetch use the network, the reason)``.
+    """
+    from .config import load_config  # local: this module must import without a config file
+
+    resolved = Path(cache_dir) if cache_dir is not None else ca.default_cache_dir()
+    if not allow_network:
+        return resolved, False, "offline: the corporate-action day-cache is read at any age"
+    if data_root is None or cache_root is None:
+        config = load_config(include_env=False)
+        data_root = config.path("data_root") if data_root is None else data_root
+        cache_root = config.path("cache_root") if cache_root is None else cache_root
+    if not inside_the_stores(resolved, data_root=data_root, cache_root=cache_root):
+        return resolved, True, f"refresh permitted: {resolved} is outside the stores"
+    if sanctioned_write:
+        return resolved, True, f"SANCTIONED STORE WRITE: {sanctioned_write}"
+    return resolved, False, CA_REFRESH_FENCED
+
+
 def build_factor_tables(
     symbols: Sequence[str],
     daily_store: DailyStore,
@@ -1601,6 +1687,7 @@ def build_factor_tables(
     end: date,
     allow_network: bool = False,
     cache_dir: Path | None = None,
+    sanctioned_write: str | None = None,
 ) -> tuple[dict[str, tuple[ca.Factor, ...]], dict[str, tuple[ca.Suppression, ...]], str, dict]:
     """The REAL chunk-3 factor table for each symbol, plus its digest and a parse summary.
 
@@ -1615,7 +1702,15 @@ def build_factor_tables(
     The full history is passed to :func:`acumen.corp_actions.build_factor_table` per symbol
     because the Q-6 face-value reconstruction needs the symbol's whole split history, not the
     slice inside the run span.
+
+    **The refresh is FENCED here rather than only at the call site** (REVIEW_13B Q3, and
+    :func:`fence_ca_cache` for the whole of why). Every caller of this function is fenced,
+    including one written next year that forgets: a networked pull into a directory inside the
+    stores needs a NAMED ``sanctioned_write`` or it becomes a cache read.
     """
+    cache_dir, allow_network, _reason = fence_ca_cache(
+        cache_dir=cache_dir, allow_network=allow_network, sanctioned_write=sanctioned_write
+    )
     actions = fetch_corp_action_history(
         date(min(2005, start.year), 1, 1),
         end,
@@ -1670,6 +1765,8 @@ def build_runner(
     master_path: Path | None = None,
     master_file: str | None = None,
     calendar: TradingCalendar | None = None,
+    ca_cache_dir: Path | None = None,
+    sanctioned_write: str | None = None,
 ) -> tuple[BacktestRunner, Path, dict]:
     """Open the local stores read-only and wire the whole machine. Returns (runner, master, ca).
 
@@ -1706,6 +1803,15 @@ def build_runner(
     the store's own scan for the history behind it, which is the C5 division of labour. The
     supplied calendar must carry an EXPLICIT trading-day set, so that CONTEXT 7-E2's
     non-standard sessions can be subtracted from evidence rather than from a weekday rule.
+
+    ``ca_cache_dir`` and ``sanctioned_write`` are **REVIEW_13B Q3's fence** (see
+    :func:`fence_ca_cache`). The corporate-action cache defaults to ``<data_dir>/nse`` -- the
+    directory the caller's own ``data_dir`` names, not the one the config file names, which is
+    the half of Q3 that made ``--config`` not govern -- and a networked refresh into a directory
+    inside the stores happens only under a named sanction. Every historical caller leaves both
+    ``None``: on the real machine the default resolves to exactly the path it always did, so no
+    stored factor table moves, and a run that passes ``--allow-network`` now READS that cache
+    instead of rewriting it.
 
     ``disclosures`` are stamped verbatim onto the run's own manifest and onto nothing else.
     """
@@ -1752,9 +1858,26 @@ def build_runner(
     residual = load_residual_register(data / RESIDUAL_LEDGER_RELPATH)
 
     wanted = tuple(symbol.strip().upper() for symbol in symbols)
-    factors, suppressions, digest, ca_summary = build_factor_tables(
-        wanted, daily_store, start=seed, end=end, allow_network=allow_network
+    # REVIEW_13B **Q3**: the corporate-action cache is passed EXPLICITLY, so `--config` governs
+    # where it is read from -- it used to resolve to `<config data_root>/nse` whatever the
+    # caller's `data_dir` said -- and the fence decides whether the flag may write there at all.
+    ca_cache, ca_network, ca_reason = fence_ca_cache(
+        cache_dir=Path(ca_cache_dir) if ca_cache_dir is not None else data / CA_CACHE_SUBDIR,
+        allow_network=allow_network,
+        sanctioned_write=sanctioned_write,
+        data_root=data,
+        cache_root=cache,
     )
+    factors, suppressions, digest, ca_summary = build_factor_tables(
+        wanted, daily_store, start=seed, end=end,
+        allow_network=ca_network, cache_dir=ca_cache, sanctioned_write=sanctioned_write,
+    )
+    if progress is not None and not ca_network:
+        # Disclosed where the operator is already reading (REVIEW_13B Q3: "nothing discloses
+        # it -- not the preflight, not the manifest, not the recording"). `fence_ca_cache` is
+        # pure and cheap, so the preflight prints the same sentence by asking it directly
+        # rather than by having it threaded back through three return values.
+        progress(f"corporate actions: {ca_reason}")
 
     if non_standard_sessions is None:
         span_days = [seed + timedelta(days=offset) for offset in range((end - seed).days + 1)]

@@ -48,6 +48,7 @@ from .atomic_io import atomic_write_text
 from .live_recording import RecordedAlert
 from .live_screener import (
     POC_PROVISIONAL,
+    STALE_AFTER_MINUTES,
     PHASE_ARMED,
     PHASE_EXITED,
     PHASE_IN_TRADE,
@@ -57,6 +58,7 @@ from .live_screener import (
     PHASE_WAITING,
     PHASES,
     SymbolState,
+    data_age,
     format_alert,
 )
 from .live_screener import rupees as _rupees
@@ -91,19 +93,22 @@ STATE_STYLE: Mapping[str, dict] = {
     PHASE_REFUSED: {"fg": "muted", "bg": "canvas", "rule": "error", "label": "refused"},
 }
 
-#: How far behind the boundary a row's last 1-minute bar may be before the row is STALE.
-#:
-#: A poll at boundary ``T`` may legally have seen stamps up to ``T - 1min`` (CONTEXT 7-E12, and
-#: :func:`acumen.live_source._clamp`), so a fresh row's last stamp IS ``T - 1min``. Anything
-#: older means the screener is looking at a prefix that stopped somewhere before now, and
-#: REVIEW_13 **B10** is what that cost: a feed answering 200 with an empty candle array froze
-#: every row on its last good prefix, and the page rendered "IN TRADE (1) -- position open,
-#: being watched" off bars that had stopped an hour earlier, byte-identical to a fresh row,
-#: while the header clock asserted the current boundary. DESIGN.md PART II's third acceptance
-#: question -- *"if the tool were broken, would this screen look different from a quiet
-#: market?"* -- was answered NO by the rendered artifact. One minute of tolerance, because one
-#: minute is the honest width of the clamp and not a judgment about liveness.
-STALE_AFTER_MINUTES: int = 1
+# ``STALE_AFTER_MINUTES`` and ``data_age`` are IMPORTED above rather than defined here.
+#
+# A poll at boundary ``T`` may legally have seen stamps up to ``T - 1min`` (CONTEXT 7-E12, and
+# :func:`acumen.live_source._clamp`), so a fresh row's last stamp IS ``T - 1min``. Anything
+# older means the screener is looking at a prefix that stopped somewhere before now, and
+# REVIEW_13 **B10** is what that cost: a feed answering 200 with an empty candle array froze
+# every row on its last good prefix, and the page rendered "IN TRADE (1) -- position open,
+# being watched" off bars that had stopped an hour earlier, byte-identical to a fresh row,
+# while the header clock asserted the current boundary. DESIGN.md PART II's third acceptance
+# question -- *"if the tool were broken, would this screen look different from a quiet
+# market?"* -- was answered NO by the rendered artifact.
+#
+# **REVIEW_13B Q1** moved the constant and the predicate into ``live_screener``: the ALERT needed
+# the same answer as the row, and a second copy of a threshold is how one screen comes to say two
+# things (REVIEW_13 M10, :func:`rupees`). Both names still resolve on this module, so every
+# caller and every test that reads ``live_dashboard.data_age`` reads the screener's own.
 
 #: What each state means, in the trader's words rather than the engine's. Shown once, as a
 #: group heading -- not as a legend, because a screen that needs a legend has already failed
@@ -181,26 +186,6 @@ def render_text(
             lines.append("  " + verification.headline)
     lines.append("")
     return "\n".join(lines) + "\n"
-
-
-def data_age(row: SymbolState, now: datetime) -> tuple[bool, int]:
-    """``(is this row STALE, how many minutes behind the boundary its last bar is)``.
-
-    REVIEW_13 B10 / M20. ``SymbolState`` has carried ``last_stamp`` and ``minute_count`` since
-    the chunk was built and neither reached either surface, so a row an hour stale was
-    indistinguishable from a fresh one. Both are rendered now, and this is the predicate that
-    decides whether the row is additionally MARKED -- because a number the reader has to
-    subtract in his head at 11:31 is a number he will not subtract at 14:31.
-
-    A ``refused`` row is never stale: its data is not what the reader is being asked to act on,
-    and marking it would spend the flag on the one state that is already explaining itself.
-    """
-    if row.phase == PHASE_REFUSED:
-        return (False, 0)
-    if row.last_stamp is None:
-        return (row.minute_count == 0, 0)
-    behind = int((now - row.last_stamp).total_seconds() // 60)
-    return (behind > STALE_AFTER_MINUTES, max(0, behind))
 
 
 def _data_words(row: SymbolState, now: datetime) -> str:

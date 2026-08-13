@@ -1,21 +1,22 @@
 """REVIEW_13B's KEPT PROBES -- the re-review of chunk 13's FIX-2.
 
-Seven probes. Four hold behaviour this re-review verified and wants held; **three PIN DEFECTS
-this re-review found and says so in their names**, so a later session must flip each one
+Seven probes. Three held behaviour that re-review verified and wanted held; **four PINNED
+DEFECTS it found and said so in their names**, so a later session had to flip each one
 deliberately rather than discover it by accident. That is the convention
 ``tests/test_review13_probes.py`` established and this file follows it exactly.
 
-The defect pins are GREEN on purpose: they assert what the code does TODAY, which is what makes
-them go red the day somebody fixes it.
+**The chunk-14 session has flipped all four, and this docstring is the record of it:**
 
-* ``test_the_live_alert_line_carries_NO_staleness_marker_when_the_feed_freezes`` -- REVIEW_13B
-  finding Q1. The dashboard ROW is marked ``[STALE ...]`` (B10 is genuinely fixed); the ALERT is
-  not, and the alert is what the bell rings and what chunk 14 forwards.
-* ``test_the_live_calendar_falls_through_a_GAP_inside_the_history_without_refusing`` --
-  REVIEW_13B finding Q2. Decision B363 and ``live_trading_calendar``'s own docstring both say a
-  gap inside the history is refused rather than papered over. It is not.
-* ``test_the_order_tripwire_still_walks_past_percent_and_format_construction`` -- REVIEW_13B
-  finding Q4. Two ordinary Python string-building idioms still evade both halves.
+    Q1  the alert carries no staleness marker   FLIPPED -- test_the_live_alert_line_CARRIES_*
+    Q2  the live calendar falls through a gap   FLIPPED -- test_the_live_calendar_REFUSES_*
+    Q3  --config does not govern the CA cache   FLIPPED -- test_build_runner_PASSES_the_*
+    Q4  two string idioms evade the tripwire    FLIPPED -- test_the_order_tripwire_CATCHES_*
+
+Each flipped probe KEEPS the defect's own measurement in its docstring and asserts the opposite
+of what it asserted, so the review's finding stays readable beside the fix that closed it. The
+deeper tests -- the whole frozen morning, the ledger's two qty-zero days, the fence's decision
+table, the byte-level store tripwire -- live in ``tests/test_chunk14_carried_defects.py``; what
+is kept here is the review's own witness, flipped.
 
 ASCII-only, like every other source file in this repo (chunk-0 B7).
 """
@@ -123,22 +124,26 @@ class _FrozenFeed:
         return self.inner.fetch(symbol, day, self.freeze_at)
 
 
-def test_the_live_alert_line_carries_NO_staleness_marker_when_the_feed_freezes(
+def test_the_live_alert_line_CARRIES_the_staleness_marker_when_the_feed_freezes(
     tmp_path: Path,
 ) -> None:
-    """REVIEW_13B **Q1**, a DEFECT PIN: the row says STALE and the alert says nothing.
+    """REVIEW_13B **Q1**, FIXED and FLIPPED. The row said STALE and the alert said nothing.
 
     Measured here on HDFCBANK 2026-06-10. The feed freezes at 11:30 and keeps answering; the
-    real day hit its target at 749.50 at 13:15. What the trader gets instead is a SQUARE-OFF
+    real day hit its target at 749.50 at 13:15. What the trader got instead was a SQUARE-OFF
     alert at 740.95 -- computed off bars that stopped four hours earlier -- with:
 
     * no failure banner (every sweep "completed": the feed answered),
     * nothing on the ALERT line to say the data is stale,
     * and the dashboard row correctly marked ``[STALE 241m BEHIND - NOT being watched]``.
 
-    B10 is fixed at the surface it was raised against and the marker does not reach the payload
-    the sinks deliver, which is the surface chunk 14 forwards. Flip this test by carrying the
-    row's staleness onto the alert exactly as ``poc_note`` is carried (:meth:`LiveScreener._alert`).
+    **FLIPPED.** The staleness marker travels on the alert exactly as ``poc_note`` does
+    (:meth:`LiveScreener._alert`), from the same predicate the dashboard row uses -- which now
+    lives in ``live_screener`` so there is one of it. The banner is still silent, which is
+    honest: every sweep really did complete, and what is wrong is the DATA, which is what the
+    marker says. The chunk-14 rule that makes it safe to forward is asserted separately:
+    :func:`acumen.live_screener.unvouched_price` refuses any alert that names a price without a
+    freshness stamp, and the Telegram sink runs it before it sends.
     """
     data_root = _stores_or_skip()
     store = MinuteStore.at(data_root / "minute_store")
@@ -159,8 +164,8 @@ def test_the_live_alert_line_carries_NO_staleness_marker_when_the_feed_freezes(
         hour=11, minute=29
     ), "the screener really is looking at a prefix that stopped at 11:29"
     assert screener.banner == "", (
-        "and NOTHING is loud about it: a feed that answers with a frozen prefix leaves every "
-        "sweep 'complete', so the failure banner never rises"
+        "the banner is still silent, and that is honest: every sweep DID complete -- the feed "
+        "answered every time. What is wrong is the data, which is what the marker is for"
     )
 
     # The RENDERED row is marked -- B10's own fix, and it holds.
@@ -172,16 +177,21 @@ def test_the_live_alert_line_carries_NO_staleness_marker_when_the_feed_freezes(
     row = [line for line in text.splitlines() if SYMBOL in line and "bars" in line]
     assert row and "STALE" in row[0], "the dashboard row IS marked stale (B10, fixed)"
 
-    # The ALERT is not.
+    # ...and so is the ALERT, which is the surface chunk 14 forwards.
     exits = [a for a in sink.alerts if a.kind in (ls.ALERT_EXIT, ls.ALERT_SQUARE_OFF)]
     assert exits, "the frozen prefix still produces an exit-side alert"
     delivered = ls.format_alert(exits[-1])
-    assert "STALE" not in delivered and "stale" not in delivered, (
-        "DEFECT PIN: the alert line the trader receives carries no staleness marker at all"
+    assert "SQUARE-OFF at 740.95" in delivered, "the review's own measured alert, unchanged"
+    assert "STALE 226m BEHIND" in delivered, (
+        "the marker is on the line the trader reads -- 15:15 minus the 11:29 prefix, measured "
+        "at the alert's own boundary rather than at the dashboard's clock (241m at 15:30)"
     )
-    assert not any(
-        "stale" in str(key).lower() for key in exits[-1].payload
-    ), "DEFECT PIN: and the payload chunk 14 will forward carries no staleness field either"
+    payload = exits[-1].payload
+    assert payload["stale"] is True and payload["data_behind_minutes"] == 226
+    assert ls.MARKER_STALE in payload["alert_states"]
+    assert ls.unvouched_price(exits[-1]) is None, (
+        "and with the marker on it, the alert may be forwarded: its price is vouched for"
+    )
 
 
 # --- DEFECT PIN 2 (REVIEW_13B Q2) --------------------------------------------------------------
@@ -202,24 +212,27 @@ class _GappyStore:
         return getattr(self.inner, name)
 
 
-def test_the_live_calendar_falls_through_a_GAP_inside_the_history_without_refusing(
-    tmp_path: Path,
-) -> None:
-    """REVIEW_13B **Q2**, a DEFECT PIN: the merge's gap refusal does not exist.
+def test_the_live_calendar_REFUSES_a_GAP_inside_the_history(tmp_path: Path) -> None:
+    """REVIEW_13B **Q2**, FIXED and FLIPPED: the merge's gap refusal now exists.
 
     Decision **B363** says *"a GAP inside the history is still refused rather than papered
     over"*, and :func:`acumen.calendar.live_trading_calendar`'s own docstring says an
     unattempted date inside the history *"is the incomplete-backfill case Q-3 safeguard 1
-    refuses"*. Neither is implemented: ``settled_through`` walks forward only while the ledger
-    is terminal, so the FIRST hole silently hands the whole remaining history to the published
+    refuses"*. Neither was implemented: ``settled_through`` walks forward only while the ledger
+    is terminal, so the FIRST hole silently handed the whole remaining history to the published
     holiday master.
 
-    The derived calendar over the same store refuses, loudly, which is the contrast this probe
-    keeps. Measured cost on this machine's store today: zero trading days move (the published
-    master and the store agree over 2026) and the Q-5 weekend-session disclosure is lost -- the
-    manifest's ``excluded_weekend_sessions`` block goes empty. What it would cost on a store
-    whose history disagrees with the published master is a CONTEXT 3.2 bias pair judged from a
+    The measured cost on this machine's store was zero moved trading days (the published master
+    and the store agree over 2026) and a LOST Q-5 weekend-session disclosure -- the manifest's
+    ``excluded_weekend_sessions`` block went empty. What it would have cost on a store whose
+    history disagrees with the published master is a CONTEXT 3.2 bias pair judged from a
     different calendar than the backtester's, which is drift in the one place section 6 forbids.
+
+    **FLIPPED.** The store's own ledger decides: terminal evidence AFTER the hole means an
+    incomplete backfill and is refused; no evidence after it means the store has reached the end
+    of what it has attempted, which is every ordinary live morning under Q-19's guard and must
+    still start. Both halves are asserted here and again, over a real morning's span, in
+    ``tests/test_chunk14_carried_defects.py``.
     """
     data_root = _stores_or_skip()
     store = DailyStore.at(data_root / "daily_store")
@@ -234,49 +247,63 @@ def test_the_live_calendar_falls_through_a_GAP_inside_the_history_without_refusi
         "Q-3 safeguard 1 still holds where it always held"
     )
 
-    merged = cal.live_trading_calendar(published, store=gappy, first_day=first, day=LIVE_DAY)
-    assert merged.trading_days, (
-        "DEFECT PIN: the live calendar builds over the SAME gappy ledger without a word"
-    )
+    with pytest.raises(cal.CalendarError) as merged_refusal:
+        cal.live_trading_calendar(published, store=gappy, first_day=first, day=LIVE_DAY)
+    assert "GAP inside its own history" in str(merged_refusal.value)
+    assert hole.isoformat() in str(merged_refusal.value)
+
     whole = cal.live_trading_calendar(published, store=store, first_day=first, day=LIVE_DAY)
-    assert set(merged.trading_days) == set(whole.trading_days), (
-        "and today the two agree exactly, which is why the fall-through is silent rather than "
-        "visible: the defect is that nothing REFUSES, not that a number is wrong today"
-    )
-    assert whole.excluded_weekend_sessions and not merged.excluded_weekend_sessions, (
-        "what IS lost is the Q-5 weekend-session disclosure the store alone can supply"
+    assert whole.trading_days, "the WHOLE store still builds"
+    assert whole.excluded_weekend_sessions, (
+        "and the Q-5 weekend-session disclosure the store alone can supply is kept"
     )
 
 
 # --- DEFECT PIN 3 (REVIEW_13B Q4) --------------------------------------------------------------
 
 
-def test_the_order_tripwire_still_walks_past_percent_and_format_construction() -> None:
-    """REVIEW_13B **Q4**, a DEFECT PIN: two ordinary idioms still evade the widened scan.
+def test_the_order_tripwire_CATCHES_percent_and_format_construction() -> None:
+    """REVIEW_13B **Q4**, FIXED and FLIPPED: two ordinary idioms no longer evade the scan.
 
-    M7's widening is real -- this re-review re-measured it at 31/31 on the shipped corpus, with
+    M7's widening was real -- that re-review re-measured it at 31/31 on the shipped corpus, with
     five AST-only catches and one literal-only catch, over 170 files instead of 46. Then ten NEW
-    shapes were put to it and seven were caught. The three misses are ``"place%s" % "Order"``,
+    shapes were put to it and seven were caught. The three misses were ``"place%s" % "Order"``,
     ``"place{}".format("Order")`` and a ``chr()`` reconstruction. The last is deliberate
     obfuscation and outside any static tripwire's remit; the first two are ordinary Python that
-    a careless author could reach for.
+    a careless author could reach for, which is exactly the population it is for.
 
-    Flip this by teaching ``_folded_strings`` ``ast.Mod`` over a constant left-hand side and
-    ``str.format`` with constant arguments.
+    **FLIPPED.** ``_folded_strings`` folds ``ast.Mod`` over a constant left-hand side (both the
+    single-value and the tuple form) and ``str.format`` with constant positional arguments. Both
+    remain LITERAL-half misses by construction -- the normaliser leaves ``%s%`` and
+    ``{}.format(`` between the halves -- so each one is a catch the AST half adds and the line
+    scan cannot make.
     """
-    from tests.test_live_safety import ast_offenders, literal_offenders
+    from tests.test_live_safety import EVASIONS, ast_offenders, literal_offenders, scan_source
 
-    for label, source in (
-        ("percent format", 'getattr(connect, "place%s" % "Order")(p)\n'),
-        ("str.format", 'getattr(connect, "place{}".format("Order"))(p)\n'),
-    ):
-        assert not literal_offenders(source, label), f"{label}: the literal half misses it"
-        assert not ast_offenders(ast.parse(source), label), f"{label}: the AST half misses it"
+    # The shapes are READ from the corpus rather than written here, and they have to be: now
+    # that the AST half folds them, a file that spells one out is a file the repository-wide
+    # scan refuses -- which is the whole point of the fix, and which is why the corpus lives in
+    # the one self-exempt file (this probe used to be able to write them precisely because they
+    # were invisible).
+    corpus = dict(EVASIONS)
+    for label in ("percent format", "str.format", "str.format across lines"):
+        source = corpus[label]
+        assert not literal_offenders(source, label), (
+            f"{label}: the literal half still cannot see it, which is why the AST half matters"
+        )
+        assert ast_offenders(ast.parse(source), label), f"{label}: the AST half CATCHES it"
 
-    # ... and the corpus the fix session shipped is genuinely caught, every variant of it.
-    from tests.test_live_safety import EVASIONS, scan_source
+    # The tuple form is the one shape of the four the LITERAL half already saw: squashing a
+    # two-placeholder template against a tuple of two constants leaves the endpoint's own
+    # spelling on the line. It is folded by the AST half anyway, so the two halves agree rather
+    # than one of them carrying it alone.
+    tuple_form = corpus["percent format, tuple"]
+    assert literal_offenders(tuple_form, "percent format, tuple")
+    assert ast_offenders(ast.parse(tuple_form), "percent format, tuple")
 
+    # ... and the corpus, now four shapes longer, is caught in full.
     assert not [label for label, src in EVASIONS if not scan_source(src, label)]
+    assert len(EVASIONS) >= 35, "the four new shapes joined the permanent corpus"
 
 
 # --- HOLD 1: CONTEXT 4.7 against the ONE recorded text that can judge it ------------------------
@@ -454,20 +481,26 @@ def test_a_stamp_RE_SERVED_in_a_later_sweep_is_a_revision_and_not_a_gate_2_dupli
 # --- HOLD 4: what --config does NOT govern, pinned at the source --------------------------------
 
 
-def test_build_runner_takes_the_CORPORATE_ACTION_cache_from_data_root_not_from_config() -> None:
-    """REVIEW_13B **Q3**, pinned at the source rather than by writing to a store.
+def test_build_runner_PASSES_the_CORPORATE_ACTION_cache_and_FENCES_the_refresh() -> None:
+    """REVIEW_13B **Q3**, FIXED and FLIPPED -- still pinned at the source, still writing nothing.
 
-    ``build_runner`` calls ``build_factor_tables(..., allow_network=allow_network)`` with NO
-    ``cache_dir``, so the corporate-action cache resolves to
+    ``build_runner`` called ``build_factor_tables(..., allow_network=allow_network)`` with NO
+    ``cache_dir``, so the corporate-action cache resolved to
     :func:`acumen.corp_actions.default_cache_dir` = ``<data_root>/nse`` whatever ``--config``
-    says. On a live morning started with ``--allow-network`` -- the invocation
-    ``run_screener``'s own docstring recommends -- that re-fetches and REWRITES 22 year files
-    inside the store the operator snapshots, before the first sweep. This re-review measured it:
+    said. On a live morning started with ``--allow-network`` -- the invocation
+    ``run_screener``'s own docstring recommends -- that re-fetched and REWROTE 22 year files
+    inside the store the operator snapshots, before the first sweep. That re-review measured it:
     22 files, +46,262 bytes, 45 seconds of paced network, and 19 symbols gaining one
     ordinary-dividend factor each (every ex-date after the frozen run's end, so no walked row
-    moved).
+    moved), with nothing in the preflight, the manifest or the recording to say so.
 
-    Nothing in the preflight, the manifest or the recording says a store was written.
+    **FLIPPED.** The cache is passed explicitly, resolved from the caller's own ``data_dir``, and
+    :func:`acumen.backtest.fence_ca_cache` stands between the CLI flag and the fetch: a cache
+    inside either store is refreshed only under a NAMED sanction, and otherwise the flag becomes
+    a cache read with :data:`acumen.backtest.CA_REFRESH_FENCED` printed. The byte-level proof --
+    a real ``build_runner(allow_network=True)`` against the real store, fingerprinted before and
+    after -- is ``test_Q3_a_LIVE_REFRESH_writes_ZERO_bytes_under_the_stores``. This probe stays
+    at the SOURCE, because the finding was that the code writes, so the probe must not.
     """
     source = (Path(bt.__file__)).read_text(encoding="utf-8")
     tree = ast.parse(source)
@@ -478,14 +511,17 @@ def test_build_runner_takes_the_CORPORATE_ACTION_cache_from_data_root_not_from_c
     ]
     assert calls, "build_runner still builds the factor tables"
     for call in calls:
-        assert "cache_dir" not in {kw.arg for kw in call.keywords}, (
-            "DEFECT PIN: no cache_dir is passed, so --config does not govern where the "
-            "corporate-action cache is read from or written to"
-        )
-        assert "allow_network" in {kw.arg for kw in call.keywords}, (
-            "and allow_network reaches it straight from the CLI flag"
-        )
+        keywords = {kw.arg for kw in call.keywords}
+        assert "cache_dir" in keywords, "--config governs the CA cache now"
+        assert "sanctioned_write" in keywords, "and a store write needs a named sanction"
+        assert "allow_network" in keywords
 
     from acumen import corp_actions as ca
 
-    assert ca.default_cache_dir() == load_config(include_env=False).path("data_root") / "nse"
+    data_root = load_config(include_env=False).path("data_root")
+    assert ca.default_cache_dir() == data_root / "nse", (
+        "the DEFAULT location is unchanged -- the fence is about writing, not about moving the "
+        "cache, so every historical run reads exactly the table it always read"
+    )
+    resolved, network, why = bt.fence_ca_cache(cache_dir=None, allow_network=True)
+    assert resolved == data_root / "nse" and network is False and why == bt.CA_REFRESH_FENCED

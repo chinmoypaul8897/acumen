@@ -137,6 +137,41 @@ PHASE_RANK: Mapping[str, int] = {
 #: the symbol produces.
 POC_PROVISIONAL: str = "POC provisional / incomplete window"
 
+# --- the STATES an alert carries besides its numbers (REVIEW_13B Q1) ---------------------------
+
+#: The alert stands on a window the screener cannot vouch for: its last 1-minute candle is
+#: further behind this boundary than :data:`STALE_AFTER_MINUTES` allows. REVIEW_13B **Q1**
+#: measured what its absence cost -- a feed answering 200 with a prefix that never grew left
+#: every sweep "complete", so no banner rose, and the trader received
+#: ``[15:15] HDFCBANK SQUARE-OFF at 740.95`` computed off bars that stopped at 11:29 on a day
+#: whose real answer was target-hit at 749.50. The dashboard ROW was marked; the ALERT, which is
+#: the surface the bell rings on and the surface chunk 14 forwards, carried nothing.
+MARKER_STALE: str = "stale"
+#: The alert's numbers descend from a POC pinned over an INCOMPLETE window (B357 / the
+#: architect's B3 ruling). A first-class alert state, on the payload, for every kind.
+MARKER_POC_PROVISIONAL: str = "poc-provisional"
+
+#: The two above, in the order an alert line prints them. A payload's ``alert_states`` is a
+#: subset of this tuple, so a reader (or a Telegram message) never meets a state nobody named.
+ALERT_STATES: tuple[str, ...] = (MARKER_STALE, MARKER_POC_PROVISIONAL)
+
+#: How far behind the boundary a state's last 1-minute bar may be before it is STALE.
+#:
+#: A poll at boundary ``T`` may legally have seen stamps up to ``T - 1min`` (CONTEXT 7-E12, and
+#: :func:`acumen.live_source._clamp`), so a fresh state's last stamp IS ``T - 1min``. One minute
+#: of tolerance, because one minute is the honest width of the clamp and not a judgment about
+#: liveness. It lives HERE, beside the alert machinery, because the same predicate now decides
+#: the dashboard's row marker and the alert's own -- one implementation of one sentence, which
+#: is the discipline REVIEW_13 M10 set for :func:`rupees` after two of them disagreed on screen.
+STALE_AFTER_MINUTES: int = 1
+
+#: The price fields an alert can carry. If any of them is present, the alert is making a claim
+#: about a PRICE and must therefore state the age of the data behind it -- which is what
+#: :func:`unvouched_price` checks before a sink is allowed to forward it.
+PRICE_FIELDS: tuple[str, ...] = (
+    "entry_paise", "stop_paise", "target_paise", "exit_paise", "poc_paise", "reference_paise",
+)
+
 #: How a dedup key is flattened into ``state.json``. A vertical bar cannot occur in a symbol, a
 #: kind or any identity component (they are stamps, integers and engine words), so the round
 #: trip is exact -- and a resume that misread its own dedup set would re-send the morning.
@@ -204,6 +239,32 @@ class BlockedByOpenQuestion(ScreenerError):
 #: REVIEW_13 and is executed by the settled-universe filter in :func:`build_live_screener`;
 #: Q-31 is a CONTEXT edit and never blocked anything.
 LIVE_BLOCKING_QUESTIONS: tuple[tuple[str, str], ...] = ()
+
+#: CONTEXT 3.5's own outcome for a day whose per-share risk exceeds the whole trade risk:
+#: *"qty == 0 -> no trade, consumed + logged"*. REVIEW_13 **M21**: the live path alerted it as a
+#: TRIGGER with ``qty 0`` on the line, which is a trade the strategy does not have -- the
+#: backtester writes :data:`acumen.simulate.FLAG_QTY_ZERO_UNSIZABLE`, no fill, no cost and no
+#: PnL for exactly these days. Measured population over the chunk-9B ten-year ledger: **2
+#: stock-days of 495,312** -- BOSCHLTD 2021-05-20 (per-share risk Rs 1,019.70) and SHREECEM
+#: 2020-03-19 (Rs 1,173.30). Rare, reachable, and a spec deviation on the live path.
+REFUSAL_QTY_ZERO: str = "qty 0 -- no trade, consumed (CONTEXT 3.5)"
+
+#: The refusal a REPLAY gives for a symbol-day nothing can gate (REVIEW_13 **M22**).
+#:
+#: CONTEXT 4.6's battery is a WHOLE-DAY measurement -- gate 1 folds a session's total volume
+#: against the day's bhavcopy -- so it is computed once and handed to every boundary. When no
+#: whole day can be found (the minute lake does not hold the day and the session's own source
+#: cannot serve one), the battery does not exist, and the pipeline's ``gates=None`` door means
+#: "compute it here", which on a GROWING PREFIX is not a stricter reading but a WRONG one: it
+#: folds a partial session against a whole-day total and refuses by gate 1. Re-measured by
+#: REVIEW_13B at **15 of 17 boundaries refused**, on a day where nothing was wrong. A refusal
+#: has to be the screener's own, by name, so that a parity result can never be an artefact of
+#: both sides refusing for reasons neither of them stated.
+REFUSAL_NO_BATTERY: str = (
+    "no whole-day battery for this symbol-day: the lake does not hold it and the session's "
+    "source could not serve a whole session, so CONTEXT 4.6's gates cannot be measured "
+    "(gating a growing prefix against a whole-day oracle would refuse a sound day)"
+)
 
 #: The refusal a live morning gives when THE DAY'S OWN instrument master is not in the cache.
 #: A module constant so a test can assert the contract by EQUALITY rather than by three
@@ -416,10 +477,77 @@ def format_alert(alert: RecordedAlert) -> str:
     A live alert carries CONTEXT 4.7's disclosure on the same line, after the numbers rather
     than before them: the sentence must not be what he reads first at 11:30, and it must not be
     absent from what he forwards at 11:31.
+
+    **REVIEW_13B Q1**: the alert's own STATES print between the numbers and the disclosure, and
+    they print BEFORE it deliberately -- the disclosure is a standing condition of every live
+    morning, while a staleness or provisional-POC marker is a fact about THIS alert, and the
+    thing that is true only today must not be read as part of the sentence that is true daily.
     """
     line = _format_alert_body(alert)
+    for note in alert_state_notes(alert.payload):
+        line = f"{line}   [{note}]"
     disclosure = alert.payload.get("disclosure")
     return f"{line}   [{disclosure}]" if disclosure else line
+
+
+def alert_state_notes(payload: Mapping) -> tuple[str, ...]:
+    """The human sentence for each state on this alert, in :data:`ALERT_STATES` order.
+
+    Read off the payload rather than recomputed, so what the terminal prints, what the HTML
+    dashboard shows and what chunk 14 forwards to Telegram are the same three sentences from
+    the same source -- and so a recording replayed months later still says what it said.
+    """
+    states = set(payload.get("alert_states") or ())
+    notes: list[str] = []
+    for marker in ALERT_STATES:
+        if marker not in states:
+            continue
+        if marker == MARKER_STALE:
+            notes.append(str(payload.get("stale_note") or MARKER_STALE))
+        else:
+            notes.append(str(payload.get("poc_note") or POC_PROVISIONAL))
+    return tuple(notes)
+
+
+def stale_note(behind_minutes: int) -> str:
+    """The staleness marker's own words. One place, so every surface says the same thing."""
+    return (
+        f"STALE {behind_minutes}m BEHIND -- this price stands on a window the screener cannot "
+        "vouch for"
+    )
+
+
+def unvouched_price(alert: RecordedAlert) -> str | None:
+    """Why this alert's price may NOT be forwarded, or ``None`` when it may.
+
+    **The chunk-14 rule, in executable form:** *no alert forwarded to Telegram may carry a price
+    the screener cannot vouch for.* An alert vouches for its price by carrying the AGE of the
+    data behind it -- ``stale`` plus ``data_behind_minutes`` -- and, when that age is beyond the
+    clamp, by carrying the marker that says so. So there are exactly two ways to fail:
+
+    1. the alert names a price and carries no freshness stamp at all, which is the shape
+       REVIEW_13B Q1 found (the row was marked, the payload was not); or
+    2. it is stale and the marker did not travel with it.
+
+    A sink calls this before it sends. Deliberately a function of the PAYLOAD alone: the sink
+    holds no clock, no bars and no state, so what it can check is exactly what a later reader of
+    the recording can check.
+    """
+    payload = alert.payload
+    if not any(payload.get(field) is not None for field in PRICE_FIELDS):
+        return None
+    if "stale" not in payload:
+        return (
+            f"{alert.symbol} {alert.kind}: the payload names a price and carries no freshness "
+            "stamp, so nothing on it says how old the window behind that price is"
+        )
+    if payload.get("stale") and MARKER_STALE not in set(payload.get("alert_states") or ()):
+        return (
+            f"{alert.symbol} {alert.kind}: the window behind this price is "
+            f"{payload.get('data_behind_minutes')} minute(s) behind the boundary and the alert "
+            "carries no staleness marker"
+        )
+    return None
 
 
 def _format_alert_body(alert: RecordedAlert) -> str:
@@ -570,6 +698,25 @@ class SymbolState:
             poc_provisional=bool(payload.get("poc_provisional", False)),
             poc_missing_minutes=int(payload.get("poc_missing_minutes", 0) or 0),
         )
+
+
+def data_age(state: SymbolState, now: datetime) -> tuple[bool, int]:
+    """``(is this state STALE, how many minutes behind ``now`` its last bar is)``.
+
+    REVIEW_13 B10 / M20 raised it for the dashboard ROW; REVIEW_13B **Q1** is that the ALERT
+    needed the same answer and there was no shared place to ask it. This is that place -- the
+    dashboard imports this function, exactly as it imports :func:`rupees`, so a row and the
+    alert beside it can never disagree about whether the same window is stale.
+
+    A ``refused`` state is never stale: its data is not what the reader is being asked to act
+    on, and marking it would spend the flag on the one state that is already explaining itself.
+    """
+    if state.phase == PHASE_REFUSED:
+        return (False, 0)
+    if state.last_stamp is None:
+        return (state.minute_count == 0, 0)
+    behind = int((now - state.last_stamp).total_seconds() // 60)
+    return (behind > STALE_AFTER_MINUTES, max(0, behind))
 
 
 @dataclass(frozen=True)
@@ -933,6 +1080,13 @@ class LiveScreener:
             return []
 
         gates = self._battery(symbol, minutes)
+        if gates is None:
+            # REVIEW_13 M22. `gates=None` reaches `evaluate` as "compute it here", which on a
+            # growing prefix measures a partial session against a whole-day oracle and refuses
+            # by gate 1 at every boundary but the last. The screener refuses in its OWN words
+            # instead, once, so the reason is the true one and a parity harness can tell a
+            # refusal apart from an agreement.
+            return self._refuse_without_battery(symbol, boundary, minutes)
         stock_day = self.pipeline.evaluate(
             symbol, self.day, bias=bias, minutes=minutes, gates=gates,
             profile=self._profile(symbol, minutes, boundary, gates),
@@ -941,6 +1095,32 @@ class LiveScreener:
         after = self._state_from(stock_day, boundary, previous=before)
         self.states[symbol] = after
         return self._alerts_for(after, stock_day, boundary)
+
+    def _refuse_without_battery(
+        self, symbol: str, boundary: datetime, minutes: Sequence[StoredBar]
+    ) -> list[RecordedAlert]:
+        """No whole-day battery exists for this symbol-day: refuse it BY NAME (REVIEW_13 M22).
+
+        Recorded once, on the boundary that first meets it, so a replay of a day the lake does
+        not hold reads as one refusal with a stated cause instead of fifteen gate-1 failures
+        that were never really gate 1's verdict.
+        """
+        previous = self.states[symbol]
+        bias = self.biases.get(symbol)
+        if previous.refusal != REFUSAL_NO_BATTERY:
+            self.recording.record_event(
+                "battery-unavailable", at=boundary, symbol=symbol,
+                minutes=len(minutes), detail=f"{symbol}: {REFUSAL_NO_BATTERY}",
+            )
+        self.states[symbol] = SymbolState(
+            symbol=symbol, phase=PHASE_REFUSED,
+            bias=None if bias is None else bias.bias,
+            bias_rule="" if bias is None else bias.rule,
+            detail=REFUSAL_NO_BATTERY, refusal=REFUSAL_NO_BATTERY,
+            minute_count=len(minutes),
+            last_stamp=minutes[-1].stamp if minutes else None,
+        )
+        return []
 
     def _profile(
         self,
@@ -1083,6 +1263,8 @@ class LiveScreener:
             sim.position_size(self.risk_per_trade_paise, entry.risk_paise)
             if self.risk_per_trade_paise else None
         )
+        if qty == 0:
+            return self._consumed_unsizable(entry, common, previous=previous, boundary=boundary)
         exit_event = signal.exit_event
         exit_kind, exit_paise, phase = None, None, PHASE_IN_TRADE
         if exit_event is not None and exit_event.kind != sig.EXIT_SQUARE_OFF:
@@ -1107,6 +1289,45 @@ class LiveScreener:
             target_paise=entry.target_paise, qty=qty,
             exit_kind=exit_kind, exit_paise=exit_paise, **common,
         ), previous)
+
+    def _consumed_unsizable(
+        self, entry, common: dict, *, previous: SymbolState, boundary: datetime
+    ) -> SymbolState:
+        """CONTEXT 3.5's ``qty == 0``: **no trade, consumed + logged** (REVIEW_13 **M21**).
+
+        The cross was real, so the stock-day is CONSUMED (CONTEXT 3.4-2) and nothing later can
+        trade it -- but a single share would already risk more than the trader's whole per-trade
+        budget, so nothing is bought and there is no position to alert, to watch or to square
+        off. The backtester has always said exactly this: ``simulate._unsizable_record`` keeps
+        the entry, stop and target for the replay pack, writes ``qty 0``, NO fill price, no cost
+        and no PnL, and flags the row ``qty_zero_unsizable``. The live path instead delivered a
+        TRIGGER with ``qty 0`` printed on it -- a trade the strategy does not have.
+
+        The four numbers stay READABLE, in the detail line, because the trader can legitimately
+        ask why his screen went quiet on a stock that crossed; they do not stay in the entry
+        FIELDS, because those are what the alert machinery reads as "there is a position here".
+        Refused rather than exited: the day is over for this symbol and
+        :meth:`_evaluate`'s own guard keeps it that way for the rest of the session.
+        """
+        risk = int(entry.risk_paise)
+        detail = (
+            f"NO TRADE, day consumed: per-share risk {rupees(risk)} exceeds the whole trade "
+            f"risk {rupees(self.risk_per_trade_paise)}, so floor(risk / per-share risk) = 0 "
+            f"shares (CONTEXT 3.5). The cross at {rupees(int(entry.entry_paise))} "
+            f"(stop {rupees(int(entry.stop_paise))}, target "
+            f"{rupees(int(entry.target_paise))}) still CONSUMED the stock-day (CONTEXT 3.4-2)"
+        )
+        if previous.refusal != REFUSAL_QTY_ZERO:
+            # "consumed + LOGGED", in the recording rather than only on a screen nobody kept.
+            self.recording.record_event(
+                "qty-zero-unsizable", at=boundary, symbol=common["symbol"],
+                entry_paise=int(entry.entry_paise), stop_paise=int(entry.stop_paise),
+                target_paise=int(entry.target_paise), per_share_risk_paise=risk,
+                risk_per_trade_paise=self.risk_per_trade_paise, detail=detail,
+            )
+        return SymbolState(
+            phase=PHASE_REFUSED, detail=detail, refusal=REFUSAL_QTY_ZERO, qty=0, **common
+        )
 
     def _monotonic(self, after: SymbolState, previous: SymbolState) -> SymbolState:
         """Refuse a state that walks BACKWARDS along :data:`PHASE_RANK` (REVIEW_13 M3).
@@ -1230,6 +1451,25 @@ class LiveScreener:
         return [alert for alert in out if self._deliver(alert)]
 
     def _alert(self, kind: str, symbol: str, at: datetime, payload: dict) -> RecordedAlert:
+        """Build the alert this state warrants, WITH the states that qualify its numbers.
+
+        **REVIEW_13B Q1, and the architect's chunk-14 instruction with it.** An alert is the
+        surface the bell rings on, the surface that gets forwarded, and the only surface a
+        trader reads at 11:31 -- so everything that qualifies its numbers has to be ON it and
+        not merely beside it on a screen. Three things travel here:
+
+        * CONTEXT 4.7's disclosure, unchanged;
+        * the AGE of the window behind the price -- ``bars``, ``last_bar_stamp``,
+          ``data_behind_minutes`` and ``stale`` -- on every alert, always, so that
+          :func:`unvouched_price` can tell "fresh" from "nobody said" rather than having to
+          assume;
+        * the STATES, :data:`ALERT_STATES`, as first-class payload data: ``stale`` beyond the
+          clamp (Q1) and B357's ``POC provisional / incomplete window`` (the architect's B3
+          ruling, whose own words are *"on the state, on both dashboards and on every alert the
+          symbol produces"* -- it used to reach ARMED and TRIGGER only, which left the exit
+          alert of a provisional-POC day carrying a stop and a target derived from that POC with
+          nothing on it to say so).
+        """
         body = dict(payload)
         body["dry_run"] = self.dry_run
         if self.disclosure:
@@ -1239,11 +1479,24 @@ class LiveScreener:
             # to travel with it.
             body["disclosure"] = self.disclosure
         state = self.states.get(symbol)
-        if state is not None and state.poc_provisional and kind in (ALERT_ARMED, ALERT_TRIGGER):
-            # CONTEXT 3.3 / B3's completeness flag, on the alert as well as on the screen: these
-            # are the two alerts whose numbers are computed off the pinned POC.
-            body["poc_note"] = POC_PROVISIONAL
-            body["poc_missing_minutes"] = state.poc_missing_minutes
+        states: list[str] = []
+        if state is not None:
+            stale, behind = data_age(state, at)
+            body["bars"] = state.minute_count
+            body["last_bar_stamp"] = (
+                None if state.last_stamp is None else state.last_stamp.isoformat()
+            )
+            body["data_behind_minutes"] = behind
+            body["stale"] = stale
+            if stale:
+                states.append(MARKER_STALE)
+                body["stale_note"] = stale_note(behind)
+            if state.poc_provisional:
+                states.append(MARKER_POC_PROVISIONAL)
+                body["poc_note"] = POC_PROVISIONAL
+                body["poc_missing_minutes"] = state.poc_missing_minutes
+        if states:
+            body["alert_states"] = [marker for marker in ALERT_STATES if marker in states]
         return RecordedAlert(kind=kind, symbol=symbol, at=at, payload=body)
 
     @staticmethod
@@ -1524,25 +1777,61 @@ def _num(value):
 # --- construction ------------------------------------------------------------------------------
 
 
+def whole_day_from_source(source: BarSource, symbol: str, day: date) -> tuple[StoredBar, ...]:
+    """Every 1-minute bar ``source`` can serve for ``day`` -- the whole session, in one ask.
+
+    A replay source (the minute lake, or a recording) answers a poll stamped after the close
+    with the complete day, which is precisely what CONTEXT 4.6's battery needs. Never called on
+    a live morning: :func:`full_day_gates` is not called there at all (CONTEXT 4.7).
+
+    A source that replays a RECORDING hands back its duplicate stamps too. ``recording.bars``
+    de-duplicates a re-polled stamp because the engines need one bar per minute; the battery
+    must see the twins or it cannot refuse them, which is REVIEW_13 **B2** exactly.
+    """
+    bars = tuple(source.fetch(symbol, day, datetime.combine(day, SESSION_END)))
+    origin = getattr(source, "recording", None)
+    if bars and origin is not None:
+        bars = bars + tuple(origin.duplicate_bars(symbol, day))
+    return bars
+
+
 def full_day_gates(
-    pipeline: SignalPipeline, symbols: Iterable[str], day: date
+    pipeline: SignalPipeline,
+    symbols: Iterable[str],
+    day: date,
+    *,
+    source: BarSource | None = None,
 ) -> dict[str, DayGates]:
-    """The CONTEXT 4.6 battery for ``day``, per symbol, from the STORED whole day.
+    """The CONTEXT 4.6 battery for ``day``, per symbol, from the WHOLE day.
 
     This is the backtester's own verdict, computed exactly where the backtester computes it --
-    :meth:`acumen.signal_engine.SignalPipeline.gate_day` over the day's whole stored minute day.
-    It is a WHOLE-DAY measurement (gate 1 folds the session's total volume against the
-    bhavcopy), which is why it is computed once and handed to every boundary rather than
-    recomputed on a growing prefix, where it would be wrong at every boundary but the last.
+    :meth:`acumen.signal_engine.SignalPipeline.gate_day` over a whole minute day. It is a
+    WHOLE-DAY measurement (gate 1 folds the session's total volume against the bhavcopy), which
+    is why it is computed once and handed to every boundary rather than recomputed on a growing
+    prefix, where it would be wrong at every boundary but the last.
 
     It is available for a PAST day and not for TODAY. That asymmetry was QUESTIONS.md **Q-28**
     and CONTEXT 4.7 is the ruling on it: a live morning runs
     :func:`acumen.signal_engine.oracle_free_battery` per sweep instead, and this function is not
     called at all for ``mode="live"``.
+
+    **The stored lake is not the only whole day there is** (REVIEW_13 **M22**). A recording of a
+    live morning holds a session the lake will not hold until that night's backfill, and
+    replaying it was the first thing chunk 14's parity harness had to do. With no battery the
+    screener handed ``gates=None`` down to the pipeline, which computed one per boundary over a
+    GROWING PREFIX and refused 15 of 17 boundaries by gate 1 -- a parity that agreed because
+    both sides had refused. So when the lake cannot answer, the battery is measured over the
+    whole day the SESSION'S OWN SOURCE can serve, against the published bhavcopy: which is
+    CONTEXT 4.7's own next-pre-open construction (:func:`acumen.live_refresh.verify_prior_
+    recording`), applied one step earlier. The duplicate stamps of a recording are folded in
+    with it, for the reason REVIEW_13 B2 gives -- a battery that cannot see a twin cannot refuse
+    it.
     """
     out: dict[str, DayGates] = {}
     for symbol in symbols:
-        minutes = pipeline.minute_store.minutes(symbol, day)
+        minutes: tuple[StoredBar, ...] = tuple(pipeline.minute_store.minutes(symbol, day))
+        if not minutes and source is not None:
+            minutes = whole_day_from_source(source, symbol, day)
         if minutes:
             out[symbol] = pipeline.gate_day(symbol, day, minutes)
     return out
@@ -1648,8 +1937,10 @@ def build_live_screener(
             biases[symbol] = series[day]
 
     # CONTEXT 4.7: a live morning has no stored day to gate and no oracle to gate it against, so
-    # the settled battery is not computed at all and the oracle-free one runs per sweep.
-    gates = {} if live else full_day_gates(runner.pipeline, wanted, day)
+    # the settled battery is not computed at all and the oracle-free one runs per sweep. A
+    # REPLAY takes it from the lake, and -- REVIEW_13 M22 -- from the session's own source for a
+    # day the lake does not hold yet, which is every recording of a live morning.
+    gates = {} if live else full_day_gates(runner.pipeline, wanted, day, source=source)
     governing_calendar = calendar if calendar is not None else runner.calendar
     recording.open_session(_manifest(
         runner=runner, day=day, symbols=wanted, master_path=master_path,
@@ -1950,12 +2241,19 @@ def master_tick_divergence(
 
 
 __all__ = [
+    "ALERT_STATES",
     "LIVE_BLOCKING_QUESTIONS",
     "LIVE_RESIDUAL_BRACKET",
+    "MARKER_POC_PROVISIONAL",
+    "MARKER_STALE",
     "MASTER_MISSING_REFUSAL",
     "PHASE_RANK",
     "POC_PROVISIONAL",
+    "PRICE_FIELDS",
+    "REFUSAL_NO_BATTERY",
+    "REFUSAL_QTY_ZERO",
     "SEED_LOOKBACK_DAYS",
+    "STALE_AFTER_MINUTES",
     "ALERT_ARMED",
     "ALERT_EXIT",
     "ALERT_FAILURE",
@@ -1987,11 +2285,17 @@ __all__ = [
     "SymbolState",
     "SystemClock",
     "VirtualClock",
+    "alert_state_notes",
     "boundary_stamps",
     "build_live_screener",
+    "data_age",
     "day_master_filename",
     "format_alert",
     "full_day_gates",
     "master_tick_divergence",
+    "rupees",
+    "stale_note",
+    "unvouched_price",
     "wait_for_boundary",
+    "whole_day_from_source",
 ]
