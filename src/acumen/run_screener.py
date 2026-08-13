@@ -177,7 +177,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"the screener cannot start: {type(exc).__name__}: {exc}")
         return 1
 
-    for line in _preflight_lines(screener, recording, args.mode, telegram=args.telegram):
+    for line in _preflight_lines(
+        screener, recording, args.mode, telegram=args.telegram,
+        data_root=data_root, allow_network=args.allow_network,
+    ):
         print(line, flush=True)
     if args.preflight_only:
         return 0
@@ -300,8 +303,24 @@ class PreflightOnlySource:
         )
 
 
+def _ca_note(data_root: Path, *, allow_network: bool) -> str:
+    """What happened to the corporate-action cache this session, in the fence's own words."""
+    from . import backtest as bt
+
+    _resolved, _refreshed, reason = bt.fence_ca_cache(
+        cache_dir=data_root / bt.CA_CACHE_SUBDIR, allow_network=allow_network
+    )
+    return reason
+
+
 def _preflight_lines(
-    screener: ls.LiveScreener, recording: LiveRecording, mode: str, *, telegram: bool = False
+    screener: ls.LiveScreener,
+    recording: LiveRecording,
+    mode: str,
+    *,
+    telegram: bool = False,
+    data_root: Path | None = None,
+    allow_network: bool = False,
 ) -> list[str]:
     manifest = recording.read_manifest()
     calendar = manifest.get("calendar", {})
@@ -345,6 +364,16 @@ def _preflight_lines(
         f"alerts               {'DRY RUN (log only)' if screener.dry_run else 'LIVE'}"
         + (f"   [{screener.disclosure}]" if screener.disclosure else ""),
         f"recording            {recording.root}",
+        # REVIEW_13B Q3's other half: "nothing discloses it -- not the preflight, not the
+        # manifest, not the recording". `fence_ca_cache` is pure and decides nothing here; it
+        # is asked the same question `build_runner` asked it, so the operator reads what really
+        # happened to the corporate-action cache rather than inferring it from a flag.
+        "corporate actions    " + _ca_note(
+            data_root if data_root is not None else load_config(include_env=False).path(
+                "data_root"
+            ),
+            allow_network=allow_network,
+        ),
     ]
     if telegram:
         # Whether the two keys EXIST, never what they are (CLAUDE.md rule 4). An operator whose
