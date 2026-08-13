@@ -4434,3 +4434,60 @@ frozen and the settled-day battery is unchanged, gate for gate. No published fig
 stored day was re-gated. Q-31's third item (the "architect's template" for section 4.7 is
 recorded nowhere in this repository, so half of that directed check can be discharged by no
 reviewer) is the architect's and is NOT closed here; it is restated so it is not lost.
+
+---
+
+## Q-32 · chunk 14 · class B · OPEN · raised by the chunk-14 BUILD session · **blocks nothing; both halves are implemented and disclosed**
+
+Two decisions the chunk-14 card's own words admit more than one reading of. Both are
+implemented in the way that satisfies every sentence of the instruction; both are recorded here
+because the alternative is defensible and the surface is the trader's phone.
+
+**(1) May a STALE alert be forwarded at all, or only marked?**
+
+The card says two things about the same alert:
+
+* *"An alert whose price the screener cannot vouch for (its window stale beyond the clamp)
+  carries a staleness marker ON THE ALERT PAYLOAD, not only the dashboard"*, and
+* *"NO alert forwarded to Telegram may carry a price the screener cannot vouch for -- assert
+  it."*
+
+Read together, the first requires the marker to be on the payload of exactly such an alert, and
+the payload is what Telegram forwards -- so the marker exists in order to travel. That is the
+reading implemented: **a stale price may be forwarded IF AND ONLY IF the marker travels with
+it**, `unvouched_price()` refuses anything else, and the refusal is counted and printed. The
+message the trader receives reads:
+
+```
+[15:15] HDFCBANK SQUARE-OFF at 740.95
+!! STALE 226m BEHIND -- this price stands on a window the screener cannot vouch for
+(live feed, not yet verified against the exchange's end-of-day record)
+```
+
+The stricter reading -- **a stale price is never forwarded at all**, and the phone simply stays
+silent while the terminal shows the alert -- is the one this session did not take, because it
+would make the first sentence pointless for the surface the second sentence is about, and
+because silence on the phone is the failure mode chunk 13 spent a review closing (a trader who
+sees nothing cannot tell "no signal" from "the tool has stopped"). If the architect wants the
+stricter one, it is one line in `TelegramSink.deliver` and its test.
+
+**(2) Should a stale window also raise the loud FAILURE BANNER?**
+
+REVIEW_13B Q1's own prescription was *"carrying the row's staleness onto the alert exactly as
+`poc_note` is carried"*, which is what was built. Raising the full-width banner as well was
+considered and NOT taken, and the reason is MEASURED rather than asserted
+(`docs/evidence/chunk14_staleness_frequency.{py,md}`): over the 204 settled symbols on
+2026-06-10, at all 17 boundaries, **9 of 3,468 symbol-boundary readings (0.26%) are stale on a
+healthy morning**, because a 1-minute bar exists only if the stock traded in that minute.
+
+That number is small enough that a banner would NOT be drowned, so it does not settle the
+question on volume and is not used to. What decided it here is what the banner MEANS -- *the
+screener could not read part of the market*, the one element DESIGN.md PART II lets cover the
+width, whose value is that it is never wrong. On a quiet stock the screener read the market
+correctly and the market said nothing. The architect may still want stale-and-loud; it is a
+one-line addition to `_settle_banner` and would fire about nine times a morning at today's
+measured rate.
+
+**Nothing is blocked.** The frozen-feed case REVIEW_13B measured is caught either way: the
+marker is on every alert the symbol produces and on its dashboard row, and the parity harness
+judges the day against the backtester regardless.
