@@ -39,6 +39,7 @@ from .live_recording import CALENDAR_PUBLISHED, LiveRecording
 from .live_refresh import morning_refresh
 from .live_source import StoredDayBarSource
 from .minute_store import MinuteStore
+from .telegram_sink import TelegramSink, credentials_present
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -62,6 +63,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--preflight-only", action="store_true")
     parser.add_argument("--live-alerts", action="store_true",
                         help="turn OFF dry-run; alerts are marked live in the recording")
+    parser.add_argument("--telegram", action="store_true",
+                        help="attach the Telegram sink (chunk 14). It SENDS only when "
+                             "--live-alerts is passed as well; on its own it logs what it "
+                             "would have sent. Needs TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID "
+                             "in .env, which are never printed, logged or committed")
     parser.add_argument("--no-wait", action="store_true",
                         help="live mode: sweep every boundary immediately instead of waiting for "
                              "the clock. For a same-day catch-up after a late start, never for a "
@@ -129,6 +135,13 @@ def main(argv: list[str] | None = None) -> int:
     screen = ls.ScreenAlertSink()
     sound = ls.SoundAlertSink()
     collected = ls.CollectingAlertSink()
+    # CHUNK 14: Telegram attaches by BEING a sink (the protocol chunk 13 reserved for it) and by
+    # nothing else -- no line of the screener changed to make this work. It sends only when
+    # --live-alerts is passed; a dry-run morning logs the message and sends nothing.
+    telegram = TelegramSink(live=bool(args.live_alerts and args.telegram))
+    sinks: tuple[ls.AlertSink, ...] = (screen, sound, collected)
+    if args.telegram:
+        sinks = sinks + (telegram,)
 
     try:
         screener = ls.build_live_screener(
@@ -139,7 +152,7 @@ def main(argv: list[str] | None = None) -> int:
             source=PreflightOnlySource() if args.preflight_only
             else _bar_source(live, config, data_root, allow_network=args.allow_network),
             recording=recording, clock=clock, mode=args.mode,
-            sinks=(screen, sound, collected),
+            sinks=sinks,
             dry_run=not args.live_alerts,
             allow_network=args.allow_network,
             # --config governs the whole session, not only what this module reads: the stores
@@ -164,7 +177,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"the screener cannot start: {type(exc).__name__}: {exc}")
         return 1
 
-    for line in _preflight_lines(screener, recording, args.mode):
+    for line in _preflight_lines(screener, recording, args.mode, telegram=args.telegram):
         print(line, flush=True)
     if args.preflight_only:
         return 0
@@ -216,6 +229,10 @@ def main(argv: list[str] | None = None) -> int:
         alerts=tuple(collected.alerts), banner=screener.banner, dry_run=screener.dry_run,
         disclosure=screener.disclosure, verification=verification,
     ))
+    if args.telegram:
+        # A silent phone must never be ambiguous: this line says whether that silence was
+        # "nothing fired", "the sends failed" or "an alert was refused as unvouched".
+        print(telegram.summary())
     print(f"recording: {recording.root}")
     print(f"dashboard: {recording.root / 'dashboard.html'}")
     return 0
@@ -283,7 +300,9 @@ class PreflightOnlySource:
         )
 
 
-def _preflight_lines(screener: ls.LiveScreener, recording: LiveRecording, mode: str) -> list[str]:
+def _preflight_lines(
+    screener: ls.LiveScreener, recording: LiveRecording, mode: str, *, telegram: bool = False
+) -> list[str]:
     manifest = recording.read_manifest()
     calendar = manifest.get("calendar", {})
     gated = len(screener.gates)
@@ -327,6 +346,15 @@ def _preflight_lines(screener: ls.LiveScreener, recording: LiveRecording, mode: 
         + (f"   [{screener.disclosure}]" if screener.disclosure else ""),
         f"recording            {recording.root}",
     ]
+    if telegram:
+        # Whether the two keys EXIST, never what they are (CLAUDE.md rule 4). An operator whose
+        # .env is short one key must learn it at 08:50 and not at 11:30.
+        ready = credentials_present()
+        lines.append(
+            "telegram             "
+            + ("SENDING" if not screener.dry_run else "attached, DRY RUN (nothing is sent)")
+            + f"   credentials in .env: {'both present' if ready else 'MISSING'}"
+        )
     if screener.excluded:
         # CONTEXT 4.7 / QUESTIONS.md Q-30, the architect's 08-Aug-2026 ruling: the quarantined
         # symbols are never screened AND the startup banner names them excluded. A universe six
