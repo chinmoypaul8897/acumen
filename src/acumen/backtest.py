@@ -136,8 +136,15 @@ from .signal_engine import SignalPipeline
 #: Moved to v2.0 on 08-Aug-2026 (the Q-28 and Q-29 rulings) for the same reason and at the same
 #: cost: CONTEXT 4.7 is a NEW section about days whose bhavcopy does not exist yet, and the
 #: backtest walks no such day -- section 4.5's battery, section 4.6's lake and section 3's
-#: strategy are untouched, so this bump changes no walked row either.
-SPEC_VERSION: str = "v2.0"
+#: strategy are untouched, so this bump changes no walked row either. Moved to v2.1 on
+#: 14-Aug-2026 (the architect's chunk-14 ruling) to CATCH UP: v2.1 landed on 08-Aug-2026 --
+#: section 4.7's parity clause (Q-31), the settled-universe rule (Q-30) and the disclosed-line
+#: byte fix -- and the constant did not move with it, so between then and now every manifest
+#: stamped v2.0 while the law was v2.1 (REVIEW_13B). All three are section-4.7 clauses about
+#: live mornings and the settled universe the screener may alert on; the backtest walks no
+#: such day, so this bump changes no walked row either and every completed run's manifest
+#: stays exactly as true as it was. CONTEXT v2.1a's own section-10 row records the alignment.
+SPEC_VERSION: str = "v2.1"
 
 #: What the manifest's ``instrument_master`` block says about itself, so a reader who has never
 #: seen QUESTIONS.md Q-20 still knows why a filename is pinned rather than resolved. Verbatim on

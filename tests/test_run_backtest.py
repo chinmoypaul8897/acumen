@@ -286,7 +286,11 @@ def test_the_q21b_disclosure_names_the_ruling_its_evidence_and_its_own_limits() 
     # CONTEXT v2.0 (the Q-28 / Q-29 rulings) moves it a fifth time and leaves the radius alone
     # for a fourth reason: section 4.7 governs days whose bhavcopy does not exist yet, and a
     # backtest walks no such day -- section 4.5's battery is untouched, gate for gate.
-    assert "v1.6" in rb.Q21B_BLAST_RADIUS and bt.SPEC_VERSION == "v2.0"
+    # v2.1 moves it a sixth time (the constant CAUGHT UP on 14-Aug-2026, the architect's
+    # chunk-14 ruling) and leaves the radius alone for the same fourth reason: v2.1's three
+    # changes are all section-4.7 clauses about live mornings -- the parity clause, the
+    # settled-universe rule and the disclosed line -- and a backtest walks no live day.
+    assert "v1.6" in rb.Q21B_BLAST_RADIUS and bt.SPEC_VERSION == "v2.1"
     assert "1 by gate 2" in rb.Q21B_BLAST_RADIUS
 
 

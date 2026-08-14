@@ -710,8 +710,10 @@ def test_the_manifest_carries_the_spec_version_code_sha_and_config_digest(
     # retired Q40-d flags), not which days it may walk, so nothing else in this test moves.
     # v2.0 (the Q-28 / Q-29 rulings, 08-Aug-2026) moves it again and again leaves the rest of
     # this test alone: CONTEXT 4.7 is a NEW section about days whose bhavcopy does not exist
-    # yet, and the backtester walks no such day.
-    assert manifest["spec_version"] == "v2.0"
+    # yet, and the backtester walks no such day. v2.1 (the architect's chunk-14 ruling,
+    # 14-Aug-2026) is the constant CATCHING UP with a version it had missed, and its three
+    # clauses are section-4.7's too -- so the rest of this test still does not move.
+    assert manifest["spec_version"] == "v2.1"
     assert manifest["code_sha"] == "0" * 40
     assert manifest["config_digest"] == make_runner(tmp_path).spec.digest()
     assert manifest["universe"] == [SYMBOL]
