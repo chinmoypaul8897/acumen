@@ -1,6 +1,6 @@
 # CONTEXT.md — ACUMEN INTELLIGENCE · Master Specification
 
-**Version 2.1 · 8 August 2026 · THIS FILE IS LAW.**
+**Version 2.1a · 14 August 2026 · THIS FILE IS LAW.**
 Every build/review session reads this before touching code. Nothing here may be changed by any Claude Code session — spec changes flow only through the architect (the Cowork chat), arrive as a new version of this file, and are logged in §10. If reality and this file disagree, STOP and write it to QUESTIONS.md.
 
 ## Table of contents
@@ -339,7 +339,8 @@ Precedence if conflict is ever found: trader's R2 answers > R1 answers > PDF tex
 
 | Version | Date | Change |
 |---|---|---|
-| 2.1 | 08-Aug-2026 | §4.7 gains the section-6 parity clause (Q-31), the settled-universe rule (Q-30), the disclosed-line byte fix; POC-immutability restated (B3) |
+| 2.1a | 14-Aug-2026 | §10 v2.1 row erratum (POC immutability is §3.3's, not a §4.7 addition); SPEC_VERSION constant aligned to v2.1 |
+| 2.1 | 08-Aug-2026 | §4.7 gains the section-6 parity clause (Q-31), the settled-universe rule (Q-30), the disclosed-line byte fix |
 | 2.0e | 08-Aug-2026 | table of contents gains 4.6 and 4.7 (omitted since v1.3) |
 | 2.0 | 08-Aug-2026 | The live era: §4.7 live-mode validity (Q-28 oracle-free battery + next-morning verification + measured residual; Q-29 day's-own master per recording); live mode unblocked |
 | 1.9e | 07-Aug-2026 | §9 OPEN-6 aligned with the Round-4 flags retirement |
