@@ -95,7 +95,30 @@ read part of the market* -- **silence below it is not calm**.
 The banner CLEARS itself on the first complete sweep. If it does not clear for two boundaries,
 stop the session (Ctrl-C), read the last lines, and restart the same command -- it resumes.
 
-## 6. Where everything is afterwards
+## 6. How the morning ENDS, and where everything is afterwards
+
+**One last message goes to the phone at the close** -- the end-of-day summary, sent by the same
+sink under the same `--live-alerts` gate as the alerts:
+
+```
+ACUMEN -- END OF DAY   <YYYY-MM-DD>
+2 symbol(s) alerted:
+  HDFCBANK   armed 11:15, trigger 11:30
+  ICICIBANK  armed 11:15
+telegram: 3 sent, 0 refused (unvouched price), 0 failed
+markers: 1 stale, 0 provisional POC
+(live feed, not yet verified against the exchange's end-of-day record)
+```
+
+A morning where nothing fired still sends it, saying so in words -- that is the line that tells
+the trader "no signal" apart from "the tool stopped". A DRY RUN prints it on this terminal,
+labelled, and sends nothing. If the send fails you will read
+`TELEGRAM SEND FAILED ...: end-of-day summary` here: nothing is retried automatically, and
+re-running the same command at the close sends it, because the "already sent" mark
+(`telegram-end-of-day-summary` in `events.jsonl`) is written only after a message really left.
+That mark is also why a restart does **not** send a second summary for the same day.
+
+Then everything the morning did is here:
 
 ```
 <data_root>/live/<YYYY-MM-DD>-live/
@@ -103,7 +126,7 @@ stop the session (Ctrl-C), read the last lines, and restart the same command -- 
     bias.json       today's bias per symbol, with the rule that produced it
     candles/        every bar the screener consumed, as it consumed it
     alerts.jsonl    every alert delivered, with its payload
-    events.jsonl    sweeps, banners, POC pins, refusals, revisions
+    events.jsonl    sweeps, banners, POC pins, refusals, revisions, the summary mark
     state.json      the resume point
     dashboard.html  the trader's screen, rewritten after every sweep
 ```

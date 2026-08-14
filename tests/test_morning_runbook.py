@@ -80,6 +80,13 @@ def test_the_runbook_quotes_the_CODE_and_not_a_paraphrase_of_it() -> None:
     assert tg.FAILURE_BANNER.split("(")[0].strip() in text
     assert tg.REFUSED_BANNER in text
 
+    # The end-of-day summary the morning now ends with (the architect's 14-Aug-2026 ruling):
+    # its heading, and the event kind whose presence in the recording is why a restart does not
+    # send a second one. Both from the sink's own constants, so a rename cannot leave the card
+    # describing a message that no longer looks like that.
+    assert tg.SUMMARY_HEADING in text
+    assert tg.SUMMARY_EVENT in text
+
     # The measured residual bracket, as a number rather than an adjective.
     assert "0.5229%" in text and "2.6808%" in text
 

@@ -32,6 +32,19 @@ the reviewed live half reviewed.
    guard for the case the screener cannot cover -- two sinks over one process, a retry loop, a
    caller that delivers the same object twice -- keyed the same way.
 
+## The end-of-day summary
+
+plan.md's chunk-14 card lists *"end-of-day summary message"* beside the bot, and the architect's
+14-Aug-2026 ruling says which surface it is about: *"the END-OF-DAY SUMMARY is a card line item
+and lands in chunk 14 -- routed to the phone via the sink at close, not only the terminal."*
+:meth:`TelegramSink.send_end_of_day` is that route, and it is the SAME route an alert takes --
+same ``--live-alerts`` gate, same dry-run labelling, same degrade-to-silence-plus-a-banner, same
+credential rule -- so the morning ends with exactly one message carrying the day's alerts by
+symbol, :meth:`TelegramSink.summary`'s counters, the marker counts and the disclosed line. It is
+sent once per sink, and once per RECORDING: the CLI records :data:`SUMMARY_EVENT` after a
+successful send and reads it back before attempting another, which is what makes a resumed
+morning end quietly rather than with a second summary.
+
 ## Credentials
 
 ``TELEGRAM_BOT_TOKEN`` and ``TELEGRAM_CHAT_ID`` come from ``.env`` through
@@ -49,7 +62,9 @@ Source files in this package are ASCII-only on purpose (see src/acumen/config.py
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Callable
 
 from .live_recording import RecordedAlert
@@ -60,6 +75,8 @@ from .live_screener import (
     ALERT_KINDS,
     ALERT_SQUARE_OFF,
     ALERT_TRIGGER,
+    MARKER_POC_PROVISIONAL,
+    MARKER_STALE,
     LiveScreener,
     alert_state_notes,
     format_alert,
@@ -83,6 +100,26 @@ FAILURE_BANNER: str = "TELEGRAM SEND FAILED (the alert is on this screen and in 
 
 #: What the operator sees when an alert is REFUSED rather than failed -- the Q1 rule.
 REFUSED_BANNER: str = "TELEGRAM REFUSED an alert whose price the screener cannot vouch for"
+
+#: The end-of-day summary's first line. plan.md's chunk-14 card lists *"end-of-day summary
+#: message"* beside the bot itself, and the architect's 14-Aug-2026 ruling says where it goes:
+#: *"routed to the phone via the sink at close, not only the terminal"*.
+SUMMARY_HEADING: str = "ACUMEN -- END OF DAY"
+
+#: What the summary says when the morning produced nothing. A silent phone must never be
+#: ambiguous: this line is the difference between "nothing fired" and "the tool stopped".
+SUMMARY_NO_ALERTS: str = "no alerts today -- the screener ran the whole session and nothing fired"
+
+#: The lifecycle event that records the summary really went out, written into the recording by
+#: :func:`acumen.run_screener._end_of_day_summary` AFTER a successful send. It is what makes
+#: "no duplicate on resume" true across PROCESSES: the sink's own flag dies with the process,
+#: this line does not (the same discipline REVIEW_13 M23 set for the alert dedup set).
+SUMMARY_EVENT: str = "telegram-end-of-day-summary"
+
+#: The summary's outcome, as one word, for the operator's last line.
+SUMMARY_SENT: str = "sent"
+SUMMARY_DRY_RUN: str = "dry-run"
+SUMMARY_FAILED: str = "failed"
 
 
 class TelegramError(RuntimeError):
@@ -147,7 +184,9 @@ class TelegramSink:
             trigger and the exit, and a FAILURE alert is the one that says the tool has stopped
             watching a position, which is the most important message a screener can send.
         sent / refused / failed: counters the CLI prints at the end of the morning, so a
-            silent phone is never ambiguous.
+            silent phone is never ambiguous. They count ALERTS; the end-of-day summary carries
+            them and is therefore never one of them.
+        end_of_day: what became of the one end-of-day message -- unset, sent, dry-run or failed.
     """
 
     send: Callable[[str], None] | None = None
@@ -159,6 +198,9 @@ class TelegramSink:
     sent: list[str] = field(default_factory=list)
     refused: list[str] = field(default_factory=list)
     failed: list[str] = field(default_factory=list)
+    #: What became of the ONE end-of-day message: ``""`` (not attempted yet),
+    #: :data:`SUMMARY_SENT`, :data:`SUMMARY_DRY_RUN` or :data:`SUMMARY_FAILED`.
+    end_of_day: str = ""
     _seen: set[tuple[str, str, str]] = field(default_factory=set, repr=False)
 
     def __repr__(self) -> str:  # CLAUDE.md rule 4: nothing about this object may print a secret
@@ -198,12 +240,116 @@ class TelegramSink:
         self.sent.append(f"{alert.symbol} {alert.kind}")
 
     def summary(self) -> str:
-        """One line for the end of the morning. Never names a credential."""
+        """One line for the end of the morning. Never names a credential.
+
+        Its three counters are about ALERTS. The end-of-day message is not one of them and never
+        counts itself: it carries this line, so a counter that included it would be a number the
+        message changed by being written.
+        """
         return (
             f"telegram: {len(self.sent)} sent, {len(self.refused)} refused (unvouched price), "
             f"{len(self.failed)} failed"
             + ("" if self.live else "   [DRY RUN -- nothing was sent]")
         )
+
+    # --- the end-of-day summary (plan.md chunk-14; architect 14-Aug-2026) ---------------
+
+    def end_of_day_message(
+        self,
+        alerts: Sequence[RecordedAlert] = (),
+        *,
+        day: date | None = None,
+        disclosure: str = "",
+    ) -> str:
+        """The ONE message that ends the morning, in the order the trader reads it.
+
+        Five parts, and every one of them is read off something that already exists rather than
+        recomputed here:
+
+        1. **the heading**, with the trade date, so a message read at 21:00 names its own day;
+        2. **the day's alerts BY SYMBOL** -- one line per symbol, each alert as ``kind HH:MM`` in
+           the order they fired, because what the trader wants at the close is the shape of his
+           day and not seventeen boundaries of detail;
+        3. **:meth:`summary`'s own line** -- sent / refused / failed -- which is the ruling's
+           "routed to the phone" made literal: the line that used to exist only on the operator's
+           terminal now travels;
+        4. **the marker counts**, stale and provisional-POC, counted off the same
+           ``alert_states`` every alert carried when it was delivered (REVIEW_13B Q1 / B357);
+        5. **CONTEXT 4.7's disclosed line**, last, exactly as every live alert carries it.
+
+        A DRY-RUN sink labels the message with the same sentence a dry-run alert carries, so an
+        operator reading a terminal transcript months later cannot mistake a rehearsal for a
+        morning that reached somebody's phone.
+        """
+        lines = [
+            f"{SUMMARY_HEADING}   {day.isoformat()}" if day is not None else SUMMARY_HEADING
+        ]
+        if not self.live:
+            lines.append("[DRY RUN -- log only, nothing was sent to anyone else]")
+        by_symbol: dict[str, list[str]] = {}
+        for alert in alerts:
+            by_symbol.setdefault(alert.symbol.strip().upper(), []).append(
+                f"{alert.kind} {alert.at.strftime('%H:%M')}"
+            )
+        if by_symbol:
+            lines.append(f"{len(by_symbol)} symbol(s) alerted:")
+            width = max(len(symbol) for symbol in by_symbol)
+            for symbol in sorted(by_symbol):
+                lines.append(f"  {symbol:<{width}}  {', '.join(by_symbol[symbol])}")
+        else:
+            lines.append(SUMMARY_NO_ALERTS)
+        lines.append(self.summary())
+        stale = sum(1 for alert in alerts if MARKER_STALE in set(
+            alert.payload.get("alert_states") or ()
+        ))
+        provisional = sum(1 for alert in alerts if MARKER_POC_PROVISIONAL in set(
+            alert.payload.get("alert_states") or ()
+        ))
+        lines.append(f"markers: {stale} stale, {provisional} provisional POC")
+        if disclosure:
+            lines.append(f"({disclosure})")
+        return "\n".join(lines)
+
+    def send_end_of_day(
+        self,
+        alerts: Sequence[RecordedAlert] = (),
+        *,
+        day: date | None = None,
+        disclosure: str = "",
+    ) -> bool:
+        """Send the end-of-day summary down the SAME path an alert travels. Never raises.
+
+        Every rule :meth:`deliver` obeys is obeyed here, deliberately by the same code shape:
+        ``--live-alerts`` decides whether anything is sent at all, a dry run logs and sends
+        nothing, a failure degrades to silence plus a visible failure, and the message is built
+        before the transport is touched so nothing about the send can reach the text.
+
+        It is sent at most ONCE per sink. The second guard against a resumed process sending a
+        second one lives in the CLI, which records :data:`SUMMARY_EVENT` in the recording after a
+        successful send and reads it back before the next attempt -- the sink holds no disk.
+
+        Returns:
+            True when a message really left this process.
+        """
+        if self.end_of_day:
+            return False  # one morning, one summary
+        text = self.end_of_day_message(alerts, day=day, disclosure=disclosure)
+        if not self.live:
+            self.end_of_day = SUMMARY_DRY_RUN
+            self.out("[telegram, DRY RUN -- not sent] end-of-day summary")
+            for line in text.splitlines():
+                self.out(f"    {line}")
+            return False
+        transport = self.send if self.send is not None else post_message
+        try:
+            transport(text)
+        except Exception as exc:  # the same degradation an alert gets: silence, plus a banner
+            self.end_of_day = SUMMARY_FAILED
+            self.out(f"!! {FAILURE_BANNER}: end-of-day summary ({type(exc).__name__})")
+            return False
+        self.end_of_day = SUMMARY_SENT
+        self.out("telegram: the end-of-day summary went to the phone")
+        return True
 
 
 def post_message(text: str, *, timeout: float = SEND_TIMEOUT_SECONDS) -> None:
@@ -250,6 +396,12 @@ __all__ = [
     "FAILURE_BANNER",
     "REFUSED_BANNER",
     "SEND_TIMEOUT_SECONDS",
+    "SUMMARY_DRY_RUN",
+    "SUMMARY_EVENT",
+    "SUMMARY_FAILED",
+    "SUMMARY_HEADING",
+    "SUMMARY_NO_ALERTS",
+    "SUMMARY_SENT",
     "TelegramError",
     "TelegramSink",
     "credentials_present",

@@ -28,6 +28,7 @@ Source files in this package are ASCII-only on purpose (see src/acumen/config.py
 from __future__ import annotations
 
 import argparse
+from collections.abc import Sequence
 from datetime import date, datetime
 from pathlib import Path
 
@@ -35,11 +36,11 @@ from . import live_dashboard as dash
 from . import live_screener as ls
 from .config import load_config
 from .daily_store import DailyStore
-from .live_recording import CALENDAR_PUBLISHED, LiveRecording
+from .live_recording import CALENDAR_PUBLISHED, LiveRecording, RecordedAlert
 from .live_refresh import morning_refresh
 from .live_source import StoredDayBarSource
 from .minute_store import MinuteStore
-from .telegram_sink import TelegramSink, credentials_present
+from .telegram_sink import SUMMARY_EVENT, TelegramSink, credentials_present
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -236,9 +237,59 @@ def main(argv: list[str] | None = None) -> int:
         # A silent phone must never be ambiguous: this line says whether that silence was
         # "nothing fired", "the sends failed" or "an alert was refused as unvouched".
         print(telegram.summary())
+        # ...and the same line now also LEAVES the terminal. The architect's 14-Aug-2026 ruling:
+        # "the END-OF-DAY SUMMARY is a card line item and lands in chunk 14 -- routed to the
+        # phone via the sink at close, not only the terminal." run_day() has returned, so
+        # close_day()'s 15:30 poll is done and the day is whole; this is the last thing the
+        # morning does.
+        _end_of_day_summary(
+            telegram, recording, day=day, alerts=tuple(collected.alerts),
+            disclosure=screener.disclosure,
+        )
     print(f"recording: {recording.root}")
     print(f"dashboard: {recording.root / 'dashboard.html'}")
     return 0
+
+
+def _end_of_day_summary(
+    telegram: TelegramSink,
+    recording: LiveRecording,
+    *,
+    day: date,
+    alerts: Sequence[RecordedAlert] = (),
+    disclosure: str = "",
+) -> bool:
+    """The morning's ONE summary message to the phone, at the close. Never raises.
+
+    plan.md's chunk-14 card lists *"end-of-day summary message"*; the architect's 14-Aug-2026
+    ruling says it goes to the phone through the sink and not only to this terminal. Everything
+    about HOW it is sent belongs to the sink (the ``--live-alerts`` gate, the dry-run labelling,
+    the degrade-to-silence, the credential rule). What belongs HERE is the one thing a sink
+    cannot hold: **the memory that it already went**.
+
+    A resumed morning re-runs the whole day into the same recording -- that is what
+    :meth:`~acumen.live_screener.LiveScreener.restore` is for -- so without a mark on disk the
+    trader would get a second summary for the same day. The mark is the recording's own event
+    log, written only AFTER a real send and read before the next attempt, which is the same
+    discipline REVIEW_13 M23 set for the alert dedup set. A send that FAILED writes nothing, so
+    a restart still owes the trader his summary.
+    """
+    try:
+        already = any(row.get("kind") == SUMMARY_EVENT for row in recording.events())
+    except Exception:  # a recording too damaged to read is not a reason to skip the summary
+        already = False
+    if already:
+        print(
+            "telegram: the end-of-day summary already went out for this recording -- not re-sent"
+        )
+        return False
+    if not telegram.send_end_of_day(alerts, day=day, disclosure=disclosure):
+        return False
+    recording.record_event(
+        SUMMARY_EVENT, at=datetime.combine(day, ls.SESSION_END),
+        detail=f"{len({alert.symbol for alert in alerts})} symbol(s), {len(alerts)} alert(s)",
+    )
+    return True
 
 
 def _logout(source) -> None:

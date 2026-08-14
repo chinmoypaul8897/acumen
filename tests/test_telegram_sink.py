@@ -12,6 +12,11 @@ sink is built around. Each is a test here:
   duplicate on resume;
 * no order endpoint, and no credential in anything the sink emits.
 
+The architect's **14-Aug-2026 ruling** adds the card's last line item to the same surface --
+*"the END-OF-DAY SUMMARY is a card line item and lands in chunk 14 -- routed to the phone via
+the sink at close, not only the terminal"* -- and it is tested under exactly the four rules
+above, one test each, in the last section of this file.
+
 **No network is touched anywhere in this file** -- the suite's socket guard would block it, and
 the transport is injected in every test. ``post_message`` is exercised only by AST and by
 signature.
@@ -425,3 +430,231 @@ def test_the_CLI_attaches_the_sink_only_on_a_FLAG_and_sends_only_on_TWO() -> Non
         and node.func.id == "TelegramSink"
     ]
     assert len(built) == 1, "one construction, at the one place sinks are assembled"
+
+
+# --- THE END-OF-DAY SUMMARY (the architect's 14-Aug-2026 ruling) ----------------------------------
+
+
+def _armed(symbol: str = "ICICIBANK", minute: int = 15, **overrides) -> RecordedAlert:
+    """An ARMED alert, for building a day out of more than one symbol."""
+    alert = _trigger(**overrides)
+    return RecordedAlert(kind=ls.ALERT_ARMED, symbol=symbol,
+                         at=datetime(2026, 6, 10, 11, minute), payload=alert.payload)
+
+
+def _a_day() -> tuple[RecordedAlert, ...]:
+    """One morning's alerts: two symbols, three alerts, one of them STALE and marked."""
+    return (
+        _armed("HDFCBANK", 15),
+        _trigger(),
+        _armed(
+            "ICICIBANK", 15, stale=True, data_behind_minutes=226,
+            stale_note=ls.stale_note(226), alert_states=[ls.MARKER_STALE],
+        ),
+    )
+
+
+def test_the_END_OF_DAY_SUMMARY_is_SENT_ONCE_at_close_and_shown_here_VERBATIM() -> None:
+    """The card's last line item, on the phone, in full.
+
+    plan.md's chunk-14 build line is *"live dashboard view ...; Telegram bot ...; alert dedup;
+    end-of-day summary message"*, and the architect's ruling names the surface: *"routed to the
+    phone via the sink at close, not only the terminal"*. So it goes down the same transport an
+    alert goes down, and it carries the three things the ruling lists -- the day's alerts BY
+    SYMBOL, ``summary()``'s own line, and the disclosed line -- plus the marker counts.
+    """
+    sent: list[str] = []
+    printed: list[str] = []
+    sink = tg.TelegramSink(send=sent.append, live=True, out=printed.append)
+    day = _a_day()
+    for alert in day:
+        sink.deliver(alert)
+    assert len(sent) == 3, "the three alerts went first, as alerts"
+
+    assert sink.send_end_of_day(day, day=DAY, disclosure=ls.LIVE_DISCLOSURE) is True
+    assert len(sent) == 4, "ONE summary message, at the close"
+    assert sent[-1] == (
+        "ACUMEN -- END OF DAY   2026-06-10\n"
+        "2 symbol(s) alerted:\n"
+        "  HDFCBANK   armed 11:15, trigger 11:30\n"
+        "  ICICIBANK  armed 11:15\n"
+        "telegram: 3 sent, 0 refused (unvouched price), 0 failed\n"
+        "markers: 1 stale, 0 provisional POC\n"
+        "(live feed, not yet verified against the exchange's end-of-day record)"
+    )
+    assert sink.end_of_day == tg.SUMMARY_SENT
+    assert any("end-of-day summary" in line for line in printed), "the operator is told too"
+
+    # ...ONCE. A second call at the same close sends nothing (the CLI's own guard is on disk;
+    # this one is the sink's, for two sinks over one process or a caller that asks twice).
+    assert sink.send_end_of_day(day, day=DAY, disclosure=ls.LIVE_DISCLOSURE) is False
+    assert len(sent) == 4
+
+    # A morning that produced NOTHING still ends with a message, and says so in words: a silent
+    # phone must never be ambiguous between "no signal" and "the tool stopped".
+    quiet: list[str] = []
+    empty = tg.TelegramSink(send=quiet.append, live=True, out=lambda _line: None)
+    assert empty.send_end_of_day((), day=DAY, disclosure=ls.LIVE_DISCLOSURE) is True
+    assert tg.SUMMARY_NO_ALERTS in quiet[0]
+    assert "markers: 0 stale, 0 provisional POC" in quiet[0]
+
+
+def test_the_END_OF_DAY_SUMMARY_IS_NOT_SENT_on_a_DRY_RUN_morning() -> None:
+    """The same ``--live-alerts`` gate the alerts pass through, on the summary.
+
+    A dry-run morning ends on the terminal, labelled with the sentence a dry-run alert carries.
+    The transport here would raise if it were ever reached.
+    """
+    printed: list[str] = []
+
+    def never(_text: str) -> None:  # pragma: no cover -- ASSERTED BY NOT BEING CALLED
+        raise AssertionError("a dry-run sink reached the transport at the close")
+
+    sink = tg.TelegramSink(send=never, live=False, out=printed.append)
+    assert sink.send_end_of_day(_a_day(), day=DAY, disclosure=ls.LIVE_DISCLOSURE) is False
+    assert sink.end_of_day == tg.SUMMARY_DRY_RUN
+
+    page = "\n".join(printed)
+    assert "DRY RUN -- not sent" in page, "and it is on the terminal, in full"
+    assert "[DRY RUN -- log only, nothing was sent to anyone else]" in page
+    assert tg.SUMMARY_HEADING in page and "HDFCBANK" in page
+    assert ls.LIVE_DISCLOSURE in page
+
+
+def test_a_FAILED_END_OF_DAY_SEND_degrades_to_SILENCE_plus_a_VISIBLE_failure() -> None:
+    """Rule 3, on the last message of the morning: never a crash, never a retry storm.
+
+    The close is the one moment where an escaping exception costs nothing else -- every sweep is
+    already done -- which is exactly why it must still not escape: the CLI has two lines left to
+    print (the recording's path and the dashboard's), and the operator needs both.
+    """
+    printed: list[str] = []
+
+    def explode(_text: str) -> None:
+        raise tg.TelegramError("the Telegram send failed: ConnectionError")
+
+    sink = tg.TelegramSink(send=explode, live=True, out=printed.append)
+    assert sink.send_end_of_day(_a_day(), day=DAY) is False  # must not raise
+    assert sink.end_of_day == tg.SUMMARY_FAILED
+    assert printed and tg.FAILURE_BANNER in printed[0]
+    assert "end-of-day summary" in printed[0] and "TelegramError" in printed[0]
+
+    # ...and the failure is not counted as an ALERT failure: the summary carries those counters,
+    # so a summary that counted itself would report a number it created.
+    assert sink.failed == [] and sink.sent == []
+
+    for error in (RuntimeError("x"), OSError("x"), ValueError("x"), TimeoutError("x")):
+        def raiser(_text: str, exc=error) -> None:
+            raise exc
+
+        one = tg.TelegramSink(send=raiser, live=True, out=lambda _line: None)
+        one.send_end_of_day((), day=DAY)
+        assert one.end_of_day == tg.SUMMARY_FAILED, f"{type(error).__name__} was not absorbed"
+
+
+def test_a_RESUMED_MORNING_does_NOT_SEND_A_SECOND_END_OF_DAY_SUMMARY(tmp_path: Path) -> None:
+    """"No duplicate on resume", for the message the sink's own flag cannot protect.
+
+    A resumed morning re-runs the whole day into the same recording (REVIEW_13 B8), in a NEW
+    process with a NEW sink -- so the sink's flag is gone and only something on disk can remember
+    that the trader already has his summary. That something is the recording's own event log,
+    written after a real send and read before the next attempt, which is the discipline REVIEW_13
+    M23 set for the alert dedup set.
+    """
+    from acumen import run_screener
+
+    recording = LiveRecording.at(tmp_path / "rec" / "2026-06-10-live")
+    day = _a_day()
+
+    first: list[str] = []
+    sink = tg.TelegramSink(send=first.append, live=True, out=lambda _line: None)
+    assert run_screener._end_of_day_summary(
+        sink, recording, day=DAY, alerts=day, disclosure=ls.LIVE_DISCLOSURE
+    ) is True
+    assert len(first) == 1
+    marks = [row for row in recording.events() if row["kind"] == tg.SUMMARY_EVENT]
+    assert len(marks) == 1 and marks[0]["at"].endswith("15:30:00"), "stamped at the close"
+
+    # The restart: a fresh sink, the same recording. Nothing leaves.
+    second: list[str] = []
+    resumed = tg.TelegramSink(send=second.append, live=True, out=lambda _line: None)
+    assert run_screener._end_of_day_summary(
+        resumed, recording, day=DAY, alerts=day, disclosure=ls.LIVE_DISCLOSURE
+    ) is False
+    assert second == [], "the trader does not get a second summary for the same day"
+    assert len([row for row in recording.events() if row["kind"] == tg.SUMMARY_EVENT]) == 1
+
+    # A send that FAILED writes no mark, so a restart still owes the trader his summary.
+    other = LiveRecording.at(tmp_path / "rec" / "2026-06-11-live")
+
+    def explode(_text: str) -> None:
+        raise tg.TelegramError("the Telegram send failed: ConnectionError")
+
+    failing = tg.TelegramSink(send=explode, live=True, out=lambda _line: None)
+    assert run_screener._end_of_day_summary(failing, other, day=DAY, alerts=day) is False
+    assert [row for row in other.events() if row["kind"] == tg.SUMMARY_EVENT] == []
+    healed: list[str] = []
+    assert run_screener._end_of_day_summary(
+        tg.TelegramSink(send=healed.append, live=True, out=lambda _line: None),
+        other, day=DAY, alerts=day,
+    ) is True
+    assert len(healed) == 1
+
+
+def test_NO_CREDENTIAL_REACHES_THE_END_OF_DAY_SUMMARY(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CLAUDE.md rule 4, over the bytes of the last message of the morning.
+
+    The same planted-value hunt the alert path gets, run over the summary's text, the sink's
+    outcome word, everything it printed and its repr -- in all three outcomes (sent, dry run and
+    failed), because the failure path is the one that has an exception to quote.
+    """
+    monkeypatch.setenv(tg.ENV_BOT_TOKEN, "NOT-A-REAL-TOKEN-000:AAquiteFakeTokenValue")
+    monkeypatch.setenv(tg.ENV_CHAT_ID, "-1009999999999")
+    planted = ("NOT-A-REAL-TOKEN-000:AAquiteFakeTokenValue", "-1009999999999")
+
+    emitted: list[str] = []
+    for live, transport in (
+        (True, lambda text: emitted.append(text)),
+        (False, None),
+        (True, lambda _text: (_ for _ in ()).throw(tg.TelegramError("send failed"))),
+    ):
+        printed: list[str] = []
+        sink = tg.TelegramSink(send=transport, live=live, out=printed.append)
+        for alert in _a_day():
+            sink.deliver(alert)
+        sink.send_end_of_day(_a_day(), day=DAY, disclosure=ls.LIVE_DISCLOSURE)
+        emitted.extend([
+            *printed, repr(sink), sink.end_of_day,
+            sink.end_of_day_message(_a_day(), day=DAY, disclosure=ls.LIVE_DISCLOSURE),
+        ])
+
+    assert emitted, "the hunt must have something to hunt through"
+    for text in emitted:
+        for secret in planted:
+            assert secret not in text, f"a planted credential reached: {text[:80]}"
+
+
+def test_the_CLI_ENDS_THE_MORNING_with_the_summary_AFTER_the_day_is_whole() -> None:
+    """Where the send sits, read at the source: after ``run_day()``, which ends in ``close_day``.
+
+    The ruling says *at close*, and "close" has a precise meaning in this repository:
+    ``run_day()`` sweeps seventeen boundaries and then calls ``close_day()``, whose 15:30 poll is
+    what makes the recording a whole session (REVIEW_13 B4). The summary is sent after that call
+    returns, so the message it carries describes a finished day rather than a partial one -- and
+    it is inside the ``--telegram`` branch, so a morning without the flag sends nothing.
+    """
+    from acumen import run_screener
+
+    source = Path(run_screener.__file__).read_text(encoding="utf-8")
+    ran = source.index("reports = screener.run_day(")
+    summarised = source.index("_end_of_day_summary(\n")
+    assert ran < summarised, "the summary is sent after close_day, not before it"
+
+    body = inspect.getsource(run_screener.main)
+    branch = body.index("if args.telegram:\n        # A silent phone")
+    assert branch < body.index("_end_of_day_summary("), "and only when --telegram was passed"
+    assert body.index("print(telegram.summary())") < body.index("_end_of_day_summary("), (
+        "the terminal line still prints -- the ruling ADDS the phone, it does not move the line"
+    )
