@@ -4437,7 +4437,7 @@ reviewer) is the architect's and is NOT closed here; it is restated so it is not
 
 ---
 
-## Q-32 · chunk 14 · class B · OPEN · raised by the chunk-14 BUILD session · **blocks nothing; both halves are implemented and disclosed**
+## Q-32 · chunk 14 · class B · **RULED 14-Aug-2026 — both halves CONFIRMED as built** · raised by the chunk-14 BUILD session · **blocked nothing**
 
 Two decisions the chunk-14 card's own words admit more than one reading of. Both are
 implemented in the way that satisfies every sentence of the instruction; both are recorded here
@@ -4491,3 +4491,21 @@ measured rate.
 **Nothing is blocked.** The frozen-feed case REVIEW_13B measured is caught either way: the
 marker is on every alert the symbol produces and on its dashboard row, and the parity harness
 judges the day against the backtester regardless.
+
+**ARCHITECT'S RULINGS (relayed to the chunk-14 FIX session, 14-Aug-2026), verbatim:**
+
+> "ARCHITECT'S RULINGS (14-Aug-2026, on chunk 14): the END-OF-DAY SUMMARY is a card line item
+> and lands in chunk 14 — routed to the phone via the sink at close, not only the terminal.
+> Q-32(1): a stale alert is forwarded ONLY WITH its marker; an unvouched-price alert is refused
+> (the built reading is confirmed). Q-32(2): a quiet-stock stale reading correctly raises no
+> banner (decided by meaning, not frequency). Architect."
+
+**What the FIX session did with it.** Both halves of Q-32 are CONFIRMED as built, so no line of
+`unvouched_price`, `TelegramSink.deliver` or `_settle_banner` moved — the ruling closes the
+question by adopting the reading already in the tree, and the alternatives written above stay on
+the record as what was NOT chosen. The third sentence is a CARD item rather than an answer to
+Q-32: plan.md's chunk-14 build line reads *"live dashboard view ...; Telegram bot ...; alert
+dedup; end-of-day summary message"*, and the build session had left that message on the terminal
+only (`TelegramSink.summary()` printed by `run_screener`). It now goes to the phone through the
+sink's own send path at the close of the morning, under the same four rules every alert travels
+under. See PROGRESS.md's chunk-14 FIX entry.
