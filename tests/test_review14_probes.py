@@ -166,7 +166,7 @@ def test_FLIPPED_the_three_act_claim_is_TRUE_in_every_place_it_is_made() -> None
     the SAME three flags -- and the one that said "two" no longer does.
     """
     for relpath in ("src/acumen/telegram_sink.py", "src/acumen/run_screener.py",
-                    "docs/morning_runbook_stub.md"):
+                    "docs/morning_runbook.md"):
         text = (REPO / relpath).read_text(encoding="utf-8", errors="replace")
         claims = [
             line for line in text.splitlines()

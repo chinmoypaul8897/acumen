@@ -111,7 +111,7 @@ def test_every_place_that_claims_THREE_ACTS_names_the_same_three() -> None:
     places = {
         "src/acumen/telegram_sink.py": None,
         "src/acumen/run_screener.py": None,
-        "docs/morning_runbook_stub.md": None,
+        "docs/morning_runbook.md": None,
         "tests/test_telegram_sink.py": None,
         "PROGRESS.md": "**B393**",
     }
@@ -241,7 +241,7 @@ def test_a_calendar_that_cannot_be_read_leaves_a_REPORT_not_a_traceback(tmp_path
     )
     assert len(report.steps) == 6, "every step reported, none silently dropped"
     steps = {step.name: step for step in report.steps}
-    for name in ("daily store (bhavcopy top-up)", "verify yesterday (CONTEXT 4.7)"):
+    for name in ("daily store (bhavcopy top-up)", refresh.VERIFY_STEP):
         assert steps[name].detail.startswith("NOT RUN:") and not steps[name].ok, name
     assert universe == ("AAA",)
 
