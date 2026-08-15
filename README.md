@@ -23,6 +23,8 @@ This README covers only how the repository is organised and run — no strategy 
 | `STATUS.md`     | Ledger — chunk state (`todo` / `built` / `reviewed-PASS` / `gate-closed`). |
 | `QUESTIONS.md`  | Ledger — anything `CONTEXT.md` does not answer (the STOP rule lives here). |
 | `docs/reviews/` | Per-chunk review reports (`REVIEW_<N>.md`). |
+| `docs/morning_runbook.md` | **The operator procedure** — a live morning end to end, and the readiness gate that comes before the week. |
+| `docs/handover.md` | **For the trader** — what the tool is, what it is NOT, and what the dry-run week tests. Plain English. |
 
 ## Quickstart
 
@@ -62,8 +64,23 @@ python scripts/backfill_daily.py --from 2000-01-01 --to 2026-07-30 --allow-netwo
 python scripts/backfill_daily.py --rebuild-ledger
 ```
 
-After `pip install -e .` these are also available as the `acumen-backfill` and
-`acumen-ca-report` console entry points.
+```bash
+# the LIVE SCREENER's own commands. `docs/morning_runbook.md` is the operator procedure;
+# read it before running any of them, and read `docs/handover.md` for what the tool is
+# and is not. THIS TOOL PLACES NO ORDERS (CONTEXT section 1 R4).
+
+# once, before a live dry-run week: seven checks, a named refusal, no side effects
+python scripts/run_screener.py --readiness --day <TODAY>
+
+# 08:45 -- the pre-open refresh and the preflight, running nothing
+python scripts/run_screener.py --mode live --day <TODAY> --refresh --allow-network --preflight-only
+
+# 08:50 -- the morning. It sends nothing without --telegram AND --live-alerts as well
+python scripts/run_screener.py --mode live --day <TODAY> --refresh --allow-network --telegram
+```
+
+After `pip install -e .` these are also available as the `acumen-backfill`,
+`acumen-ca-report` and `acumen-screener` console entry points.
 
 ## Discipline
 

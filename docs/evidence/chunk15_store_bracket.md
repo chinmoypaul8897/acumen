@@ -27,6 +27,11 @@ not one file was created, removed, resized or re-stamped, and `newest_mtime` did
 metadata digest matters as much as the content one: a file rewritten with identical bytes would
 still move its `mtime_ns`, and it did not.
 
+Taken **twice**, and the two agree to the digit: once before the two full suite runs (the
+clean-clone 2,572-test run and the operator-tree 2,573-test run) and once after them. So the
+bracket is closed on both sides of the only commands in this session long enough to hide a
+write.
+
 Everything in this chunk that needed real bars built a COPY of the slices one symbol-day needs
 (`tests/test_review14_fix.build_scratch_world`, reused rather than re-implemented) -- a copy,
 never a junction or a symlink (CLAUDE.md data-store safety, the Q-18 incident). **No mutating
