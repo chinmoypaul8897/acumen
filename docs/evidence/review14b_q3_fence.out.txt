@@ -1,0 +1,86 @@
+REVIEW_14B PROBE 1 -- the fenced CA pull, on a scratch copy of BOTH roots
+==============================================================================
+scratch root: C:\Users\chinm\AppData\Local\Temp\review14b-pfa8aa_f
+
+1. THE SCRATCH WORLD
+   symlinks/junctions found : 0  (CLAUDE.md: a COPY, never a link)
+   real data_root           : C:\Users\chinm\acumen-data
+   scratch data_root        : C:\Users\chinm\AppData\Local\Temp\review14b-pfa8aa_f\data
+   disjoint trees           : True
+   planted CA day-cache     : cache/ca/nse_ca_2026-05-31_2026-06-10.json
+   its fetched_on           : 2026-05-01  (= 2026-06-10 minus 40 days)
+
+2. THE FENCE, ASKED THE WAY morning_refresh ASKS IT
+   resolved      : C:\Users\chinm\AppData\Local\Temp\review14b-pfa8aa_f\cache
+   may_network   : False   <- False is the downgrade
+   reason        : corporate-action refresh FENCED: the cache lives inside the stores, which a session treats as READ-ONLY (CLAUDE.md data-store safety, Q-18 layer 2), so the day-cache was read at any age and NOTHING was fetched or written. This changes no factor a run already holds. Refreshing it is an operator step, taken after a snapshot and never ninety seconds before the bell (the ingest path: `python -m acumen.ca_report --from <D> --to <D> --allow-network`); a session may do it only under an architect-named sanction (`sanctioned_write=`)
+   control (a cache OUTSIDE both roots): may_network=True  refresh permitted: C:\Users\chinm\AppData\Local\Temp\review14b-outside-hxmisay1 is outside the stores
+
+3. morning_refresh(allow_network=True) -- the shipped pre-open, network stubbed
+   [ok] calendar (published NSE)
+        published calendar governs (20 holidays in 2026); today is a standard session
+   [ok] universe (F&O underlyings)
+        2 symbol(s) supplied by the operator, no pull
+   [ok] daily store (bhavcopy top-up)
+        2026-05-30 -> 2026-06-09 (Q-19 ceiling: the last COMPLETED trading day, never 2026-06-10)
+   [ok] corporate actions
+        1 event(s) for the universe in 2026-05-31..2026-06-10; 1 ex-date(s) ON or beside today's bias pair: HDFCBANK [read from the day-cache, NOT refreshed -- corporate-action refresh FENCED: the cache lives inside the stores, which a session treats as READ-ONLY (CLAUDE.md data-store safety, Q-18 layer 2),
+   [FAIL] instrument master (TODAY's dump)
+        OpenAPIScripMaster_2026-06-10.json is not available: Blocked: probe: the socket layer is stubbed (('2406:da1a:62c:be02:2c58:925f:299f:734e', 443, 0, 0)). CONTEXT 4.7 runs a live morning on THE DAY'S OWN master; a stale snapshot is not a substitute, because the vendor's tick moves between dumps and i
+   [ok] verify yesterday (CONTEXT 4.7)
+        no LIVE recording for 2026-06-09 under C:\Users\chinm\AppData\Local\Temp\review14b-pfa8aa_f\recordings -- nothing to verify (a replay needs no verification: its day already had a bhavcopy)
+
+   CA step ok            : True
+   CA step fenced        : True
+   CA events_total       : 1   <- the 40-day cache was READ, not refused
+   CA events_for_universe: 1
+
+4. WHAT THE PRE-OPEN REACHED FOR
+   the CA endpoint            : https://www.nseindia.com/api/corporates-corporateActions?index=equities&from_date=31-05-2026&to_date=10-06-2026
+   attempted?                 : False
+   outbound attempts recorded : 1
+        SOCKET ('2406:da1a:62c:be02:2c58:925f:299f:734e', 443, 0, 0)
+
+5. EVERY FILE THAT MOVED, under BOTH scratch roots
+   data_root  : 0 file(s) moved of 66
+   cache_root : 0 file(s) moved of 3
+   <cache_root>/ca contents   : ['ca/nse_ca_2026-05-31_2026-06-10.json']  (the planted file, unmoved)
+   <cache_root>/ca touched?   : False
+
+6. B408 -- the calendar step that used to have no guard
+   returned calendar          : None
+   report.ok                  : False
+   steps reported             : 6  (none silently dropped)
+        [FAIL] calendar (published NSE)     NseFetchError: Refusing to fetch https://www.nseindia.com/api/holiday-master?type=trading: no cache file exist
+        [ok] universe (F&O underlyings)   1 symbol(s) supplied by the operator, no pull
+        [FAIL] daily store (bhavcopy top-up) NOT RUN: the published calendar step above failed, and the Q-19 ceiling is the last COMPLETED trading day, whi
+        [FAIL] corporate actions            NseFetchError: Refusing to fetch https://www.nseindia.com/api/corporates-corporateActions?index=equities&from_
+        [FAIL] instrument master (TODAY's dump) OpenAPIScripMaster_2026-06-10.json is not available: InstrumentMasterError: No instrument master cached for 20
+        [FAIL] verify yesterday (CONTEXT 4.7) NOT RUN: the published calendar step above failed, and which day 'yesterday' was is a calendar question
+
+7. B409 -- WHICH store the bhavcopy top-up tops up
+   argv handed to the backfill: ['--from', '2026-07-27', '--to', '2026-08-06', '--store', 'C:\\Users\\chinm\\AppData\\Local\\Temp\\review14b-pfa8aa_f\\b409-store']
+   step.figures['store']      : C:\Users\chinm\AppData\Local\Temp\review14b-pfa8aa_f\b409-store
+   the REAL backfill, --store <scratch>, network stubbed -> exit raised Blocked: probe: the network is stubbed (https://nsearchives.nseindia.com/content/cm/BhavCopy_NSE_CM_0_0_0_20260803_F_0000.csv.zip)
+   files it wrote under the SCRATCH store : 0
+   files it moved under the REAL daily_store : 0   <- must be 0
+
+==============================================================================
+END OF PROBE 1
+
+==============================================================================
+THE CLOSING WHOLE-STORE FINGERPRINT (housekeeping_13aug_store_fingerprint.py),
+taken after every measurement of this re-review:
+
+{
+  "root": "C:\Users\chinm\acumen-data",
+  "files": 22186,
+  "bytes": 4109782853,
+  "metadata_digest": "dbea5660b7734f6a71edd5e99eac0159e53174ec431a1a7fb17c2bad5bf61423",
+  "content_digest": "d97ba4191339be543df9ee8a67f3a8c17aed629e0cc21e4be1d989a86dc1e089",
+  "newest_mtime": "2026-08-12T23:19:20",
+  "newest_file": "nse/ca/nse_ca_2026-01-01_2026-12-31.json"
+}
+
+Identical to the opening fingerprint in every field, metadata digest included.
+==============================================================================

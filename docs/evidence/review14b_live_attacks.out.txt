@@ -1,0 +1,166 @@
+REVIEW_14B PROBES 2-8 -- the re-review's own attacks
+==============================================================================
+work root: C:\Users\chinm\AppData\Local\Temp\review14b-attacks-nybo8lbb
+
+2. B3 -- THE RUNBOOK'S OWN 08:45 COMMAND, THROUGH run_screener.main
+------------------------------------------------------------------------------
+   command : --mode live --day 2026-06-10 --refresh --allow-network --preflight-only
+   exit    : 0
+   [PASS] B3: exit 0  -- ==============================================================================
+   [PASS] B3: the screener does NOT say it cannot start
+   [PASS] B3: the preflight says READY and not NOT READY
+   [PASS] B3: the screener really started (preflight header printed)
+   manifest calendar.governing_source : published-nse-holiday-master
+   manifest calendar.is_trading_day   : True
+   [PASS] B3: the manifest names the PUBLISHED master  -- published-nse-holiday-master
+   [PASS] B3: and calls the day a trading day
+   preflight CA line: corporate actions    corporate-action refresh FENCED: the cache lives inside the stores, which a session treats as READ-ONLY (CLAUDE.md data-store saf
+   [PASS] B3: the preflight discloses the fence to the operator
+
+3. THE TELEGRAM GATE -- three acts, and a message a phone cannot misread
+------------------------------------------------------------------------------
+   replay + --telegram + --live-alerts -> exit 0, 3 alert(s) produced, 0 message(s) on the transport
+   [PASS] H1: a replay with both flags sends NOTHING through main()
+   [PASS] H1: ...and it is not an empty morning (alerts really were produced)
+     mode=live   telegram=True  live_alerts=True  -> sends=True  (expected True)
+     mode=live   telegram=True  live_alerts=False -> sends=False  (expected False)
+     mode=live   telegram=False live_alerts=True  -> sends=False  (expected False)
+     mode=replay telegram=True  live_alerts=True  -> sends=False  (expected False)
+     mode=replay telegram=True  live_alerts=False -> sends=False  (expected False)
+     mode=live   telegram=False live_alerts=True  -> sends=False  (expected False)
+   [PASS] H1: the five-case table holds
+   [PASS] H1: ...and the sixth case (no --telegram) too
+   the message a replayed 2020 trade would produce:
+        [2020-03-19 11:30] SHREECEM LONG  entry 740.95  SL 738.10  TP 749.50  qty 350   (POC 739.80, bias bullish)
+        [DRY RUN -- log only, nothing was sent to anyone else]
+        [REPLAY of a PAST day -- this is not a live alert and nothing about it is about today]
+   [PASS] H1: a replayed/dry message carries its TRADE DATE
+   [PASS] H1: ...and both posture markers
+   [PASS] H1: a LIVE alert carries neither marker
+   [PASS] H1: ...and still carries CONTEXT 4.7's disclosure
+   [PASS] H1: the end-of-day summary of a replayed day names itself a replay
+   the five places REVIEW_14 H1 counted:
+     src/acumen/telegram_sink.py      three-act=True names-all-3=True says-two=False
+     src/acumen/run_screener.py       three-act=True names-all-3=True says-two=False
+     docs/morning_runbook_stub.md     three-act=True names-all-3=True says-two=False
+     PROGRESS.md                      three-act=True names-all-3=True says-two=False
+     tests/test_telegram_sink.py      three-act=True names-all-3=True says-two=False
+   [PASS] H1: all five places make the SAME three-act claim, and none still says two
+
+4. M19 -- TEN SYMBOLS, ONE POISONED WITH AN INVERTED CANDLE (high < low)
+------------------------------------------------------------------------------
+   poisoned symbol : ITC
+   the poison      : the 09:20 candle re-served stamped on the NEXT trading day -- the MIRROR of the fix session's fixture, chosen after measuring five malformed shapes (section 4b) to find one that actually reaches the evaluation guard
+   sweeps completed        : 18  (sweeps_done=18)
+   evaluated per sweep     : [9]
+   unevaluated per sweep   : [('ITC',)]
+   dashboard.html written  : True
+   banner                  : 15:30 sweep INCOMPLETE -- 1 symbol(s) could NOT be evaluated: ITC. Those stocks are NOT being watched.
+   evaluation-failed events: 18
+   [PASS] M19: the morning survives -- 18 of 18 boundaries  -- 18
+   [PASS] M19: nine symbols evaluated at ALL 18 boundaries
+   [PASS] M19: the tenth is unevaluated at every boundary
+   [PASS] M19: the trader's screen was written
+   [PASS] M19: the banner NAMES the tenth
+   [PASS] M19: the reason is on disk, per symbol per boundary  -- 18
+   [PASS] M19: the nine healthy symbols are not marked skipped
+   [PASS] M19: the nine healthy symbols alerted
+   [PASS] M19: a RESTART recovers (the review measured it could not)
+   the boundaries the failures name: ['11:15', '11:30', '11:45', '12:00'] ... ['15:15', '15:30']
+   [PASS] M19: the failure is recorded PER BOUNDARY, each naming its own sweep
+   NOTE: a stray-stamp poison is PERMANENT for its symbol inside one session -- merge_bars accumulates, so a feed that heals still serves a screener that remembers. The other nine finish the day; the tenth is lost until a new recording.
+
+   4b. THE SHAPE CENSUS: which malformed bars reach the guard, and which walk past it
+   `_poll` wraps ONLY `self.source.fetch(...)` (live_screener.py:1055-1066). The merge,
+   the duplicate-stamp scan and the two recording writes that follow it are OUTSIDE
+   both guards, so a bar that survives the fetch and dies in THAT block still ends the
+   sweep -- and the morning -- exactly as M19 described.
+        NEXT-day stray stamp   CONTAINED by the guard (PocError)
+        high < low             handled by the gates -- no exception at all
+        negative volume        handled by the gates -- no exception at all
+        sub-minute stamp       handled by the gates -- no exception at all
+        tz-AWARE stamp         ** ESCAPES run_day: TypeError **
+        close_paise = None     ** ESCAPES run_day: TypeError **
+        volume = None          ** ESCAPES run_day: TypeError **
+   shapes that walk past BOTH guards: ['tz-AWARE stamp', 'close_paise = None', 'volume = None']
+   [FAIL] M19: no malformed-bar shape escapes run_day (RESIDUAL -- see REVIEW_14B)  -- 3 of 7 escape: ['tz-AWARE stamp', 'close_paise = None', 'volume = None']
+   [PASS] M19: a RAISING sink costs only its own delivery
+   [PASS] M19: ...and the miss is recorded by sink name
+
+5. H3 / M21 -- BOSCHLTD 2021-05-20, THE EIGHT EVENTS RE-DERIVED BY HAND FIRST
+------------------------------------------------------------------------------
+   HAND DERIVATION, straight off the raw minute store (nothing imported from the screener):
+     entry candle 13:15..13:29, 15 one-minute bars
+     entry (13:29 close)                 : 1556990 paise
+     candle low WITHOUT the two late bars: 1458000 paise
+     candle low WITH them (the true low) : 1455020 paise
+     risk without the late bars          : 98990 paise -> qty 1
+     risk with them                      : 101970 paise -> qty 0
+     boundaries in a session             : 18 (11:15..15:15 plus close_day's 15:30)
+     boundaries AFTER the 13:30 entry    : 8 <- the number of regressions a consumed-unsizable re-read must produce
+   MEASURED: trigger alerts=1  qty=1  final phase=triggered  final qty=1  regressions=8
+   [PASS] H3: the trade really was delivered at 13:30 with qty 1
+   [PASS] H3: entry/stop are the hand-derived numbers
+   [PASS] H3: two late candles do NOT walk it into a numberless row
+   [PASS] H3: exactly 8 phase-regression events, as hand-derived  -- measured 8
+   [PASS] H3: each names TRIGGERED -> refused
+   ORDINARY qty-0 day: phase=refused refusal='qty 0 -- no trade, consumed (CONTEXT 3.5)' qty=0 alerts=['armed']
+   [PASS] M21: the ordinary qty-0 day is still consumed-and-logged with no trigger
+   [PASS] M21: ...and it produced NO phase-regression event
+   ordinary-day alerts.jsonl written to C:\Users\chinm\AppData\Local\Temp\review14b-attacks-nybo8lbb\h3-plain-alerts.jsonl (383 bytes) for the 993d57a byte comparison
+
+6. H4 / Q1 -- A REFUSED STATE'S REAL AGE, AND A STAMP THAT LIES
+------------------------------------------------------------------------------
+   a feed frozen at 11:29, read at 15:00 -> stale=True behind=211
+   [PASS] H4: a refused state reports its REAL age (211 minutes)  -- (True, 211)
+   [PASS] H4: ...and an unrefused state is unchanged by the fix
+   unvouched_price(a FALSE fresh stamp) -> BOSCHLTD failure: the payload stamps this price FRESH while its own recorded age is 211 minute(s) behind the boundary -- a stamp t
+   [PASS] Q1: a FALSE fresh stamp is rejected, not only a missing one
+   [PASS] Q1: ...and the sink really refuses it rather than merely being able to
+   [PASS] Q1: a marked STALE price still travels
+   [PASS] Q1: an age exactly at the clamp (1) is NOT called a lie
+
+7. H2 -- THE SUMMARY OF A MORNING THIS PROCESS DID NOT DELIVER
+------------------------------------------------------------------------------
+   the summary a resumed process sends:
+        ACUMEN -- END OF DAY   2026-06-10
+        1 symbol(s) alerted:
+          HDFCBANK  armed 11:15, trigger 11:30, exit 11:45
+        telegram: 0 sent, 0 refused (unvouched price), 0 failed
+        markers: 0 stale, 0 provisional POC
+        (live feed, not yet verified against the exchange's end-of-day record)
+   [PASS] H2: a resumed morning reports the day's REAL alerts
+   [PASS] H2: an actually-empty morning still says so
+   [PASS] H2: ...and the summary is still sent ONCE per recording
+
+8. M15 / M16 -- 'NOT JUDGED' IS NEITHER 'PASSED' NOR 'REFUSED', ON BOTH SURFACES
+------------------------------------------------------------------------------
+   M15 headline: 2026-06-10: NOT VERIFIED -- 1 LIVE-ALERTED symbol-day(s) could NOT be judged -- HDFCBANK. Their alerts are NOT withdrawn and NOT confirmed: the end-of-day battery was never able to run on them, and a verification that di
+   [PASS] M15: the alerted-but-uncandled symbol is IN the verdict list
+   [PASS] M15: it is NOT reported as '0 alerted'
+   [PASS] M15: it is NOT withdrawn (refused_after_alert is False)
+   [PASS] M15: the render marks it NOT-VERIFIED
+   M16 silent-oracle headline : 2026-06-10: NOT VERIFIED -- 1 LIVE-ALERTED symbol-day(s) could NOT be judged -- HDFCBANK. Their alerts are NOT withdrawn and NOT confirmed: the end-of-day battery was never able to run on them, and a 
+   M16 real-oracle headline   : 2026-06-10: verified against the published bhavcopy -- 1/1 symbol-day(s) pass the FULL battery, 1 alerted, 0 alerted-then-refused.
+   [PASS] M16: a SILENT oracle is not a refusal
+   [PASS] M16: ...and it names the oracle as the thing that did not speak
+   [PASS] M16: a REAL answer still reads as one (the loud line is not softened)
+   dashboard TEXT: unjudged loud=True  a passing day quiet=True
+   [PASS] M15/M16: the TEXT dashboard puts an unjudged alerted day in the loud register
+   dashboard HTML: unjudged -> banner=True  a passing day -> quiet row=True
+   [PASS] M15/M16: the HTML dashboard does the same
+   oracle SILENT  : 2026-06-10: NOT VERIFIED -- 1 LIVE-ALERTED symbol-day(s) could NOT be judged -- HDFCBANK. Their alerts are NOT withdrawn
+   oracle REFUSES : 2026-06-10: THE EXCHANGE'S RECORD REFUSES 1 LIVE-ALERTED SYMBOL-DAY(S) -- HDFCBANK. Those alerts were produced on data t
+   [PASS] M15/M16: oracle-SILENT and oracle-REFUSES are distinct on the headline
+   [PASS] M15/M16: ...and distinct on the row, by reason and by mark
+   [PASS] M15/M16: no-candles and silent-oracle share a headline but NOT a reason
+
+   H5 -- THE PARITY HARNESS IN LIVE POSTURE
+   posture=live gates={} judged=True matched=True transitions_equal=True mismatches=[]
+   [PASS] H5: a live-posture day is JUDGED  -- the FULL CONTEXT 4.6 battery accepts this day
+   [PASS] H5: the trail comparison is real again
+   [PASS] H5: and the day MATCHES  -- []
+
+==============================================================================
+CHECKS: 60 PASS / 1 FAIL
+   FAILED: M19: no malformed-bar shape escapes run_day (RESIDUAL -- see REVIEW_14B)
