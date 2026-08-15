@@ -61,6 +61,14 @@ from .signal_engine import DayGates, SignalPipeline, oracle_free_battery
 #: How far back a top-up looks when the store's own last day cannot be trusted to be recent.
 DEFAULT_LOOKBACK_DAYS: int = 10
 
+#: What a calendar-dependent step reports when the calendar step itself failed. NOT RUN is a
+#: third outcome beside ok and FAIL, and it is stated rather than left to be inferred from a
+#: missing line -- a step that is silently absent reads as a step that passed (REVIEW_14 M15's
+#: shape, refused here before it can be made).
+NOT_RUN_WITHOUT_A_CALENDAR: str = (
+    "NOT RUN: the published calendar step above failed, and {what}"
+)
+
 
 class RefreshError(RuntimeError):
     """The morning refresh cannot complete, and the screener must not start behind it."""
@@ -101,9 +109,14 @@ class RefreshReport:
             lines.append(f"[{mark}] {step.name:<28} {step.detail}")
         lines.append("=" * 72)
         lines.append("READY" if self.ok else "NOT READY -- the screener must not start")
-        if self.verification is not None and self.verification.refused_after_alert:
+        if self.verification is not None and (
+            self.verification.refused_after_alert
+            or self.verification.alerted_but_unverified
+        ):
             # The one thing in this report that must not be read past. CONTEXT 4.7's "named
-            # loudly", in the only register a text report has.
+            # loudly", in the only register a text report has. REVIEW_14 M15: a live-alerted
+            # symbol-day that could not be judged AT ALL is loud too -- quieter than a refusal
+            # and louder than silence, because the operator has to know what was not checked.
             lines.append("")
             lines.append("!! " + self.verification.headline)
         return "\n".join(lines) + "\n"
@@ -223,8 +236,15 @@ def refresh_daily_store(
             "trading day. A top-up ends at the last COMPLETED trading day."
         )
     start = ceiling - timedelta(days=max(1, lookback_days))
+    # REVIEW_14, found by driving the shipped `--refresh` end to end for B3's CLI test: the
+    # backfill was invoked with no `--store`, so it resolved `default_store_root()` -- the
+    # data_root of whatever config.yaml the PROCESS loaded -- and topped up THAT store however
+    # the caller had been pointed. A session running against a scratch copy would have written
+    # into the real one, which is precisely the write CLAUDE.md's new rule forbids and precisely
+    # the shape of B1 one directory over. The store this job was HANDED is the store it tops up.
     argv = [
         "--from", start.isoformat(), "--to", ceiling.isoformat(),
+        *([] if store is None else ["--store", str(Path(store.root))]),
         *(["--allow-network"] if allow_network else []),
     ]
     code = (runner or daily_backfill.main)(argv)
@@ -235,7 +255,8 @@ def refresh_daily_store(
             f"trading day, never {today.isoformat()})"
         ),
         figures={"from": start.isoformat(), "to": ceiling.isoformat(),
-                 "exit_code": code, "q19_ceiling": ceiling.isoformat()},
+                 "exit_code": code, "q19_ceiling": ceiling.isoformat(),
+                 "store": None if store is None else str(Path(store.root))},
     )
 
 
@@ -243,6 +264,8 @@ def refresh_corporate_actions(
     *, symbols: Sequence[str], today: date, allow_network: bool = False,
     cache_dir: Path | None = None,
     puller: Callable[..., Sequence] | None = None,
+    data_root: Path | None = None,
+    cache_root: Path | None = None,
 ) -> RefreshStep:
     """Incremental CA pull, so a factor effective TODAY is known before any bias is computed.
 
@@ -253,15 +276,66 @@ def refresh_corporate_actions(
     because that is the case where a stale cache silently changes a bias rather than merely
     aging. An ordinary stale cache costs nothing; a cache that missed today's split is a wrong
     bias on every stock it touches.
+
+    **THE FENCE IS ASKED HERE** (REVIEW_14 **B1**, closing REVIEW_13B Q3 where it was left
+    open). :func:`acumen.backtest.fence_ca_cache` was built, works on every machine layout, and
+    was never called on this path: the pull took ``allow_network`` straight from the CLI flag and
+    the cache directory straight from ``--config``'s ``cache_root``, so a real
+    ``--refresh --allow-network`` morning CREATED ``<cache_root>/ca/`` and accreted one
+    ``nse_ca_<D-10>_<D>.json`` into the snapshot-protected tree every morning thereafter. The
+    defect REVIEW_13B pinned was one module away from the fence built to stop it. The fence now
+    stands between this step's flag and the fetch, judged against **the roots this job is
+    actually running under** rather than against whatever ``config.yaml`` a process happened to
+    load -- which is what makes a scratch-copy run fenced by its own scratch roots and a real
+    morning fenced by the real ones.
+
+    A fenced pull is a **downgrade to the cache, never a refusal**: the day-cache is read at any
+    age (the 31-Jul-2026 offline ruling) and the morning goes on. When the fence has downgraded
+    the pull and there is no cached window on disk to read, this step is ``ok`` and says so
+    LOUDLY in its own detail: the report it produces is advisory -- the factor tables every bias
+    really descends from come from :func:`acumen.backtest.build_factor_tables`, fenced
+    identically, reading the cache the backtester has always read -- and a read-only law is not a
+    reason to tell the operator his morning is broken. An operator who asked for OFFLINE and has
+    no cache still gets the failure he asked about, unchanged.
     """
+    from . import backtest as bt
+
     window_start = today - timedelta(days=DEFAULT_LOOKBACK_DAYS)
     if puller is None:
         from . import corp_actions as ca
 
         puller = ca.fetch_nse_corporate_actions
-    events = puller(
-        window_start, today, allow_network=allow_network, cache_dir=cache_dir, today=today
+    resolved, network, fence_reason = bt.fence_ca_cache(
+        cache_dir=cache_dir, allow_network=allow_network,
+        data_root=data_root, cache_root=cache_root,
     )
+    fenced = bool(allow_network) and not network
+    try:
+        events = puller(
+            window_start, today, allow_network=network, cache_dir=resolved, today=today
+        )
+    except Exception as exc:
+        if not fenced:
+            raise
+        return RefreshStep(
+            name="corporate actions", ok=True,
+            detail=(
+                f"{fence_reason}. NO cached window for "
+                f"{window_start.isoformat()}..{today.isoformat()} is on disk at "
+                f"{ca_cache_display(resolved)}, so THIS REPORT IS BLIND: an ex-date effective "
+                f"today would not be named below ({type(exc).__name__}). The factor tables the "
+                "bias descends from are unaffected -- they are built from the corporate-action "
+                "cache the backtester reads, under the same fence"
+            ),
+            figures={
+                "fenced": True, "fence_reason": fence_reason, "cache_dir": str(resolved),
+                "events_total": None, "events_for_universe": None,
+                "ex_dates_near_the_bias_pair": None,
+                "window_start": window_start.isoformat(),
+                "window_end": today.isoformat(),
+                "unreadable": f"{type(exc).__name__}: {exc}",
+            },
+        )
     wanted = {symbol.strip().upper() for symbol in symbols}
     in_window = [
         event for event in events
@@ -279,6 +353,10 @@ def refresh_corporate_actions(
     if on_the_pair:
         names = ", ".join(sorted({event.symbol for event in on_the_pair}))
         detail += f"; {len(on_the_pair)} ex-date(s) ON or beside today's bias pair: {names}"
+    if fenced:
+        # Disclosed where the operator is already reading. The events above came off the
+        # day-cache at whatever age it has, and that is a different sentence from "pulled".
+        detail += f" [read from the day-cache, NOT refreshed -- {fence_reason}]"
     return RefreshStep(
         name="corporate actions", ok=True, detail=detail,
         figures={
@@ -291,8 +369,18 @@ def refresh_corporate_actions(
             ],
             "window_start": window_start.isoformat(),
             "window_end": today.isoformat(),
+            "fenced": fenced,
+            "fence_reason": fence_reason,
+            "cache_dir": str(resolved),
         },
     )
+
+
+def ca_cache_display(cache_dir: Path) -> str:
+    """The corporate-action day-cache directory, as the report names it. No I/O."""
+    from . import corp_actions as ca
+
+    return str(ca.cache_path(Path(cache_dir), "").parent)
 
 
 def refresh_instrument_master(
@@ -380,6 +468,47 @@ def refresh_instrument_master(
 
 # --- CONTEXT 4.7: the next morning's verdict on the last one -----------------------------------
 
+#: The row mark for a symbol-day nothing could judge. Distinct from ``oracle-refused`` on purpose
+#: (REVIEW_14 M15/M16): one says the exchange's record disagrees with this tool, the other says
+#: the exchange's record is not there to ask.
+NOT_VERIFIED_MARK: str = "NOT-VERIFIED"
+
+#: Why a symbol could not be judged: its candles are not in the recording (M15).
+NO_CANDLES_RECORDED: str = (
+    "this symbol ALERTED but the recording holds no candle file for it, so neither battery "
+    "could be run -- nothing about this symbol-day has been verified"
+)
+
+#: Why a symbol could not be judged: the oracle itself is absent (M16).
+NO_ORACLE_ROW: str = "THE ORACLE HAS NOT SPOKEN"
+
+
+def oracle_spoke(gates: DayGates) -> bool:
+    """Did the exchange's record ANSWER for this symbol-day at all? (REVIEW_14 M16.)
+
+    A gate-1P failure whose cause is :data:`acumen.quality_gates.GATE1P_NO_ORACLE` means the
+    published bhavcopy has no row for the day -- *"the stored prices can be compared with
+    nothing"*. That is the oracle being silent, and a silent oracle refuses nothing. Every other
+    failure is a real disagreement between this tool's data and the exchange's, which is what
+    CONTEXT 4.7's loud sentence is for.
+    """
+    from . import quality_gates as qg
+
+    gate1p = gates.gate1p
+    if gate1p is not None and not gate1p.passed and gate1p.cause == qg.GATE1P_NO_ORACLE:
+        return False
+    return True
+
+
+def _blind_sentence(blind: Sequence["SymbolVerdict"]) -> str:
+    names = ", ".join(verdict.symbol for verdict in blind)
+    return (
+        f"{len(blind)} LIVE-ALERTED symbol-day(s) could NOT be judged -- {names}. "
+        "Their alerts are NOT withdrawn and NOT confirmed: the end-of-day battery was never "
+        "able to run on them, and a verification that did not happen must not read as one "
+        "that passed."
+    )
+
 
 @dataclass(frozen=True)
 class SymbolVerdict:
@@ -392,6 +521,12 @@ class SymbolVerdict:
     oracle_reason: str
     alerted: tuple[str, ...]
     minutes: int
+    #: Could this symbol be judged AT ALL? False when the recording holds no candle file for it
+    #: (REVIEW_14 **M15**) or when the published bhavcopy has no row for the day, so gate 1P
+    #: fails with :data:`acumen.quality_gates.GATE1P_NO_ORACLE` (**M16**). Both are "the oracle
+    #: has not spoken", which is a different sentence from "the oracle REFUSES" and must never be
+    #: rendered as one: the first withdraws nothing, the second withdraws a real alert.
+    verified: bool = True
     #: Stamps ONE reply served twice -- CONTEXT 4.5 gate 2's first exclusion trigger, which both
     #: batteries below are handed so they can act on it (REVIEW_13 B2).
     duplicate_stamps: int = 0
@@ -402,8 +537,26 @@ class SymbolVerdict:
 
     @property
     def refused_after_alert(self) -> bool:
-        """The LOUD case: this symbol produced live alerts and the oracle refuses its day."""
-        return bool(self.alerted) and not self.oracle_passed
+        """The LOUD case: this symbol produced live alerts and the oracle REFUSES its day.
+
+        REVIEW_14 **M16**: an unjudgeable symbol is not a refused one. An absent bhavcopy row
+        fails gate 1P by :data:`~acumen.quality_gates.GATE1P_NO_ORACLE` -- *"no raw daily row for
+        this day, so the stored prices can be compared with nothing"* -- which is the exchange
+        having said NOTHING, and over five dry-run days it withdrew real, correct alerts in a
+        headline that must never be ignored. Withdrawing an alert the record has not refused
+        trains the trader to ignore the one line that exists to stop him trading.
+        """
+        return bool(self.alerted) and self.verified and not self.oracle_passed
+
+    @property
+    def alerted_but_unverified(self) -> bool:
+        """This symbol ALERTED and could not be judged at all (REVIEW_14 M15 / M16).
+
+        Not a pass, not a refusal, and above all not absent: a symbol dropped from the verdict
+        list is counted nowhere, which is how ``0 alerted`` came to be printed over a recording
+        holding three alerts.
+        """
+        return bool(self.alerted) and not self.verified
 
 
 @dataclass(frozen=True)
@@ -433,6 +586,15 @@ class MorningVerification:
         return tuple(verdict for verdict in self.verdicts if verdict.refused_after_alert)
 
     @property
+    def alerted_but_unverified(self) -> tuple[SymbolVerdict, ...]:
+        """Symbols that alerted and could not be judged -- REVIEW_14 M15 and M16, counted."""
+        return tuple(verdict for verdict in self.verdicts if verdict.alerted_but_unverified)
+
+    @property
+    def unverified(self) -> tuple[SymbolVerdict, ...]:
+        return tuple(verdict for verdict in self.verdicts if not verdict.verified)
+
+    @property
     def oracle_passed(self) -> tuple[SymbolVerdict, ...]:
         return tuple(verdict for verdict in self.verdicts if verdict.oracle_passed)
 
@@ -441,17 +603,30 @@ class MorningVerification:
         if not self.oracle_available:
             return f"{self.day.isoformat()}: NOT VERIFIED -- {self.note}"
         bad = self.refused_after_alert
+        blind = self.alerted_but_unverified
         if bad:
             names = ", ".join(verdict.symbol for verdict in bad)
-            return (
+            head = (
                 f"{self.day.isoformat()}: THE EXCHANGE'S RECORD REFUSES {len(bad)} "
                 f"LIVE-ALERTED SYMBOL-DAY(S) -- {names}. Those alerts were produced on data the "
                 "end-of-day battery does not accept; treat them as withdrawn."
             )
+            return head + ("" if not blind else " " + _blind_sentence(blind))
+        if blind:
+            # REVIEW_14 **M15**: this is the case that used to print "0/0 ... 0 alerted, 0
+            # alerted-then-refused" over a morning holding three alerts, and the dry-run week's
+            # debrief read it as "yesterday checked out". It is NOT a pass and it is NOT a
+            # refusal -- nothing has been verified, and the sentence has to say so first.
+            return f"{self.day.isoformat()}: NOT VERIFIED -- " + _blind_sentence(blind)
         return (
             f"{self.day.isoformat()}: verified against the published bhavcopy -- "
             f"{len(self.oracle_passed)}/{len(self.verdicts)} symbol-day(s) pass the FULL battery, "
-            f"{len(self.alerted)} alerted, 0 alerted-then-refused."
+            f"{len(self.alerted)} alerted, 0 alerted-then-refused"
+            + (
+                "." if not self.unverified else
+                f"; {len(self.unverified)} symbol-day(s) could not be judged at all "
+                "(the oracle has not spoken for them), none of which alerted."
+            )
         )
 
     def as_dict(self) -> dict:
@@ -462,6 +637,8 @@ class MorningVerification:
             "note": self.note,
             "headline": self.headline,
             "refused_after_alert": [v.symbol for v in self.refused_after_alert],
+            "alerted_but_unverified": [v.symbol for v in self.alerted_but_unverified],
+            "unverified": [v.symbol for v in self.unverified],
             "verdicts": [
                 {
                     "symbol": v.symbol,
@@ -469,6 +646,7 @@ class MorningVerification:
                     "live_reason": v.live_reason,
                     "oracle_passed": v.oracle_passed,
                     "oracle_reason": v.oracle_reason,
+                    "verified": v.verified,
                     "alerted": list(v.alerted),
                     "minutes": v.minutes,
                     "duplicate_stamps": v.duplicate_stamps,
@@ -487,13 +665,14 @@ class MorningVerification:
         ]
         for verdict in sorted(self.verdicts, key=lambda v: v.symbol):
             mark = "REFUSED-AFTER-ALERT" if verdict.refused_after_alert else (
+                NOT_VERIFIED_MARK if not verdict.verified else
                 "oracle-pass" if verdict.oracle_passed else "oracle-refused"
             )
             lines.append(
                 f"  {verdict.symbol:<14} live={'pass' if verdict.live_passed else 'refused'}  "
                 f"{mark:<20} alerts={','.join(verdict.alerted) or '-'}"
             )
-            if not verdict.oracle_passed:
+            if not verdict.oracle_passed or not verdict.verified:
                 lines.append(f"      {verdict.oracle_reason}")
         lines.append("=" * 72)
         return "\n".join(lines) + "\n"
@@ -527,9 +706,24 @@ def verify_prior_recording(
     for row in recording.alerts():
         alerts_by_symbol.setdefault(str(row.get("symbol", "")), []).append(str(row.get("kind")))
 
-    for symbol in recording.symbols():
+    judged_symbols = set(recording.symbols()) | set(alerts_by_symbol)
+    for symbol in sorted(judged_symbols):
         bars = recording.bars(symbol, day)
         if not bars:
+            # REVIEW_14 **M15**: this used to `continue`, so a symbol that ALERTED and whose
+            # candle file is absent left the verdict list entirely -- and the headline then
+            # asserted it had alerted zero times ("0/0 symbol-day(s) pass the FULL battery, 0
+            # alerted, 0 alerted-then-refused") over an `alerts.jsonl` holding three alerts. A
+            # false GREEN over a morning nothing verified is worse than no verification at all,
+            # because the dry-run week's debrief reads it as "yesterday checked out".
+            verdicts.append(SymbolVerdict(
+                symbol=symbol, live_passed=False,
+                live_reason=NO_CANDLES_RECORDED,
+                oracle_passed=False, oracle_reason=NO_CANDLES_RECORDED,
+                verified=False,
+                alerted=tuple(sorted(set(alerts_by_symbol.get(symbol, ())))),
+                minutes=0,
+            ))
             continue
         # REVIEW_13 B2. `recording.bars()` de-duplicates a re-polled stamp exactly as the
         # screener's `merge_bars` does, and it must -- the engines need one bar per minute. But
@@ -554,15 +748,26 @@ def verify_prior_recording(
                 f" [{len(revisions)} stamp(s) the vendor RE-SERVED with different values; the "
                 "screener acted on the later one]"
             )
+        # REVIEW_14 **M16**: gate 1P fails with GATE1P_NO_ORACLE when the published bhavcopy has
+        # no row for this symbol-day -- which is the exchange having said NOTHING, not the
+        # exchange refusing. Rendering the two the same way loudly withdrew real, correct alerts
+        # over five dry-run days, and `oracle_available` plus the NOT-VERIFIED branch that exist
+        # for exactly this case were dead code. The oracle is asked whether it SPOKE first.
+        spoke = oracle_spoke(oracle_gates)
         verdicts.append(SymbolVerdict(
             symbol=symbol,
             live_passed=live_gates.usable,
             live_reason=(live_gates.refusal or "the oracle-free battery accepts this day") + note,
             oracle_passed=oracle_gates.usable,
             oracle_reason=(
-                oracle_gates.refusal_detail[1] if oracle_gates.refusal_detail is not None
-                else "the FULL battery accepts this day"
+                (
+                    oracle_gates.refusal_detail[1] if oracle_gates.refusal_detail is not None
+                    else "the FULL battery accepts this day"
+                ) if spoke else
+                f"{NO_ORACLE_ROW} -- the published bhavcopy has no row for this symbol-day, so "
+                "nothing has been verified either way"
             ) + note,
+            verified=spoke,
             alerted=tuple(sorted(set(alerts_by_symbol.get(symbol, ())))),
             minutes=len(bars),
             duplicate_stamps=len(twins),
@@ -649,6 +854,10 @@ def verify_yesterday(
             "oracle_pass": len(verification.oracle_passed),
             "alerted": len(verification.alerted),
             "refused_after_alert": [verdict.symbol for verdict in bad],
+            "alerted_but_unverified": [
+                verdict.symbol for verdict in verification.alerted_but_unverified
+            ],
+            "unverified": [verdict.symbol for verdict in verification.unverified],
         },
     )
 
@@ -663,8 +872,12 @@ def morning_refresh(
     daily_runner: Callable[[list[str]], int] | None = None,
     verify_prior: bool = True,
     recording_root: Path | None = None,
-) -> tuple[cal.TradingCalendar, tuple[str, ...], RefreshReport]:
+) -> tuple[cal.TradingCalendar | None, tuple[str, ...], RefreshReport]:
     """Run every pre-open step in order and report each one. Returns what the screener needs.
+
+    The calendar is ``None`` only when the published master could not be read at all, which is
+    the one case :attr:`RefreshReport.ok` is guaranteed False for -- so no caller ever reaches a
+    ``None`` calendar past its own readiness check.
 
     The bias itself is NOT computed here -- :func:`acumen.live_screener.build_live_screener`
     computes it through the backtester's own runner, which is the only way to be sure the
@@ -676,9 +889,28 @@ def morning_refresh(
     parameter at all so that a test can drive the job without a recordings tree beside it.
     """
     steps: list[RefreshStep] = []
-    calendar, step = refresh_calendar(
-        cache_dir=cache_dir, today=today, allow_network=allow_network, daily_store=store
-    )
+    calendar: cal.TradingCalendar | None
+    try:
+        calendar, step = refresh_calendar(
+            cache_dir=cache_dir, today=today, allow_network=allow_network, daily_store=store
+        )
+    except Exception as exc:
+        # REVIEW_14, found while building B1's certifying test: this was the ONE step with no
+        # guard, so a published holiday master that could not be read -- an offline morning with
+        # no day-cache, a refused endpoint at 08:45 -- left `main` with a traceback from four
+        # layers down instead of REVIEW_12C C2's one sentence and exit 1. Every step still runs
+        # that CAN run; the two that need a calendar say why they did not, which is the same
+        # discipline the rest of this job already had ("the job did not abandon itself at the
+        # first failure, and the operator is told about both problems in one preflight").
+        calendar = None
+        step = RefreshStep(
+            name="calendar (published NSE)", ok=False,
+            detail=(
+                f"{type(exc).__name__}: {exc}. The PUBLISHED master governs a live morning "
+                "(QUESTIONS.md C5) and the store-derived calendar cannot answer for today by "
+                "construction, so there is no fallback"
+            ),
+        )
     steps.append(step)
 
     if symbols is None:
@@ -700,18 +932,32 @@ def morning_refresh(
             figures={"symbols": len(universe)},
         ))
 
-    try:
-        steps.append(refresh_daily_store(
-            store, calendar, today=today, allow_network=allow_network, runner=daily_runner
-        ))
-    except Exception as exc:
+    if calendar is None:
         steps.append(RefreshStep(
-            name="daily store (bhavcopy top-up)", ok=False, detail=f"{type(exc).__name__}: {exc}"
+            name="daily store (bhavcopy top-up)", ok=False,
+            detail=NOT_RUN_WITHOUT_A_CALENDAR.format(
+                what="the Q-19 ceiling is the last COMPLETED trading day, which only a calendar "
+                     "can name"
+            ),
         ))
+    else:
+        try:
+            steps.append(refresh_daily_store(
+                store, calendar, today=today, allow_network=allow_network, runner=daily_runner
+            ))
+        except Exception as exc:
+            steps.append(RefreshStep(
+                name="daily store (bhavcopy top-up)", ok=False,
+                detail=f"{type(exc).__name__}: {exc}",
+            ))
 
     try:
+        # REVIEW_14 B1: the fence is judged against the roots THIS job runs under -- the store
+        # the caller handed in and the cache directory it was given -- so a scratch-copy run is
+        # fenced by its own roots and a real morning by the real ones.
         steps.append(refresh_corporate_actions(
-            symbols=universe, today=today, allow_network=allow_network, cache_dir=cache_dir
+            symbols=universe, today=today, allow_network=allow_network, cache_dir=cache_dir,
+            data_root=data_root_for(store), cache_root=cache_dir,
         ))
     except Exception as exc:
         steps.append(RefreshStep(
@@ -733,7 +979,14 @@ def morning_refresh(
     # CONTEXT 4.7 / Q-28. AFTER the bhavcopy top-up: the oracle it verifies against is the file
     # that step just fetched.
     verification: MorningVerification | None = None
-    if verify_prior:
+    if verify_prior and calendar is None:
+        steps.append(RefreshStep(
+            name="verify yesterday (CONTEXT 4.7)", ok=False,
+            detail=NOT_RUN_WITHOUT_A_CALENDAR.format(
+                what="which day 'yesterday' was is a calendar question"
+            ),
+        ))
+    elif verify_prior:
         try:
             verification, step = verify_yesterday(
                 today=today, calendar=calendar, data_root=data_root_for(store),
@@ -763,7 +1016,13 @@ def data_root_for(store: DailyStore) -> Path:
 
 __all__ = [
     "DEFAULT_LOOKBACK_DAYS",
+    "NOT_RUN_WITHOUT_A_CALENDAR",
+    "NOT_VERIFIED_MARK",
+    "NO_CANDLES_RECORDED",
+    "NO_ORACLE_ROW",
     "MorningVerification",
+    "ca_cache_display",
+    "oracle_spoke",
     "RefreshError",
     "RefreshReport",
     "RefreshStep",

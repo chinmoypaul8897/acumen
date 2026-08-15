@@ -180,7 +180,10 @@ def render_text(
         lines.append("")
         lines.append(f"YESTERDAY, VERIFIED (CONTEXT 4.7)")
         lines.append("-" * width)
-        if verification.refused_after_alert:
+        # REVIEW_14 M15/M16: a live-alerted symbol-day the morning-after could not judge AT ALL
+        # is loud too. Quieter than a refusal and louder than silence -- the operator has to know
+        # what was NOT checked, and "not checked" must never render as "checked out".
+        if verification.refused_after_alert or verification.alerted_but_unverified:
             lines.append("  !! " + verification.headline)
         else:
             lines.append("  " + verification.headline)
@@ -311,7 +314,10 @@ def render_html(
     add("</div></section>")
 
     if verification is not None:
-        loud = bool(verification.refused_after_alert)
+        # REVIEW_14 M15/M16, on the trader's own screen: an unjudged live-alerted symbol-day is
+        # in the banner's register, because a verification that did not happen must not be shown
+        # in the same quiet row as one that passed.
+        loud = bool(verification.refused_after_alert or verification.alerted_but_unverified)
         add('<section class="group verify"><h2><span class="chip">YESTERDAY, VERIFIED</span>'
             '<span class="words">CONTEXT 4.7 -- the full battery, against the published '
             'bhavcopy</span></h2>')

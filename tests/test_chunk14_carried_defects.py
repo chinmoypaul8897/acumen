@@ -556,61 +556,203 @@ def test_Q3_the_fence_decides_by_PATH_and_by_named_sanction(tmp_path: Path) -> N
     assert "architect 14-Aug" in why, "the sanction is echoed, so the record names who allowed it"
 
 
-def test_Q3_a_LIVE_REFRESH_writes_ZERO_bytes_under_the_stores(tmp_path: Path) -> None:
-    """The tripwire the finding asks for, against the real store, read-only.
+def store_fingerprint(root: Path) -> tuple[int, int, tuple]:
+    """``(files, bytes, (relpath, size, mtime_ns) per file)`` for a whole root. Reads nothing."""
+    files = sorted(p for p in root.rglob("*") if p.is_file())
+    rows = tuple(
+        (p.relative_to(root).as_posix(), p.stat().st_size, p.stat().st_mtime_ns)
+        for p in files
+    )
+    return len(files), sum(row[1] for row in rows), rows
 
-    ``build_runner(..., allow_network=True)`` is what ``--mode live --refresh --allow-network``
-    reaches, and it is what wrote 22 files and 46,262 bytes into ``data_root`` during REVIEW_13B.
-    It is driven here for real, over the real corporate-action cache, with a fingerprint taken
-    before and after -- and with the HTTP layer replaced by a fetcher that raises, so that a
-    fence which failed could not write even by accident. Both halves are asserted: nothing was
-    fetched, and not one byte under the stores moved.
+
+def test_Q3_a_LIVE_REFRESH_writes_ZERO_bytes_under_the_stores(tmp_path: Path) -> None:
+    """The tripwire the finding asks for -- driven through ``morning_refresh``, both roots.
+
+    **REVIEW_14 B2 rewrote this test, because the version it replaces asserted its own name.**
+    That one never entered :func:`acumen.live_refresh.morning_refresh` at all: it drove
+    ``bt.build_runner(..., allow_network=True)`` and fingerprinted ``<data_root>/nse`` -- one
+    directory, and not one of the three a real live refresh actually writes. The property it
+    claimed (a live refresh writes nothing under the stores) was therefore never measured, and
+    B1's defect sat one module away from it with the suite green. CLAUDE.md now carries the rule
+    that came out of it: *a test that certifies a no-write property must drive the ACTUAL write
+    path and fingerprint EVERY affected root, never assert its own name.*
+
+    So this drives the job the operator's 08:45 command drives, with the flag that caused the
+    incident (``allow_network=True``), against the REAL ``data_root`` and the REAL ``cache_root``
+    -- the two roots between them holding every directory the review measured: ``cache_root/ca``,
+    ``cache_root/instrument_master`` and ``data_root/daily_store``. Both are fingerprinted whole,
+    before and after, file by file, size and mtime.
+
+    The network is replaced by a recorder that raises, so nothing can be fetched and every URL
+    that was ASKED FOR is captured. The corporate-action endpoint must not be among them: that is
+    B1's fence, measured at the only place it matters. A fence that failed would show up twice
+    over -- as a URL in ``attempted`` and as a byte under one of the roots.
+
+    What this test does NOT claim, and could not (B2's lesson stated from the other side): that a
+    real networked morning writes nothing. It cannot -- ingesting yesterday's bhavcopy and
+    fetching today's own instrument master ARE writes, and they are the job's product. The claim
+    is the one CLAUDE.md makes: no SESSION -- this suite included -- moves a byte under the real
+    stores, and the CA refresh the fence exists for is never even attempted.
     """
     data_root = _stores_or_skip()
     config = load_config(include_env=False)
-    ca_cache = data_root / bt.CA_CACHE_SUBDIR
-    if not ca_cache.is_dir():
-        pytest.skip("this machine has no corporate-action cache to protect")
-
-    def fingerprint(root: Path) -> tuple[int, int, tuple]:
-        files = sorted(p for p in root.rglob("*") if p.is_file())
-        rows = tuple(
-            (p.relative_to(root).as_posix(), p.stat().st_size, p.stat().st_mtime_ns)
-            for p in files
-        )
-        return len(files), sum(row[1] for row in rows), rows
+    cache_root = config.path("cache_root")
+    today = date(2026, 8, 14)   # the review's own probe day, and the day its incident is dated
 
     import acumen.nse_http as nse_http
+    from acumen import corp_actions as ca
+    from acumen import live_refresh as refresh
 
     attempted: list[str] = []
 
-    def refuse(url: str, *args, **kwargs):  # pragma: no cover -- ASSERTED BY NOT BEING CALLED
+    def refuse(url: str, *args, **kwargs):
         attempted.append(url)
-        raise AssertionError(f"the fence let a network fetch through to {url}")
+        raise nse_http.NseFetchError(f"this test serves no payload; something asked for {url}")
 
-    before = fingerprint(ca_cache)
+    before_data, before_cache = store_fingerprint(data_root), store_fingerprint(cache_root)
+    argv_seen: list[list[str]] = []
     original = nse_http.fetch_json
     nse_http.fetch_json = refuse
     try:
-        runner, _master, _ca = bt.build_runner(
-            (SYMBOL,), LIVE_DAY, LIVE_DAY, seed_from=LIVE_DAY,
-            label="chunk14-fence-tripwire", allow_network=True,
+        calendar, universe, report = refresh.morning_refresh(
+            today=today,
+            store=DailyStore.at(data_root / "daily_store"),
+            cache_dir=cache_root,
+            allow_network=True,
+            symbols=(SYMBOL,),
+            daily_runner=lambda argv: (argv_seen.append(list(argv)), 0)[1],
+            recording_root=tmp_path / "recordings",
         )
     finally:
         nse_http.fetch_json = original
-    after = fingerprint(ca_cache)
+    after_data, after_cache = store_fingerprint(data_root), store_fingerprint(cache_root)
 
-    assert not attempted, f"a networked fetch was attempted: {attempted}"
-    assert before == after, "the corporate-action cache under data_root MOVED"
-    assert runner.spec.factor_digest, "and the run still has its factor tables, from the cache"
+    # 1. THE PROPERTY, on both roots.
+    assert before_data == after_data, "data_root MOVED under a --refresh --allow-network job"
+    assert before_cache == after_cache, "cache_root MOVED under a --refresh --allow-network job"
 
-    # The same run, pointed at a scratch cache OUTSIDE the stores, is NOT fenced -- so the fence
-    # is a fence and not a blanket refusal to ever refresh.
+    # 2. THE FENCE: the corporate-action endpoint was never even asked.
+    ca_url = ca.nse_url(today - timedelta(days=refresh.DEFAULT_LOOKBACK_DAYS), today)
+    assert ca_url not in attempted, (
+        "the CA pull reached the network with the raw CLI flag -- B1, unfixed:\n" + ca_url
+    )
+    steps = {step.name: step for step in report.steps}
+    ca_step = steps["corporate actions"]
+    assert ca_step.figures["fenced"] is True, ca_step.detail
+    assert bt.CA_REFRESH_FENCED.split(":")[0] in ca_step.detail
+    assert ca_step.ok, "a fenced pull downgrades to the cache; it does not refuse the morning"
+    assert str(cache_root) in ca_step.figures["cache_dir"], (
+        "and it was fenced at the directory the shipped CLI really passes"
+    )
+
+    # 3. ...and the report is HONEST about the rest: this machine has no network, so the two
+    #    steps that need one say so rather than reporting a morning that is ready.
+    assert not report.ok and calendar is None
+    assert not steps["calendar (published NSE)"].ok
+    assert not steps["instrument master (TODAY's dump)"].ok
+    for name in ("daily store (bhavcopy top-up)", "verify yesterday (CONTEXT 4.7)"):
+        assert steps[name].detail.startswith("NOT RUN:"), name
+    assert argv_seen == [], "no calendar means no Q-19 ceiling, so no top-up was attempted"
+    assert universe == (SYMBOL,)
+
+    # 4. The fence is a fence and not a blanket refusal to ever refresh: a cache OUTSIDE the
+    #    stores is still permitted to pull.
     _resolved, network, _why = bt.fence_ca_cache(
         cache_dir=tmp_path / "outside" / "nse", allow_network=True,
-        data_root=data_root, cache_root=config.path("cache_root"),
+        data_root=data_root, cache_root=cache_root,
     )
     assert network is True
+
+
+def test_Q3_the_fenced_CA_pull_is_a_DOWNGRADE_to_the_cache_not_a_refusal(
+    tmp_path: Path,
+) -> None:
+    """The other half of B1: the morning still gets its corporate actions, from disk.
+
+    ``fence_ca_cache``'s whole design is that a fenced pull becomes an offline READ at any age
+    (the architect's 31-Jul-2026 ruling: offline means *"use exactly what is on disk"*), so the
+    pre-open loses a refresh it should never have been doing ninety seconds before the bell and
+    loses nothing else. Driven through ``morning_refresh`` again -- not through the fence
+    directly -- over a scratch world whose roots are the scratch directories themselves, so the
+    CA cache really is INSIDE the stores the job is running under and really is fenced.
+
+    The day-cache planted here is 40 days old on purpose: a fence that silently became an age
+    check would refuse it, and the events would not arrive.
+    """
+    from acumen import live_refresh as refresh
+    from acumen.corp_actions import CorporateAction
+
+    data, cache = tmp_path / "data", tmp_path / "cache"
+    today = date(2026, 8, 14)
+    window_start = today - timedelta(days=refresh.DEFAULT_LOOKBACK_DAYS)
+    planted = cache / "ca" / f"nse_ca_{window_start.isoformat()}_{today.isoformat()}.json"
+    planted.parent.mkdir(parents=True, exist_ok=True)
+    planted.write_text(
+        json.dumps({"fetched_on": (today - timedelta(days=40)).isoformat(), "payload": []}),
+        encoding="utf-8",
+    )
+    stamp = (planted.stat().st_size, planted.stat().st_mtime_ns)
+
+    served: list[tuple] = []
+
+    def puller(start, end, *, allow_network, cache_dir, today):
+        # The reviewed chunk-3 fetcher's own contract, recorded: what the fence handed it.
+        served.append((start, end, allow_network, Path(cache_dir)))
+        assert not allow_network, "a fenced pull must reach the fetcher with the flag OFF"
+        return (CorporateAction(
+            symbol=SYMBOL, ex_date=today, subject="Bonus 1:1", source="nse"
+        ),)
+
+    step = refresh.refresh_corporate_actions(
+        symbols=(SYMBOL,), today=today, allow_network=True, cache_dir=cache,
+        puller=puller, data_root=data, cache_root=cache,
+    )
+
+    assert served and served[0][2] is False
+    assert served[0][3] == cache, "--config governs where the fenced read looks"
+    assert step.ok and step.figures["fenced"] is True
+    assert step.figures["events_for_universe"] == 1, "the events ARRIVED -- a downgrade, not a refusal"
+    assert SYMBOL in step.detail and "read from the day-cache, NOT refreshed" in step.detail
+    assert (planted.stat().st_size, planted.stat().st_mtime_ns) == stamp, "the cache was READ"
+
+    # ...and the fence really is what turned the flag off: the same call with the cache OUTSIDE
+    # both roots reaches the fetcher with allow_network still True.
+    served.clear()
+    outside = refresh.refresh_corporate_actions(
+        symbols=(SYMBOL,), today=today, allow_network=True, cache_dir=tmp_path / "scratch",
+        puller=lambda start, end, **kw: (served.append(kw["allow_network"]), ())[1],
+        data_root=data, cache_root=cache,
+    )
+    assert served == [True] and outside.figures["fenced"] is False
+
+
+def test_Q3_the_fence_is_ASKED_on_the_live_refresh_path(tmp_path: Path) -> None:
+    """B1's source-level pin, where REVIEW_13B's own pin was: the call has to exist.
+
+    The finding was not that the fence is wrong -- it works on all four machine layouts -- but
+    that ``live_refresh.refresh_corporate_actions`` never asked it. An AST assertion is what
+    keeps that from being true again: a future edit that drops the call fails here even if every
+    behavioural test above happens to run on a machine whose cache is outside the stores.
+    """
+    import ast
+    import inspect
+
+    from acumen import live_refresh as refresh
+
+    tree = ast.parse(inspect.getsource(refresh.refresh_corporate_actions))
+    called = {
+        node.func.id if isinstance(node.func, ast.Name) else node.func.attr
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, (ast.Name, ast.Attribute))
+    }
+    assert "fence_ca_cache" in called, (
+        "the CA pull takes the raw CLI flag again -- REVIEW_14 B1, reopened"
+    )
+    # ...and the puller is handed the FENCED verdict, never `allow_network` itself.
+    source = inspect.getsource(refresh.refresh_corporate_actions)
+    assert "allow_network=network" in source and "cache_dir=resolved" in source
 
 
 def test_Q3_build_runner_passes_the_CA_cache_EXPLICITLY_so_config_governs() -> None:
