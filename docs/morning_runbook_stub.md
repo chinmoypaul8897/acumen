@@ -25,8 +25,12 @@ python -m acumen.run_screener --mode live --day <TODAY> --refresh --allow-networ
 ```
 
 Three deliberate acts stand between you and a message on somebody's phone: `--mode live`,
-`--telegram`, `--live-alerts`. Without the last one the morning is a DRY RUN -- every alert is
-computed, shown, recorded and marked `dry_run`, and nothing is sent to anyone.
+`--telegram`, `--live-alerts`. All three are in the gate (`run_screener.telegram_is_live`) and
+**any one of them missing means nothing is sent**. Without `--live-alerts` the morning is a DRY
+RUN -- every alert is computed, shown, recorded and marked `dry_run`, and nothing goes to anyone.
+Without `--mode live` the session is a REPLAY of a past day: it never sends, and every message it
+would have sent carries its trade date and a `REPLAY` marker so a phone can never read it as
+today (REVIEW_14 H1 -- a replayed 2020 trade really did reach the transport, undated).
 
 `<TODAY>` is `YYYY-MM-DD`. The session sweeps 11:15 -> 15:15 and closes itself at 15:30.
 If it dies, run the **same command again**: it resumes from the recording, re-sends nothing
@@ -57,7 +61,7 @@ line. Read it in that order.
 | `<SYMBOL> LONG/SHORT entry ... SL ... TP ... qty ...` | **the trade.** The first 15-minute close across the POC while armed (3.4-2). Entry is that candle's close; SL is 3.4-3; TP is 3x the risk; qty is `floor(Rs 1,000 / per-share risk)` (3.5). | this is the signal |
 | `EXIT stop-loss-hit / target-hit at ...` | the level was touched by a later candle (3.4-5). Both touched in one candle -> the stop wins. | the trade is over |
 | `SQUARE-OFF at ...` | neither level by 15:15, so the position closes at the 15:00-15:15 candle's close (3.4-5). | close it |
-| `!!` (failure) | the battery has REFUSED the day while a position was open. **The tool has stopped watching that position and 15:15 will not square it off.** | manage it by hand |
+| `!!` (failure) | the battery has REFUSED the day while a position was open, or a symbol could NOT be evaluated at all this sweep (the banner names it). **The tool has stopped watching that position and 15:15 will not square it off.** | manage it by hand |
 
 A stock that armed and then went quiet with `no trade, consumed` on the dashboard is CONTEXT
 3.5's `qty == 0`: the cross was real, one share would already risk more than the Rs 1,000 budget,
@@ -88,6 +92,7 @@ read part of the market* -- **silence below it is not calm**.
 |---|---|---|
 | `N symbol(s) never answered` | those symbols were polled twice and gave nothing. They keep their previous state and are NOT being watched. | if one of them is in a trade, manage it by hand |
 | `N symbol(s) are stale` | they answered earlier but not this sweep. | as above |
+| `N symbol(s) could NOT be evaluated: <NAMES>` | their data arrived and the evaluation raised on it -- a bad candle, a broken window. The named stocks keep their previous state and are NOT being watched; every other symbol swept normally. | if one of them is in a trade, manage it by hand; report it |
 | `the sweep hit its hard deadline` | the sweep ran out of time before the next boundary (CONTEXT 4.4). | let it run -- the next sweep re-polls everything; if it repeats, the feed is degraded |
 | `TELEGRAM SEND FAILED ...` | the alert exists, was recorded and is on this screen; only the phone did not get it. | read the terminal; the next re-derivation retries |
 | `TELEGRAM REFUSED an alert whose price the screener cannot vouch for` | the alert exists and is on this screen; the forwarding stopped because its price stands on a window the screener cannot vouch for. | look at the alert on screen and at the chart |

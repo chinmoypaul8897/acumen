@@ -12,9 +12,10 @@ Two modes, one pipeline:
 * ``live`` -- today. Unblocked by the architect's 08-Aug-2026 ruling and governed by **CONTEXT
   4.7**: the ORACLE-FREE battery per sweep, the disclosed line on every alert, the day's own
   instrument master, and the next pre-open's full-battery verdict on this day. It takes an
-  EXPLICIT ``--mode live``, it prints section 4.7's disclosure before it starts, and it stays in
-  DRY RUN unless ``--live-alerts`` is also passed -- three separate deliberate acts between an
-  operator and a live morning.
+  EXPLICIT ``--mode live``, it prints section 4.7's disclosure before it starts, it attaches the
+  phone only under ``--telegram``, and it stays in DRY RUN unless ``--live-alerts`` is also
+  passed -- three separate deliberate acts between an operator and a message on somebody's
+  phone, all three of them in :func:`telegram_is_live` (REVIEW_14 H1).
 
 The preflight prints everything a later reader would need to reproduce the session: the
 instrument master and its digest with the reason THAT master governs, the calendar reading and
@@ -28,7 +29,6 @@ Source files in this package are ASCII-only on purpose (see src/acumen/config.py
 from __future__ import annotations
 
 import argparse
-from collections.abc import Sequence
 from datetime import date, datetime
 from pathlib import Path
 
@@ -76,6 +76,26 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def telegram_is_live(args: argparse.Namespace) -> bool:
+    """May a message reach the trader's phone this session? **REVIEW_14 H1, in one place.**
+
+    THREE deliberate acts, all required and all named here so no reader has to assemble them
+    from a boolean expression at a call site:
+
+    * ``--mode live`` -- the session is about TODAY. This is the term that was MISSING: the gate
+      was ``bool(args.live_alerts and args.telegram)``, the mode defaults to ``replay``, and the
+      review put two real messages on the transport with ``--day 2020-03-19 --telegram
+      --live-alerts``. The first of them named a price, a stop, a target and a quantity, with
+      nothing on it about 2020;
+    * ``--telegram`` -- the sink is attached at all;
+    * ``--live-alerts`` -- dry run is OFF.
+
+    A session failing any one of them still computes, shows, records and logs every alert. What
+    it does not do is send.
+    """
+    return bool(args.mode == "live" and args.telegram and args.live_alerts)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     day = date.fromisoformat(args.day)
@@ -115,6 +135,14 @@ def main(argv: list[str] | None = None) -> int:
         # one line later (`del calendar`), so every recording ever written stamped
         # "published-nse-holiday-master" beside readings taken from the derived store scan. The
         # calendar the refresh cross-checked is the calendar the session runs and records.
+        #
+        # REVIEW_14 **B3**: what is handed on is the PUBLISHED master, which carries no explicit
+        # trading-day set -- and `backtest.build_runner` refuses exactly that, so this line used
+        # to end the operator's 08:45 command with "the screener cannot start" AFTER the refresh
+        # had run. `build_live_screener` now COMPOSES it through `calendar.live_trading_calendar`
+        # (published for today, the store's own scan for the history behind it) instead of
+        # passing it on raw, so the calendar this session records is still the one the refresh
+        # cross-checked and it is one the runner accepts.
         published_calendar = calendar
 
     if not symbols:
@@ -137,9 +165,9 @@ def main(argv: list[str] | None = None) -> int:
     sound = ls.SoundAlertSink()
     collected = ls.CollectingAlertSink()
     # CHUNK 14: Telegram attaches by BEING a sink (the protocol chunk 13 reserved for it) and by
-    # nothing else -- no line of the screener changed to make this work. It sends only when
-    # --live-alerts is passed; a dry-run morning logs the message and sends nothing.
-    telegram = TelegramSink(live=bool(args.live_alerts and args.telegram))
+    # nothing else -- no line of the screener changed to make this work. It sends only under all
+    # THREE acts (REVIEW_14 H1); a dry-run or replayed morning logs the message and sends nothing.
+    telegram = TelegramSink(live=telegram_is_live(args))
     sinks: tuple[ls.AlertSink, ...] = (screen, sound, collected)
     if args.telegram:
         sinks = sinks + (telegram,)
@@ -180,7 +208,8 @@ def main(argv: list[str] | None = None) -> int:
 
     for line in _preflight_lines(
         screener, recording, args.mode, telegram=args.telegram,
-        data_root=data_root, allow_network=args.allow_network,
+        data_root=data_root, cache_root=config.path("cache_root"),
+        allow_network=args.allow_network,
     ):
         print(line, flush=True)
     if args.preflight_only:
@@ -243,8 +272,7 @@ def main(argv: list[str] | None = None) -> int:
         # close_day()'s 15:30 poll is done and the day is whole; this is the last thing the
         # morning does.
         _end_of_day_summary(
-            telegram, recording, day=day, alerts=tuple(collected.alerts),
-            disclosure=screener.disclosure,
+            telegram, recording, day=day, disclosure=screener.disclosure,
         )
     print(f"recording: {recording.root}")
     print(f"dashboard: {recording.root / 'dashboard.html'}")
@@ -256,7 +284,6 @@ def _end_of_day_summary(
     recording: LiveRecording,
     *,
     day: date,
-    alerts: Sequence[RecordedAlert] = (),
     disclosure: str = "",
 ) -> bool:
     """The morning's ONE summary message to the phone, at the close. Never raises.
@@ -273,6 +300,17 @@ def _end_of_day_summary(
     log, written only AFTER a real send and read before the next attempt, which is the same
     discipline REVIEW_13 M23 set for the alert dedup set. A send that FAILED writes nothing, so
     a restart still owes the trader his summary.
+
+    **The alerts are the RECORDING's, not this process's** (REVIEW_14 **H2**). The summary used
+    to be built from the sink that collected what this process delivered -- and a resumed morning
+    delivers nothing, because ``restore()`` correctly re-reads a dedup set that already holds the
+    day's alerts. So the one summary of a crashed-and-resumed morning said *"no alerts today --
+    the screener ran the whole session and nothing fired"* while ``alerts.jsonl`` in the same
+    recording held armed 11:15, trigger 11:30 and exit 11:45. That defeats B402's stated purpose
+    exactly: the message exists so a silent phone is never ambiguous between "no signal" and
+    "the tool has stopped", and on the one morning where the ambiguity is real it asserted the
+    wrong one. ``recording.alerts()`` holds the WHOLE day however many processes produced it,
+    which is the only list that can be right after a resume.
     """
     try:
         already = any(row.get("kind") == SUMMARY_EVENT for row in recording.events())
@@ -283,6 +321,7 @@ def _end_of_day_summary(
             "telegram: the end-of-day summary already went out for this recording -- not re-sent"
         )
         return False
+    alerts = recorded_alerts(recording)
     if not telegram.send_end_of_day(alerts, day=day, disclosure=disclosure):
         return False
     recording.record_event(
@@ -290,6 +329,31 @@ def _end_of_day_summary(
         detail=f"{len({alert.symbol for alert in alerts})} symbol(s), {len(alerts)} alert(s)",
     )
     return True
+
+
+def recorded_alerts(recording: LiveRecording) -> tuple[RecordedAlert, ...]:
+    """Every alert in ``alerts.jsonl``, as the objects the sink already knows how to read.
+
+    The whole day, whatever number of processes produced it -- which is the property REVIEW_14
+    H2 turns on. A row too damaged to parse is skipped rather than allowed to cost the trader
+    his summary; the recording is append-only JSONL and a truncated last line is the ordinary
+    shape of a kill.
+    """
+    out: list[RecordedAlert] = []
+    try:
+        rows = recording.alerts()
+    except Exception:
+        return ()
+    for row in rows:
+        try:
+            out.append(RecordedAlert(
+                kind=str(row["kind"]), symbol=str(row["symbol"]),
+                at=datetime.fromisoformat(str(row["at"])),
+                payload=dict(row.get("payload") or {}),
+            ))
+        except Exception:  # pragma: no cover -- a half-written row is not worth a lost summary
+            continue
+    return tuple(out)
 
 
 def _logout(source) -> None:
@@ -354,12 +418,19 @@ class PreflightOnlySource:
         )
 
 
-def _ca_note(data_root: Path, *, allow_network: bool) -> str:
-    """What happened to the corporate-action cache this session, in the fence's own words."""
+def _ca_note(data_root: Path, cache_root: Path, *, allow_network: bool) -> str:
+    """What happened to the corporate-action cache this session, in the fence's own words.
+
+    REVIEW_14 B1's neighbour, found while closing it: the fence was asked WITHOUT the roots this
+    session is running under, so it fell back to whatever ``config.yaml`` the process loaded and
+    printed *"refresh permitted: ... is outside the stores"* on a ``--config``-scoped run whose
+    pull the same fence had just refused. The preflight now asks the question the run asked.
+    """
     from . import backtest as bt
 
     _resolved, _refreshed, reason = bt.fence_ca_cache(
-        cache_dir=data_root / bt.CA_CACHE_SUBDIR, allow_network=allow_network
+        cache_dir=data_root / bt.CA_CACHE_SUBDIR, allow_network=allow_network,
+        data_root=data_root, cache_root=cache_root,
     )
     return reason
 
@@ -371,6 +442,7 @@ def _preflight_lines(
     *,
     telegram: bool = False,
     data_root: Path | None = None,
+    cache_root: Path | None = None,
     allow_network: bool = False,
 ) -> list[str]:
     manifest = recording.read_manifest()
@@ -422,6 +494,9 @@ def _preflight_lines(
         "corporate actions    " + _ca_note(
             data_root if data_root is not None else load_config(include_env=False).path(
                 "data_root"
+            ),
+            cache_root if cache_root is not None else load_config(include_env=False).path(
+                "cache_root"
             ),
             allow_network=allow_network,
         ),

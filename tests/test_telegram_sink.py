@@ -114,10 +114,14 @@ def test_the_MESSAGE_carries_the_alert_the_disclosure_and_the_markers() -> None:
     The alert line is ``format_alert``'s own -- one source of truth for what the terminal shows
     and what the phone shows -- and the qualifiers are split onto their own lines because a
     phone wraps a long line into something nobody re-reads.
+
+    **The clock time carries its DATE** (REVIEW_14 H1). ``[11:30]`` is unambiguous on a terminal
+    headed by the trade date and dangerous on a phone, where the message is the whole context:
+    the review put a replayed 2020 trade on the transport and not one byte of it said 2020.
     """
     plain = tg.message_for(_trigger())
     assert plain == (
-        "[11:30] HDFCBANK LONG  entry 740.95  SL 738.10  TP 749.50  qty 350   "
+        "[2026-06-10 11:30] HDFCBANK LONG  entry 740.95  SL 738.10  TP 749.50  qty 350   "
         "(POC 739.80, bias bullish)\n"
         "(live feed, not yet verified against the exchange's end-of-day record)"
     )
@@ -406,21 +410,30 @@ def test_post_message_reports_a_failure_WITHOUT_the_url_it_failed_on(
 # --- the CLI wiring -------------------------------------------------------------------------------
 
 
-def test_the_CLI_attaches_the_sink_only_on_a_FLAG_and_sends_only_on_TWO() -> None:
-    """``--telegram`` attaches it; ``--live-alerts`` is what makes it send.
+def test_the_CLI_attaches_the_sink_only_on_a_FLAG_and_sends_only_on_THREE() -> None:
+    """``--telegram`` attaches it; ``--mode live`` and ``--live-alerts`` are what make it send.
 
     Read at the source, because what is being asserted is a wiring decision rather than an
     outcome: three deliberate acts stand between an operator and a message on somebody's phone,
     and each of them is a separate flag.
+
+    **REVIEW_14 H1 renamed this test.** It made the three-act claim in its own docstring and then
+    asserted a gate with TWO terms in it -- so the one place a reader would go to check the claim
+    confirmed the defect instead. The mode is now in the gate, and the gate is a named function
+    rather than an expression, so there is one thing to read and one thing to assert.
     """
     from acumen import run_screener
 
     args = run_screener.parse_args(["--day", "2026-06-10"])
     assert args.telegram is False and args.live_alerts is False
+    assert args.mode == "replay", "and the mode DEFAULTS to replay, which is why it must be a term"
 
     source = Path(run_screener.__file__).read_text(encoding="utf-8")
-    assert "TelegramSink(live=bool(args.live_alerts and args.telegram))" in source, (
-        "the sink SENDS only when both flags are present"
+    assert "TelegramSink(live=telegram_is_live(args))" in source, (
+        "the sink SENDS only under the three-act gate"
+    )
+    assert 'args.mode == "live" and args.telegram and args.live_alerts' in source, (
+        "and all three acts are in it"
     )
     assert "sinks = sinks + (telegram,)" in source, "and it attaches by joining the sink tuple"
     tree = ast.parse(source)
@@ -560,16 +573,22 @@ def test_a_RESUMED_MORNING_does_NOT_SEND_A_SECOND_END_OF_DAY_SUMMARY(tmp_path: P
     that the trader already has his summary. That something is the recording's own event log,
     written after a real send and read before the next attempt, which is the discipline REVIEW_13
     M23 set for the alert dedup set.
+
+    **The day's alerts come from the RECORDING** (REVIEW_14 H2), so this test writes them where
+    the shipped CLI writes them instead of handing the same tuple to both calls -- which is
+    precisely what the CLI does not do, and what let the resumed-morning defect live under a
+    green test.
     """
     from acumen import run_screener
 
     recording = LiveRecording.at(tmp_path / "rec" / "2026-06-10-live")
-    day = _a_day()
+    for alert in _a_day():
+        recording.record_alert(alert)
 
     first: list[str] = []
     sink = tg.TelegramSink(send=first.append, live=True, out=lambda _line: None)
     assert run_screener._end_of_day_summary(
-        sink, recording, day=DAY, alerts=day, disclosure=ls.LIVE_DISCLOSURE
+        sink, recording, day=DAY, disclosure=ls.LIVE_DISCLOSURE
     ) is True
     assert len(first) == 1
     marks = [row for row in recording.events() if row["kind"] == tg.SUMMARY_EVENT]
@@ -579,24 +598,26 @@ def test_a_RESUMED_MORNING_does_NOT_SEND_A_SECOND_END_OF_DAY_SUMMARY(tmp_path: P
     second: list[str] = []
     resumed = tg.TelegramSink(send=second.append, live=True, out=lambda _line: None)
     assert run_screener._end_of_day_summary(
-        resumed, recording, day=DAY, alerts=day, disclosure=ls.LIVE_DISCLOSURE
+        resumed, recording, day=DAY, disclosure=ls.LIVE_DISCLOSURE
     ) is False
     assert second == [], "the trader does not get a second summary for the same day"
     assert len([row for row in recording.events() if row["kind"] == tg.SUMMARY_EVENT]) == 1
 
     # A send that FAILED writes no mark, so a restart still owes the trader his summary.
     other = LiveRecording.at(tmp_path / "rec" / "2026-06-11-live")
+    for alert in _a_day():
+        other.record_alert(alert)
 
     def explode(_text: str) -> None:
         raise tg.TelegramError("the Telegram send failed: ConnectionError")
 
     failing = tg.TelegramSink(send=explode, live=True, out=lambda _line: None)
-    assert run_screener._end_of_day_summary(failing, other, day=DAY, alerts=day) is False
+    assert run_screener._end_of_day_summary(failing, other, day=DAY) is False
     assert [row for row in other.events() if row["kind"] == tg.SUMMARY_EVENT] == []
     healed: list[str] = []
     assert run_screener._end_of_day_summary(
         tg.TelegramSink(send=healed.append, live=True, out=lambda _line: None),
-        other, day=DAY, alerts=day,
+        other, day=DAY,
     ) is True
     assert len(healed) == 1
 

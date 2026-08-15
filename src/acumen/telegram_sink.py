@@ -12,10 +12,15 @@ the reviewed live half reviewed.
 
 ## The four rules this sink is built around
 
-1. **It sends only when the operator asked.** ``--live-alerts`` is what turns dry run off, and a
-   DRY-RUN alert is never sent: it is logged, exactly as the screen and the sound sink log it.
-   Two separate deliberate acts stand between an operator and a message on somebody's phone --
-   ``--mode live`` and ``--live-alerts``.
+1. **It sends only when the operator asked.** Three separate deliberate acts stand between an
+   operator and a message on somebody's phone -- ``--mode live``, ``--telegram`` and
+   ``--live-alerts`` -- and all three are in the gate
+   (:func:`acumen.run_screener.telegram_is_live`). REVIEW_14 **H1**: the gate used to be
+   ``bool(args.live_alerts and args.telegram)``, with no mode term, while five places in this
+   repository said otherwise -- so ``--day 2020-03-19 --telegram --live-alerts`` on the DEFAULT
+   (replay) mode put a real 2020 trade on the trader's phone, carrying no date, no mode and no
+   marker to tell it apart from an alert about today. A DRY-RUN alert is never sent either: it
+   is logged, exactly as the screen and the sound sink log it.
 2. **It never carries a price the screener cannot vouch for.**
    :func:`acumen.live_screener.unvouched_price` runs on every alert BEFORE it is sent, and an
    alert that names a price with no freshness stamp, or a stale one with no marker, is REFUSED
@@ -101,6 +106,17 @@ FAILURE_BANNER: str = "TELEGRAM SEND FAILED (the alert is on this screen and in 
 #: What the operator sees when an alert is REFUSED rather than failed -- the Q1 rule.
 REFUSED_BANNER: str = "TELEGRAM REFUSED an alert whose price the screener cannot vouch for"
 
+#: On any message a DRY RUN produced. REVIEW_14 H1: a message that did not come from a live
+#: morning must never be readable on a phone as one, and the only thing separating them used to
+#: be CONTEXT 4.7's disclosed line -- which a replay has no reason to carry.
+DRY_RUN_MARKER: str = "[DRY RUN -- log only, nothing was sent to anyone else]"
+
+#: On any message about a day that is not today. A replayed 2020 trade and today's trade were
+#: byte-identical on the phone apart from a price (REVIEW_14 H1).
+REPLAY_MARKER: str = (
+    "[REPLAY of a PAST day -- this is not a live alert and nothing about it is about today]"
+)
+
 #: The end-of-day summary's first line. plan.md's chunk-14 card lists *"end-of-day summary
 #: message"* beside the bot itself, and the architect's 14-Aug-2026 ruling says where it goes:
 #: *"routed to the phone via the sink at close, not only the terminal"*.
@@ -136,19 +152,24 @@ def credentials_present() -> bool:
 
 
 def message_for(alert: RecordedAlert) -> str:
-    """The message body -- the alert line, its states, and CONTEXT 4.7's disclosed line.
+    """The message body -- the alert line, its DATE, its posture, its states, and the disclosure.
 
-    One message, three parts, in the order the trader needs them:
+    One message, in the order the trader needs it:
 
     1. **the alert itself**, in the same words the screen shows (``format_alert``), so what he
-       reads on his phone and what the operator reads on the terminal cannot differ;
-    2. **the markers that qualify it**, on their own lines, because a phone wraps a long line
+       reads on his phone and what the operator reads on the terminal cannot differ -- with the
+       TRADE DATE beside the clock time (REVIEW_14 **H1**: the terminal line carries only
+       ``[11:30]``, which is fine on a screen headed by the day and dangerous on a phone);
+    2. **the posture**, when it is not a live morning: :data:`DRY_RUN_MARKER`,
+       :data:`REPLAY_MARKER`, or both. A live alert carries CONTEXT 4.7's disclosed line and a
+       replayed one has no reason to, so before this the two were separable only by a price;
+    3. **the markers that qualify it**, on their own lines, because a phone wraps a long line
        into something nobody re-reads -- staleness (REVIEW_13B Q1) and B357's provisional POC;
-    3. **CONTEXT 4.7's disclosed line**, always, on a live alert.
+    4. **CONTEXT 4.7's disclosed line**, always, on a live alert.
 
-    ``format_alert`` already carries all three on one line for the terminal. Here they are split,
-    which is a presentation choice and not a second source of truth: every part is read off the
-    same payload.
+    ``format_alert`` already carries the middle parts on one line for the terminal. Here they are
+    split, which is a presentation choice and not a second source of truth: every part is read
+    off the same payload, the mode included.
     """
     payload = alert.payload
     head = format_alert(alert)
@@ -158,14 +179,35 @@ def message_for(alert: RecordedAlert) -> str:
         head = head.replace(f"   [{disclosure}]", "")
     for note in notes:
         head = head.replace(f"   [{note}]", "")
-    lines = [head.rstrip()]
-    if payload.get("dry_run"):
-        lines.append("[DRY RUN -- log only, nothing was sent to anyone else]")
+    lines = [_dated(head.rstrip(), alert)]
+    for marker in posture_markers(payload):
+        lines.append(marker)
     for note in notes:
         lines.append(f"!! {note}")
     if disclosure:
         lines.append(f"({disclosure})")
     return "\n".join(lines)
+
+
+def posture_markers(payload) -> tuple[str, ...]:
+    """Which posture markers this payload's message carries, in reading order (REVIEW_14 H1).
+
+    Read off the payload like everything else: ``dry_run`` is the screener's own flag and
+    ``mode`` is the session's, both already stamped on every alert. A live, live-alerting morning
+    produces neither -- which is the ONLY posture that may look like one on a phone.
+    """
+    markers: list[str] = []
+    if payload.get("dry_run"):
+        markers.append(DRY_RUN_MARKER)
+    if str(payload.get("mode") or "") not in ("", "live"):
+        markers.append(REPLAY_MARKER)
+    return tuple(markers)
+
+
+def _dated(line: str, alert: RecordedAlert) -> str:
+    """``[11:30]`` -> ``[2026-06-10 11:30]``. The one thing a phone cannot infer from context."""
+    clock = alert.at.strftime("%H:%M")
+    return line.replace(f"[{clock}]", f"[{alert.at.date().isoformat()} {clock}]", 1)
 
 
 @dataclass
@@ -285,7 +327,13 @@ class TelegramSink:
             f"{SUMMARY_HEADING}   {day.isoformat()}" if day is not None else SUMMARY_HEADING
         ]
         if not self.live:
-            lines.append("[DRY RUN -- log only, nothing was sent to anyone else]")
+            lines.append(DRY_RUN_MARKER)
+        if any(
+            REPLAY_MARKER in posture_markers(alert.payload) for alert in alerts
+        ):
+            # REVIEW_14 H1: the same rule the alerts obey. One summary of a replayed day must
+            # not read on a phone as the summary of today's morning.
+            lines.append(REPLAY_MARKER)
         by_symbol: dict[str, list[str]] = {}
         for alert in alerts:
             by_symbol.setdefault(alert.symbol.strip().upper(), []).append(
@@ -391,9 +439,12 @@ def post_message(text: str, *, timeout: float = SEND_TIMEOUT_SECONDS) -> None:
 
 __all__ = [
     "API_TEMPLATE",
+    "DRY_RUN_MARKER",
     "ENV_BOT_TOKEN",
     "ENV_CHAT_ID",
     "FAILURE_BANNER",
+    "REPLAY_MARKER",
+    "posture_markers",
     "REFUSED_BANNER",
     "SEND_TIMEOUT_SECONDS",
     "SUMMARY_DRY_RUN",
