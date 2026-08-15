@@ -71,7 +71,7 @@ from .bias_engine import DailyBias
 from .live_recording import RecordedAlert
 from .live_source import BarSource
 from .minute_store import StoredBar
-from .signal_engine import SignalPipeline, StockDay
+from .signal_engine import POSTURE_LIVE, SignalPipeline, StockDay, oracle_free_battery
 
 #: The decision fields compared at every boundary. Order is the order a mismatch is reported in,
 #: and it is the order CONTEXT 3.4 decides them: what state the day is in, then the four numbers
@@ -214,6 +214,10 @@ def run_live(
     Nothing is reached into: the day runs through :meth:`~acumen.live_screener.LiveScreener.
     run_day`, which is the same call ``run_screener`` makes, and the state is read after each
     sweep through the same ``on_sweep`` hook the dashboard uses.
+
+    The alerts are filtered to THIS SYMBOL (REVIEW_14 PART 3): the sink is shared by the whole
+    screener, so a screener holding more than one symbol used to hand every symbol's comparison
+    the whole morning's alert list and false-mismatch all of them.
     """
     captured: list[Decision] = []
 
@@ -228,7 +232,9 @@ def run_live(
 
     screener.run_day(on_sweep=after, before_sweep=before)
     sinks = [s for s in screener.sinks if isinstance(s, ls.CollectingAlertSink)]
-    alerts = tuple(sinks[0].alerts) if sinks else ()
+    alerts = tuple(
+        alert for alert in (sinks[0].alerts if sinks else ()) if alert.symbol == symbol
+    )
     # The live half's OWN final answer over everything it collected -- the object whose
     # transition trail is compared against the backtester's.
     bias = screener.biases.get(symbol)
@@ -236,6 +242,21 @@ def run_live(
     final: StockDay | None = None
     if bias is not None and minutes:
         gates = screener.gates.get(symbol)
+        if gates is None and screener.posture == POSTURE_LIVE:
+            # REVIEW_14 **H5**: `build_live_screener` sets `gates = {} if live else
+            # full_day_gates(...)`, because CONTEXT 4.7 gives a live morning no settled battery
+            # at all -- so this branch never ran in live posture, `final` stayed None, and
+            # `trails_equal` was structurally False for EVERY day the backtester has a signal.
+            # Measured on 8 oracle-passing live-posture days: judged 8, matched 0, mismatched 8,
+            # each with exactly one named mismatch -- the trail line -- while the live half's own
+            # trail is byte-identical. It fails SAFE (it invents a mismatch and cannot hide one),
+            # which is why the review rated it HIGH; but a harness that cannot judge the posture
+            # the tool actually runs in judges nothing that matters. The battery used here is the
+            # one the live half used at every sweep -- `LiveScreener._battery`'s own live branch,
+            # over the bars in hand plus the duplicate stamps CONTEXT 4.5 gate 2 must see.
+            gates = oracle_free_battery(
+                screener.day, tuple(minutes) + screener.duplicate_bars.get(symbol, ())
+            )
         if gates is not None:
             final = screener.pipeline.evaluate(
                 symbol, screener.day, bias=bias, minutes=minutes, gates=gates,

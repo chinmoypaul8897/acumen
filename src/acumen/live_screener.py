@@ -189,6 +189,15 @@ ALERT_KINDS: frozenset[str] = frozenset(
     {ALERT_ARMED, ALERT_TRIGGER, ALERT_EXIT, ALERT_SQUARE_OFF, ALERT_FAILURE}
 )
 
+#: One symbol's evaluation raised and the sweep continued without it (REVIEW_14 M19). Recorded
+#: per symbol per boundary, because a feed that poisons one stock at 11:15 and heals at 11:30 is
+#: a different morning from one that poisons it all day.
+EVENT_EVALUATION_FAILED: str = "evaluation-failed"
+
+#: One sink raised while an alert was being delivered to it (REVIEW_14 M19, second surface). The
+#: alert is already recorded and already on every other sink; this names the one that missed it.
+EVENT_SINK_FAILED: str = "sink-failed"
+
 # --- the clock the sweeps run on (CONTEXT 3.1 / 3.4) ------------------------------------------
 
 #: The POC pass. CONTEXT 3.3: the profile is built after 11:15 from the 09:15-11:14 window,
@@ -526,8 +535,13 @@ def unvouched_price(alert: RecordedAlert) -> str | None:
     clamp, by carrying the marker that says so. So there are exactly two ways to fail:
 
     1. the alert names a price and carries no freshness stamp at all, which is the shape
-       REVIEW_13B Q1 found (the row was marked, the payload was not); or
-    2. it is stale and the marker did not travel with it.
+       REVIEW_13B Q1 found (the row was marked, the payload was not);
+    2. it is stale and the marker did not travel with it; or
+    3. **the stamp contradicts itself** -- it says FRESH while its own recorded age is past the
+       clamp (REVIEW_14 **H4**). A missing stamp was caught here from the first day; a false one
+       was not, and a false one is worse, because it is the shape that survives a reviewer's eye.
+       The predicate does not need a clock to catch it: the two numbers are both on the payload
+       and they have to agree.
 
     A sink calls this before it sends. Deliberately a function of the PAYLOAD alone: the sink
     holds no clock, no bars and no state, so what it can check is exactly what a later reader of
@@ -546,6 +560,13 @@ def unvouched_price(alert: RecordedAlert) -> str | None:
             f"{alert.symbol} {alert.kind}: the window behind this price is "
             f"{payload.get('data_behind_minutes')} minute(s) behind the boundary and the alert "
             "carries no staleness marker"
+        )
+    behind = payload.get("data_behind_minutes")
+    if not payload.get("stale") and isinstance(behind, int) and behind > STALE_AFTER_MINUTES:
+        return (
+            f"{alert.symbol} {alert.kind}: the payload stamps this price FRESH while its own "
+            f"recorded age is {behind} minute(s) behind the boundary -- a stamp that contradicts "
+            "itself vouches for nothing"
         )
     return None
 
@@ -708,11 +729,20 @@ def data_age(state: SymbolState, now: datetime) -> tuple[bool, int]:
     dashboard imports this function, exactly as it imports :func:`rupees`, so a row and the
     alert beside it can never disagree about whether the same window is stale.
 
-    A ``refused`` state is never stale: its data is not what the reader is being asked to act
-    on, and marking it would spend the flag on the one state that is already explaining itself.
+    **REVIEW_14 H4.** A ``refused`` state used to short-circuit to ``(False, 0)`` -- the reading
+    being that its data is not what the reader is asked to act on. That is true of a refused row
+    on the dashboard and FALSE of the one alert kind that names prices out of a refused state:
+    the *"the battery now REFUSES this day while a position is open"* FAILURE alert, which
+    carries entry, stop, target and qty precisely so the trader can manage a position this tool
+    has stopped watching. Measured by the review: a feed frozen at 11:29 produced, at 15:00, such
+    an alert stamped ``stale=False, data_behind_minutes=0`` over a true gap of **211 minutes** --
+    and :func:`unvouched_price` accepted it, because a missing stamp is caught by the predicate
+    and a FALSE one was not.
+
+    So the age is now measured for every state, always. It is a MEASUREMENT and never a verdict:
+    what a surface does with it stays that surface's own choice, and the dashboard's refused rows
+    are rendered from the same numbers they always were.
     """
-    if state.phase == PHASE_REFUSED:
-        return (False, 0)
     if state.last_stamp is None:
         return (state.minute_count == 0, 0)
     behind = int((now - state.last_stamp).total_seconds() // 60)
@@ -739,10 +769,15 @@ class SweepReport:
     alerts: tuple[RecordedAlert, ...]
     deadline: datetime
     deadline_hit: bool
+    #: Symbols whose data ARRIVED and whose evaluation then raised (REVIEW_14 M19). A third
+    #: outcome beside fetched and skipped, and a first-class one: the sweep completed, these
+    #: symbols did not, and the banner names them because a symbol that vanishes from the watch
+    #: list without being named is indistinguishable from a symbol with nothing to say.
+    unevaluated: tuple[str, ...] = ()
 
     @property
     def complete(self) -> bool:
-        return not self.skipped and not self.failed
+        return not self.skipped and not self.failed and not self.unevaluated
 
     @property
     def elapsed_seconds(self) -> float:
@@ -962,9 +997,26 @@ class LiveScreener:
 
         alerts: list[RecordedAlert] = []
         evaluated = 0
+        unevaluated: list[str] = []
         for symbol in fetched:
+            try:
+                alerts.extend(self._evaluate(symbol, boundary))
+            except Exception as exc:
+                # REVIEW_14 PART 4, **M19** -- the finding that disqualified the dry-run week.
+                # A vendor reply carrying an in-session candle stamped on the PREVIOUS trading
+                # day raised `PocError` at the first boundary, and the exception escaped
+                # `run_screener.main` entirely: 0 of 18 sweeps, no dashboard, no banner, six
+                # symbols never evaluated all day, and a restart resumed into the same raise.
+                # One symbol lost the morning. CONTEXT 4.4's discipline for a symbol that will
+                # not answer -- "SKIP the symbol and re-poll" -- is already implemented on the
+                # FETCH side above; this is the same discipline on the EVALUATION side, and it
+                # is deliberately as narrow as that one: the symbol keeps its previous state,
+                # the reason is recorded per symbol per boundary, the banner NAMES it, and the
+                # other 203 symbols finish their sweep.
+                unevaluated.append(symbol)
+                self._evaluation_failed(symbol, boundary, exc)
+                continue
             evaluated += 1
-            alerts.extend(self._evaluate(symbol, boundary))
         for symbol in still:
             self._mark_skipped(symbol, boundary)
             self.recording.record_fetch(FetchOutcome(
@@ -979,6 +1031,7 @@ class LiveScreener:
             fetched=tuple(fetched), skipped=tuple(skipped), failed=tuple(failed),
             evaluated=evaluated, alerts=tuple(alerts),
             deadline=deadline, deadline_hit=deadline_hit,
+            unevaluated=tuple(unevaluated),
         )
         self._settle_banner(report)
         self.sweeps_done.append(label)
@@ -986,6 +1039,7 @@ class LiveScreener:
             "sweep-closed", at=finished, sweep=label,
             fetched=len(fetched), skipped=len(skipped), failed=len(failed),
             evaluated=evaluated, alerts=len(alerts), deadline_hit=deadline_hit,
+            unevaluated=len(unevaluated),
             detail="complete" if report.complete else "INCOMPLETE",
         )
         self.persist()
@@ -1308,6 +1362,18 @@ class LiveScreener:
         FIELDS, because those are what the alert machinery reads as "there is a position here".
         Refused rather than exited: the day is over for this symbol and
         :meth:`_evaluate`'s own guard keeps it that way for the rest of the session.
+
+        **It returns through :meth:`_monotonic`** (REVIEW_14 **H3**). The M21 fix returned this
+        state DIRECTLY, which made it the only transition in the screener that could walk
+        BACKWARDS along :data:`PHASE_RANK`. Measured on BOSCHLTD 2021-05-20 with two ordinary
+        late candles -- CONTEXT 4.4's normal case, no vendor revision: at 13:30 ``qty == 1`` and
+        the trader was sent a TRIGGER with all four numbers; at 13:45 the late bars landed,
+        ``qty`` went to 0, and the state became a numberless ``refused`` row with **no alert, no
+        ALERT_FAILURE and no phase-regression record**. The position was unmanaged and 15:15
+        would not have squared it off -- verbatim the sentence :meth:`_alerts_for` exists to
+        shout for REVIEW_13 M5. CONTEXT 3.4-2 consumes the stock-day at the first cross, so a
+        re-evaluation that unwinds a DELIVERED trade is a state this strategy does not have: the
+        earlier state stands and the disagreement is recorded.
         """
         risk = int(entry.risk_paise)
         detail = (
@@ -1325,8 +1391,11 @@ class LiveScreener:
                 target_paise=int(entry.target_paise), per_share_risk_paise=risk,
                 risk_per_trade_paise=self.risk_per_trade_paise, detail=detail,
             )
-        return SymbolState(
-            phase=PHASE_REFUSED, detail=detail, refusal=REFUSAL_QTY_ZERO, qty=0, **common
+        return self._monotonic(
+            SymbolState(
+                phase=PHASE_REFUSED, detail=detail, refusal=REFUSAL_QTY_ZERO, qty=0, **common
+            ),
+            previous,
         )
 
     def _monotonic(self, after: SymbolState, previous: SymbolState) -> SymbolState:
@@ -1472,6 +1541,12 @@ class LiveScreener:
         """
         body = dict(payload)
         body["dry_run"] = self.dry_run
+        # REVIEW_14 H1: the POSTURE travels on the alert, exactly as `dry_run` does and for the
+        # same reason. A recording says which mode it was made in; a single alert forwarded to a
+        # phone said only "11:30", and a replayed 2020 trade was then indistinguishable from
+        # today's. `posture` is `live` or `settled` -- the screener's own word for it, not a
+        # second flag that could disagree with the one the battery is chosen by.
+        body["mode"] = self.posture
         if self.disclosure:
             # CONTEXT 4.7: "Every live alert carries: 'live feed, not yet verified against the
             # exchange's end-of-day record.'" On the alert itself, not only on the screen it was
@@ -1573,8 +1648,56 @@ class LiveScreener:
         self.alerted.add(key)
         self.persist()
         for sink in self.sinks:
-            sink.deliver(alert)
+            try:
+                sink.deliver(alert)
+            except Exception as exc:
+                # REVIEW_14 M19's second surface. `TelegramSink.deliver` never raises by design
+                # -- that is rule 3 of its own module doc -- and chunk 14 still made this the
+                # fourth participant in a bare loop, the only one doing network I/O. An
+                # exception here ends the SWEEP, so one sink costs the other 203 symbols their
+                # boundary. The alert is already recorded and already dedup-keyed on disk above,
+                # so a sink that dies loses exactly its own delivery.
+                self.recording.record_event(
+                    EVENT_SINK_FAILED, at=alert.at, symbol=alert.symbol,
+                    sink=type(sink).__name__, error=type(exc).__name__,
+                    detail=(
+                        f"{type(sink).__name__} raised {type(exc).__name__}: {exc} on "
+                        f"{alert.symbol} {alert.kind}. The alert is recorded and on every other "
+                        "sink; only this one did not receive it."
+                    ),
+                )
         return True
+
+    def _evaluation_failed(self, symbol: str, boundary: datetime, exc: Exception) -> None:
+        """One symbol's evaluation raised. Record it BY NAME, and mark it (REVIEW_14 M19).
+
+        Recorded per symbol per boundary rather than once per day, because a feed that poisons
+        one symbol at 11:15 and heals at 11:30 is a different morning from one that poisons it
+        all day, and the morning-after cannot tell them apart from a single line.
+
+        The symbol is marked SKIPPED -- the same phase a symbol that never answered gets, since
+        the consequence is identical (it keeps its previous state and is not being watched) --
+        but with its OWN detail: *"missed its data window"* would be a lie about a symbol whose
+        data arrived and could not be read.
+        """
+        state = self.states[symbol]
+        if state.phase not in (PHASE_REFUSED, PHASE_EXITED):
+            self.states[symbol] = replace(
+                state, phase=PHASE_SKIPPED,
+                detail=(
+                    f"the {boundary.strftime('%H:%M')} evaluation raised "
+                    f"{type(exc).__name__}; kept its previous state and NOT being watched"
+                ),
+            )
+        self.recording.record_event(
+            EVENT_EVALUATION_FAILED, at=boundary, symbol=symbol,
+            sweep=boundary.strftime("%H:%M"), error=type(exc).__name__,
+            detail=(
+                f"{symbol}: the evaluation raised {type(exc).__name__}: {exc}. The symbol keeps "
+                "its previous state and is SKIPPED for this boundary (CONTEXT 4.4); the rest of "
+                "the sweep continues."
+            ),
+        )
 
     def _mark_skipped(self, symbol: str, boundary: datetime) -> None:
         state = self.states[symbol]
@@ -1605,6 +1728,14 @@ class LiveScreener:
             parts.append(f"{len(report.skipped)} symbol(s) never answered")
         if report.failed:
             parts.append(f"{len(report.failed)} symbol(s) are stale")
+        if report.unevaluated:
+            # NAMED, not counted (REVIEW_14 M19): an evaluation that raises is a defect in the
+            # data or in this tool, not a quiet feed, and the operator has to know WHICH stock
+            # stopped being watched in order to manage it by hand.
+            parts.append(
+                f"{len(report.unevaluated)} symbol(s) could NOT be evaluated: "
+                + ", ".join(sorted(report.unevaluated))
+            )
         if report.deadline_hit:
             parts.append("the sweep hit its hard deadline")
         self.banner = (
@@ -1748,11 +1879,21 @@ def _reached_rank(state: SymbolState) -> int:
     (CONTEXT 3.4-2) whatever the sweep is currently able to fetch; ``armed`` is a live reading
     of the state machine. Content rather than label, so a ``skipped`` sweep -- which keeps every
     other field and only relabels the phase -- cannot reset the ladder.
+
+    **CONTEXT 3.5's ``qty == 0`` day stands exactly where an ARMED day stands** (REVIEW_14 H3).
+    The ladder measures how far a POSITION got, and on an unsizable cross nothing was bought:
+    the day is consumed and terminal, but there is no position, so it is not further along than
+    a day still waiting for one. That places the transition ARMED -> consumed FORWARD (which is
+    what CONTEXT 3.5 asks for) and TRIGGERED -> consumed BACKWARD, which is the hole H3 found: a
+    delivered ``qty 1`` alert walked into a numberless ``refused`` row, with no alert, no
+    ALERT_FAILURE and no regression record, leaving a position 15:15 would not square off.
     """
     if state.exit_kind is not None:
         return PHASE_RANK[PHASE_EXITED]
     if state.entry_paise is not None:
         return PHASE_RANK[PHASE_TRIGGERED]
+    if state.refusal == REFUSAL_QTY_ZERO:
+        return PHASE_RANK[PHASE_ARMED]
     if state.phase == PHASE_ARMED:
         return PHASE_RANK[PHASE_ARMED]
     return PHASE_RANK[PHASE_WAITING]
@@ -1904,11 +2045,26 @@ def build_live_screener(
         # than whichever of the morning's other inputs happens to be resolved next.
         _require_day_master(chosen_master, cache_dir=cache_dir)
     seed = seed_from if seed_from is not None else day - timedelta(days=SEED_LOOKBACK_DAYS)
-    if live and calendar is None:
+    if (live and calendar is None) or (
+        calendar is not None and calendar.trading_days is None
+    ):
         # REVIEW_13 B6: the derived calendar cannot answer for TODAY and never will be able to.
+        #
+        # REVIEW_14 **B3**, the second clause. A PUBLISHED holiday master carries no explicit
+        # trading-day set -- it is a list of holidays and a weekday rule -- and
+        # `backtest.build_runner` refuses exactly that (there is nothing for CONTEXT 7-E2's
+        # non-standard sessions to be subtracted from). `--refresh` ALWAYS supplies one, because
+        # REVIEW_13 M17 made the refresh's own cross-checked calendar the calendar the session
+        # runs and records; so the documented 08:45 command reached the refusal and the operator
+        # read "the screener cannot start" AFTER the pre-open had already touched the stores.
+        # The published master is now COMPOSED here -- the C5 division of labour, published for
+        # today and the store's own scan for the history behind it -- instead of being handed on
+        # raw. The composition is the same function `_live_calendar` builds from, so a supplied
+        # master and a fetched one produce the same calendar.
         calendar = _live_calendar(
             day=day, first_day=seed - timedelta(days=bt.CALENDAR_LEAD_DAYS),
             data_dir=data_dir, cache_dir=cache_dir, allow_network=allow_network,
+            published=calendar,
         )
         calendar_source = CALENDAR_PUBLISHED
 
@@ -2017,7 +2173,7 @@ def _require_day_master(filename: str | None, *, cache_dir: Path | None) -> Path
 
 def _live_calendar(
     *, day: date, first_day: date, data_dir: Path | None, cache_dir: Path | None,
-    allow_network: bool,
+    allow_network: bool, published: TradingCalendar | None = None,
 ) -> TradingCalendar:
     """The calendar a live morning runs on -- the PUBLISHED master, over the store's history.
 
@@ -2030,6 +2186,11 @@ def _live_calendar(
 
     The holiday master is DAY-CACHED (CONTEXT 4.1's own courtesy rule), so an offline morning
     runs on the file the pre-open refresh already pulled and nothing reaches out here.
+
+    ``published`` is the master the caller ALREADY holds -- the one ``morning_refresh`` fetched
+    and cross-checked against the store scan an instant earlier (REVIEW_13 M17's C5 duty). It is
+    composed rather than re-fetched, so the calendar the session runs is byte-for-byte the one
+    the preflight reported on, and the endpoint is not asked twice in one morning (CONTEXT 4.1).
     """
     from . import calendar as cal
     from .config import load_config
@@ -2039,7 +2200,7 @@ def _live_calendar(
     data = Path(data_dir) if data_dir is not None else config.path("data_root")
     cache = Path(cache_dir) if cache_dir is not None else config.path("cache_root")
     try:
-        published = cal.fetch_calendar(
+        published = published if published is not None else cal.fetch_calendar(
             cache_dir=cache, today=day, allow_network=allow_network
         )
     except Exception as exc:
@@ -2266,6 +2427,8 @@ __all__ = [
     "ALERT_EXIT",
     "ALERT_FAILURE",
     "ALERT_KINDS",
+    "EVENT_EVALUATION_FAILED",
+    "EVENT_SINK_FAILED",
     "ALERT_SQUARE_OFF",
     "ALERT_TRIGGER",
     "AlertSink",
