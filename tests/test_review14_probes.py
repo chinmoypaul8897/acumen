@@ -1,12 +1,28 @@
 """REVIEW_14 reviewer probes -- the chunk-14 QC review's own tests, kept in the repo.
 
 Written by the REVIEW session, not the build session. Each one pins a finding from
-``docs/reviews/REVIEW_14.md`` at the place the finding lives, and each is written to be GREEN on
+``docs/reviews/REVIEW_14.md`` at the place the finding lives, and each was written to be GREEN on
 the tree as reviewed (`e3c43fa`) so the suite stays honest. **A defect pin asserts the DEFECT.**
 The fix session flips it -- that is the property REVIEW_13B's five flipped pins had, and it is
 what makes a fix checkable rather than merely claimed.
 
 The probes that pin something CORRECT (the ones whose names say so) must never flip.
+
+**FIVE PINS WERE FLIPPED by the chunk-14 FIX-2 session** (15-Aug-2026), each renamed
+``test_FLIPPED_*`` and rewritten to assert the property the defect denied, with the reviewed
+behaviour quoted in its docstring so the record of what was wrong survives the fix:
+
+* ``B3`` half two -- the published calendar is COMPOSED, not handed to a runner that refuses it;
+* ``B3`` half three -- a test in this repository now drives ``--refresh`` through the CLI;
+* ``H1`` -- the Telegram gate names ``args.mode``;
+* ``H1``'s census -- the three-act claim is true in every place it is made;
+* ``H5`` -- ``parity.run_live`` has a live-posture path.
+
+Three DEFECT pins are deliberately NOT flipped, because their findings are not this session's
+scope: ``B3`` half one (a published calendar carries no trading-day set -- which is a true and
+permanent property of ``TradingCalendar.from_holidays``, not a defect), and PART 3's two
+self-comparison probes (``bias``/``bias_rule`` and the boundary grid), which stay pinned for
+chunk 15. ``H5``'s second probe evaluates a copy of the predicate inline and cannot flip.
 
 Store-free by construction: nothing here reads ``data_root`` or ``cache_root``, so these run on a
 clone and on a machine whose stores are absent or, as at review time, contaminated.
@@ -49,59 +65,69 @@ def test_DEFECT_B3_the_published_calendar_carries_no_trading_day_set() -> None:
     assert published.covered_days is None
 
 
-def test_DEFECT_B3_build_runner_REFUSES_the_calendar_that_refresh_supplies() -> None:
-    """REVIEW_14 **B3**, half two: the refusal, read out of the shipped source.
+def test_FLIPPED_B3_the_calendar_refresh_supplies_is_COMPOSED_not_handed_on_raw() -> None:
+    """REVIEW_14 **B3**, half two -- **PIN FLIPPED by the chunk-14 FIX-2 session.**
 
-    ``backtest.build_runner`` rejects any supplied calendar whose ``trading_days`` is None, and
-    ``live_screener.build_live_screener`` builds the proper live calendar only when the caller
-    supplied none -- so ``--refresh`` (which always supplies one) reaches the refusal. The net
-    effect on a real morning is that the pre-open writes to the stores and THEN exits 1.
+    As reviewed: ``backtest.build_runner`` rejects any supplied calendar whose ``trading_days``
+    is None, and ``build_live_screener`` composed the proper live calendar only when the caller
+    supplied NONE -- so ``--refresh``, which always supplies one, reached the refusal, and the
+    operator's own 08:45 command mutated the stores and then exited 1.
+
+    The refusal in ``build_runner`` is CORRECT and stays: without an explicit trading-day set
+    there is nothing for CONTEXT 7-E2's non-standard sessions to be subtracted from. What changed
+    is the caller. A supplied calendar carrying no trading-day set is now composed through
+    ``calendar.live_trading_calendar`` before it goes anywhere near the runner.
     """
     source = inspect.getsource(bt.build_runner)
-    assert "elif calendar.trading_days is None:" in source, (
-        "the refusal that B3 lands on"
-    )
+    assert "elif calendar.trading_days is None:" in source, "the refusal is still there"
     assert "A supplied calendar must carry an EXPLICIT trading-day set" in source
 
     guarded = inspect.getsource(ls.build_live_screener)
-    assert "if live and calendar is None:" in guarded, (
-        "the live calendar is built only when the caller supplied none -- which --refresh never "
-        "is. When this becomes unconditional (or run_screener composes the published master "
-        "through live_trading_calendar), B3 is fixed and this probe flips."
+    assert "if live and calendar is None:" not in guarded, "the defect's own line, gone"
+    assert "calendar is not None and calendar.trading_days is None" in guarded, (
+        "a PUBLISHED master supplied by --refresh is composed, not passed on raw"
+    )
+    assert "published=calendar" in guarded, (
+        "...and composed from the master the refresh already fetched and cross-checked "
+        "(REVIEW_13 M17's C5 duty), rather than from a second pull"
     )
 
 
-def test_DEFECT_B3_no_test_in_the_repository_drives_refresh_through_the_CLI() -> None:
-    """REVIEW_14 **B3**, half three: why nobody caught it.
+def test_FLIPPED_B3_a_test_in_this_repository_DOES_drive_refresh_through_the_CLI() -> None:
+    """REVIEW_14 **B3**, half three -- **PIN FLIPPED.** The coverage gap that hid it, closed.
 
-    The whole pre-open-to-screener seam is unexercised. This probe counts the tests that build a
-    ``--refresh`` argv and hand it to ``run_screener.main``; the answer at review time is zero.
+    At review time the whole pre-open-to-screener seam was unexercised: the only two ``--refresh``
+    hits under ``tests/`` were a docstring and a comment, which is why nothing caught a defect
+    sitting on the operator's own documented command. This probe counts the tests that build a
+    ``--refresh`` argv and hand it to ``run_screener.main``.
     """
-    drivers = 0
+    drivers = []
     for path in (REPO / "tests").glob("test_*.py"):
         if path.name == Path(__file__).name:
             continue  # this file quotes the flag to describe the gap; it does not drive it
         text = path.read_text(encoding="utf-8", errors="replace")
         if '"--refresh"' in text and "main(" in text:
-            drivers += 1
-    assert drivers == 0, (
-        f"{drivers} test(s) now drive --refresh through the CLI -- B3's coverage gap is closing; "
-        "flip this probe to assert drivers >= 1"
-    )
+            drivers.append(path.name)
+    assert drivers, "no test drives --refresh through the CLI -- B3's coverage gap is back"
+    assert "test_review14_fix.py" in drivers
 
 
 # --- H1: the three-act gate is two acts ---------------------------------------------------------
 
 
-def test_DEFECT_H1_the_telegram_gate_has_no_mode_term() -> None:
-    """REVIEW_14 **H1**: ``--mode live`` is not one of the acts, though five places say it is.
+def test_FLIPPED_H1_the_telegram_gate_NAMES_the_mode() -> None:
+    """REVIEW_14 **H1** -- **PIN FLIPPED.** ``--mode live`` is one of the acts, in code.
 
-    Asserted over the AST of ``run_screener.main`` rather than over its text, so a comment
-    mentioning the mode cannot make this pass. The gate is
-    ``TelegramSink(live=bool(args.live_alerts and args.telegram))`` -- two flags, no mode.
+    As reviewed the gate was ``TelegramSink(live=bool(args.live_alerts and args.telegram))`` --
+    two flags, no mode -- and the mode DEFAULTS to replay, so ``--day 2020-03-19 --telegram
+    --live-alerts`` put two real messages on the transport.
+
+    Asserted over the AST of the gate function rather than over its text, so a comment mentioning
+    the mode cannot make this pass. The gate is a named function now (``telegram_is_live``), so
+    the thing a reader checks and the thing this asserts are the same object.
     """
     tree = ast.parse(inspect.getsource(run_screener.main))
-    gate_args: list[str] = []
+    gate_calls: list[str] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
@@ -109,58 +135,77 @@ def test_DEFECT_H1_the_telegram_gate_has_no_mode_term() -> None:
         if isinstance(func, ast.Name) and func.id == "TelegramSink":
             for kw in node.keywords:
                 if kw.arg == "live":
-                    gate_args = [
-                        n.attr for n in ast.walk(kw.value) if isinstance(n, ast.Attribute)
+                    gate_calls = [
+                        n.func.id for n in ast.walk(kw.value)
+                        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
                     ]
-    assert gate_args, "the TelegramSink(live=...) gate must exist"
-    assert "mode" not in gate_args, (
-        f"the gate now reads {gate_args} -- if it names the mode, H1 is fixed and this flips"
-    )
-    assert set(gate_args) == {"live_alerts", "telegram"}, gate_args
+    assert gate_calls == ["telegram_is_live"], gate_calls
 
-
-def test_the_three_act_claim_is_made_in_five_places() -> None:
-    """REVIEW_14 **H1**, the other side: the claim the code does not keep.
-
-    Kept as a census rather than a judgement. When H1 is fixed by adding the mode term, these
-    five stay true and this probe stays green; when it is fixed by CORRECTING the prose instead,
-    this probe flips and says so.
-    """
-    claims = {
-        "src/acumen/telegram_sink.py": "``--mode live`` and ``--live-alerts``",
-        "src/acumen/run_screener.py": "three separate deliberate acts",
-        "docs/morning_runbook_stub.md": "Three deliberate acts stand between you",
+    gate = ast.parse(inspect.getsource(run_screener.telegram_is_live))
+    terms = {
+        node.attr for node in ast.walk(gate)
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name)
+        and node.value.id == "args"
     }
-    for relpath, needle in claims.items():
+    assert terms == {"mode", "telegram", "live_alerts"}, terms
+    assert run_screener.telegram_is_live(
+        run_screener.parse_args(["--day", "2020-03-19", "--telegram", "--live-alerts"])
+    ) is False, "the review's own command: replay by default, so nothing may be sent"
+    assert run_screener.telegram_is_live(run_screener.parse_args(
+        ["--mode", "live", "--day", "2026-08-14", "--telegram", "--live-alerts"]
+    )) is True
+
+
+def test_FLIPPED_the_three_act_claim_is_TRUE_in_every_place_it_is_made() -> None:
+    """REVIEW_14 **H1**, the other side -- **PIN FLIPPED.** The claim the code now keeps.
+
+    As reviewed this was a census of five places asserting a gate the code did not have; the
+    sink's own module doc said "Two separate deliberate acts ... ``--mode live`` and
+    ``--live-alerts``", which is neither the code's gate nor the runbook's claim. H1 was fixed by
+    adding the missing act rather than by softening the prose, so every one of the five now names
+    the SAME three flags -- and the one that said "two" no longer does.
+    """
+    for relpath in ("src/acumen/telegram_sink.py", "src/acumen/run_screener.py",
+                    "docs/morning_runbook_stub.md"):
         text = (REPO / relpath).read_text(encoding="utf-8", errors="replace")
-        assert needle in text, f"{relpath} no longer makes the three-act claim -- H1 may be fixed"
+        claims = [
+            line for line in text.splitlines()
+            if "deliberate acts" in line and ("three" in line.lower())
+        ]
+        assert claims, f"{relpath} no longer makes the three-act claim"
+        for flag in ("--mode live", "--telegram", "--live-alerts"):
+            assert flag in text, f"{relpath} does not name {flag}"
+        assert "Two separate deliberate acts" not in text, relpath
 
 
 # --- H5: the parity harness cannot judge the LIVE posture ---------------------------------------
 
 
-def test_DEFECT_H5_live_posture_leaves_the_harness_without_the_live_halfs_own_answer() -> None:
-    """REVIEW_14 **H5**: ``transitions_equal`` is structurally False in CONTEXT 4.7 posture.
+def test_FLIPPED_H5_run_live_HAS_a_live_posture_path() -> None:
+    """REVIEW_14 **H5** -- **PIN FLIPPED.** The harness can judge the posture the tool runs in.
 
-    ``build_live_screener`` sets ``gates = {} if live else full_day_gates(...)``, and
-    ``parity.run_live`` computes the live half's own whole-day ``StockDay`` only when
-    ``screener.gates.get(symbol)`` is not None. So in live posture ``live_final`` is None, and
-    ``trails_equal`` is False for every day the backtester has a signal -- a FALSE mismatch on
-    every judged live-posture day.
+    As reviewed: ``build_live_screener`` sets ``gates = {} if live else full_day_gates(...)``,
+    because CONTEXT 4.7 gives a live morning no settled battery at all -- and ``parity.run_live``
+    computed the live half's own whole-day ``StockDay`` only when ``screener.gates.get(symbol)``
+    was not None. So ``live_final`` stayed None and ``trails_equal`` was structurally False for
+    every day the backtester has a signal: 8 of 8 oracle-passing live-posture days judged, 0
+    matched, each with exactly one invented mismatch.
 
-    It fails SAFE (it invents a mismatch; it cannot hide one), which is why REVIEW_14 rates it
-    HIGH and not blocking. Read out of the source, so it needs no store.
+    The input side is unchanged and correct -- a live morning has no oracle. What ``run_live``
+    gained is the battery the live half ITSELF used at every sweep, ``oracle_free_battery`` over
+    the bars in hand plus the duplicate stamps, which is ``LiveScreener._battery``'s own live
+    branch rather than a second reading of it.
     """
     built = inspect.getsource(ls.build_live_screener)
     assert "gates = {} if live else full_day_gates(" in built, (
-        "the live posture computes no settled battery -- the input side of H5"
+        "the live posture still computes no settled battery -- CONTEXT 4.7, unchanged"
     )
     driven = inspect.getsource(parity.run_live)
     assert "gates = screener.gates.get(symbol)" in driven
-    assert "if gates is not None:" in driven, (
-        "the live half's own whole-day answer is computed only when a settled battery exists. "
-        "When run_live gains a live-posture path, H5 is fixed and this probe flips."
+    assert "if gates is None and screener.posture == POSTURE_LIVE:" in driven, (
+        "the live-posture path H5 asked for"
     )
+    assert "oracle_free_battery(" in driven, "and it is the battery the live half used"
 
 
 def test_DEFECT_H5_trails_equal_is_False_when_only_the_live_half_is_missing() -> None:
