@@ -857,6 +857,28 @@ def recording_day(recording: LiveRecording) -> date | None:
         return None
 
 
+def recording_day_or_name(path: Path) -> date | None:
+    """The day a directory is of, from its manifest -- or, failing that, from its NAME.
+
+    **REVIEW_15 Q2.** :func:`recording_day` reads the manifest and only the manifest, which is
+    right for everything that VERIFIES a day: a label is the operator's and ``trade_date`` is the
+    screener's, and only one of those is a fact. But the one entry whose manifest cannot be read
+    is exactly the entry the blocking test has to judge, and answering ``None`` there let the
+    prior trading day's own recording pass as "not yesterday's".
+
+    So this is the fallback, and it exists for the BLOCKING TEST ALONE -- no verdict is ever
+    written, no day is ever verified, and nothing is ever re-judged under a name. ``None`` means
+    neither the manifest nor the name can say, and a caller must then treat the day as unknown.
+    """
+    day = recording_day(LiveRecording.at(Path(path)))
+    if day is not None:
+        return day
+    try:
+        return date.fromisoformat(Path(path).name[:10])
+    except ValueError:
+        return None
+
+
 def unverified_recordings(
     root: Path, *, before: date
 ) -> tuple[tuple[LiveRecording, ...], tuple[tuple[Path, str], ...]]:
@@ -876,6 +898,13 @@ def unverified_recordings(
     Every recording of a day is returned, not the last one (**M14**), and every day is returned,
     not yesterday (**M13**). An unreadable manifest is REPORTED rather than skipped: a recording
     silently absent from this list reads as a recording that passed, which is M15's shape.
+
+    **REVIEW_15 Q4**: a directory with NO ``manifest.json`` at all is reported the same way. It
+    used to be skipped silently, which is the same shape one filter earlier -- ``open_session``
+    creates the directory before it writes the manifest, so a directory without one is either a
+    session that died in its first milliseconds or a recording somebody has taken the manifest
+    out of, and only one of those two is harmless. Neither is a thing this function may decide,
+    so it names it and lets the caller refuse.
     """
     base = Path(root)
     if not base.is_dir():
@@ -884,6 +913,10 @@ def unverified_recordings(
     unreadable: list[tuple[Path, str]] = []
     for path in sorted(p for p in base.iterdir() if p.is_dir()):
         if not (path / MANIFEST_NAME).is_file():
+            unreadable.append((path, (
+                f"no {MANIFEST_NAME} -- nothing here names a day, a mode or an instrument "
+                "master, so there is nothing to verify it under"
+            )))
             continue
         recording = LiveRecording.at(path)
         try:
@@ -939,6 +972,17 @@ def verify_prior_recordings(
     is the one CONTEXT 4.7 names, *"the prior recording"*: the previous trading day's. An older
     entry of the backlog is shouted about and does not hold the bell hostage, because a morning
     the trader loses is a worse failure than a stale artifact nobody can re-judge.
+
+    **And an entry that cannot say WHICH day it is of blocks too (REVIEW_15 Q2).** The clause
+    above used to be asked with :func:`recording_day`, which reads the manifest -- so for the one
+    entry whose manifest is what could not be read the answer was ``None``, ``None == prior`` was
+    ``False``, and the prior trading day's own recording did not stop the morning. The
+    conservative reading is the opposite one: a recording that cannot say which day it is COULD
+    be yesterday's, and yesterday's is the one the ruling names. So the day is taken from the
+    manifest, or failing that from the directory NAME (:func:`recording_day_or_name`, used for
+    this test and nothing else), and when neither can say it is treated as possibly-prior and
+    refused. The name fallback is what keeps B420's judgment intact: a Thursday-named artefact
+    with a broken manifest is still shouted about without holding a Monday's bell hostage.
     """
     from . import backtest as bt
     from .config import load_config
@@ -966,9 +1010,16 @@ def verify_prior_recordings(
     refused: list[str] = []
     unjudged: list[str] = []
     blocking = False
+    unknown_day: list[str] = []
     for path, why in unreadable:
         unjudged.append(f"{path} ({why})")
-        blocking = blocking or recording_day(LiveRecording.at(path)) == prior
+        # REVIEW_15 Q2: the manifest first, the directory NAME as the fallback, and an entry
+        # neither can date is possibly yesterday's -- so it stops the morning rather than
+        # passing as "not yesterday's" on the strength of the thing that could not be read.
+        day = recording_day_or_name(path)
+        if day is None:
+            unknown_day.append(str(path))
+        blocking = blocking or day is None or day == prior
     for recording in pending:
         day = recording_day(recording)
         manifest = recording.read_manifest()
@@ -1006,6 +1057,12 @@ def verify_prior_recordings(
             + ". A day is re-judged under the ticks it ran on (Q-29), so it is not re-judged "
             "under another."
         )
+    if unknown_day:
+        details.append(
+            f"{len(unknown_day)} of them cannot say WHICH day they are of, from a manifest or "
+            f"from a name -- so they are treated as possibly the prior trading day's "
+            f"({prior.isoformat()}) and STOP this morning: " + "; ".join(unknown_day)
+        )
     return tuple(verifications), RefreshStep(
         name=VERIFY_STEP, ok=not blocking, detail=" | ".join(details),
         figures={
@@ -1027,6 +1084,7 @@ def verify_prior_recordings(
                 for v in verifications for verdict in v.unverified
             ],
             "not_judged": unjudged,
+            "unknown_day": unknown_day,
         },
     )
 
@@ -1207,6 +1265,7 @@ __all__ = [
     "refresh_instrument_master",
     "refresh_universe",
     "recording_day",
+    "recording_day_or_name",
     "unverified_recordings",
     "verify_prior_recording",
     "verify_prior_recordings",

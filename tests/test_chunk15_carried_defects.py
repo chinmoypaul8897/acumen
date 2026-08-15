@@ -717,6 +717,10 @@ def test_L1_a_RESUMED_summary_says_which_number_is_about_what() -> None:
     Each is right about its own subject and after a resume they read as a contradiction -- "1
     symbol(s) alerted ... telegram: 0 sent". Counting deliveries this process did not make would
     be worse; one line saying which is which is the whole remedy.
+
+    **REVIEW_15 Q3**: and the test is the counters' TOTAL against the day's alert count, not
+    "did this process do nothing" -- so the PARTIAL resume, which is the commoner shape, carries
+    the sentence too. Driven below at 0 of 3, 1 of 3, 2 of 3 and 3 of 3.
     """
     alerts = (RecordedAlert(
         kind=ls.ALERT_TRIGGER, symbol=SYMBOL, at=datetime(2026, 6, 10, 11, 30),
@@ -732,6 +736,49 @@ def test_L1_a_RESUMED_summary_says_which_number_is_about_what() -> None:
     ordinary.deliver(alerts[0])
     assert tg.SUMMARY_SUBJECTS not in ordinary.end_of_day_message(alerts, day=DAY)
     assert tg.SUMMARY_SUBJECTS not in ordinary.end_of_day_message((), day=DAY)
+
+    # THE PARTIAL RESUME (Q3). Three alerts on the day; this process delivers 0, then 1, then 2,
+    # then all three. Only the last of the four is a process that can account for the whole day.
+    day_alerts = tuple(
+        RecordedAlert(
+            kind=ls.ALERT_TRIGGER, symbol=symbol, at=datetime(2026, 6, 10, 11, 30),
+            # The freshness pair, so these are really SENT rather than refused as unvouched --
+            # the resumed morning this finding is about delivered its alerts.
+            payload={
+                "side": "long", "entry_paise": 74_095 + index, "mode": ls.POSTURE_LIVE,
+                "stale": False, "data_behind_minutes": 0,
+            },
+        )
+        for index, symbol in enumerate(("HDFCBANK", "ICICIBANK", "INFY"))
+    )
+    for delivered in range(len(day_alerts) + 1):
+        sink = tg.TelegramSink(live=True, send=lambda text: None, out=lambda line: None)
+        for alert in day_alerts[:delivered]:
+            sink.deliver(alert)
+        text = sink.end_of_day_message(day_alerts, day=DAY)
+        assert f"telegram: {delivered} sent" in text, text
+        assert (tg.SUMMARY_SUBJECTS in text) is (delivered < len(day_alerts)), (
+            f"the clarifying line is wrong for a process that sent {delivered} of "
+            f"{len(day_alerts)}:\n{text}"
+        )
+
+    # A process that REFUSED the day's alerts accounts for them too -- 0 sent, 3 refused is not
+    # a contradiction, and the counters' total is what the line is about.
+    unvouched = tuple(
+        RecordedAlert(
+            kind=alert.kind, symbol=alert.symbol, at=alert.at,
+            payload={key: value for key, value in alert.payload.items() if key != "stale"},
+        )
+        for alert in day_alerts
+    )
+    refusing = tg.TelegramSink(live=True, send=lambda text: None, out=lambda line: None)
+    for alert in unvouched:
+        refusing.deliver(alert)
+    refused_text = refusing.end_of_day_message(unvouched, day=DAY)
+    assert "0 sent, 3 refused" in refused_text
+    assert tg.SUMMARY_SUBJECTS not in refused_text, (
+        "this process accounted for all three; there is nothing to explain"
+    )
 
 
 def test_L2_a_payload_with_NO_MODE_is_not_read_as_a_live_morning() -> None:

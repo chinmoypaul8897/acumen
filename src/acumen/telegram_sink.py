@@ -137,6 +137,10 @@ UNSTAMPED_MARKER: str = (
 #: a resume they disagree by design, and each is right about its own subject: *"1 symbol(s)
 #: alerted ... telegram: 0 sent"*. Counting deliveries this process did not make would be worse
 #: than the ambiguity; saying which number is about what costs one line.
+#:
+#: It is carried whenever the counters' TOTAL falls short of the day's alert count (REVIEW_15
+#: **Q3**) -- the PARTIAL resume, *"3 symbol(s) alerted ... telegram: 1 sent"*, as much as the
+#: total one. The partial shape is the commoner of the two and was the one left unexplained.
 SUMMARY_SUBJECTS: str = (
     "(the list above is the whole day's, read from the recording; the counters are this "
     "process's own -- a resumed morning delivered its alerts before the restart)"
@@ -377,9 +381,14 @@ class TelegramSink:
         else:
             lines.append(SUMMARY_NO_ALERTS)
         lines.append(self.summary())
-        if alerts and not (self.sent or self.refused or self.failed):
+        if alerts and len(self.sent) + len(self.refused) + len(self.failed) < len(alerts):
             # REVIEW_14B **L1**: the two numbers above describe two different subjects, and after
             # a resume they look like a contradiction. One line says which is which.
+            #
+            # REVIEW_15 **Q3**: the test is the COUNTERS' TOTAL against the day's alert count,
+            # not "did this process do nothing". A restart mid-morning delivers some of the day's
+            # alerts after the restart -- the commoner resume by far -- and "3 symbol(s) alerted
+            # / telegram: 1 sent" needs the sentence exactly as much as "0 sent" does.
             lines.append(SUMMARY_SUBJECTS)
         stale = sum(1 for alert in alerts if MARKER_STALE in set(
             alert.payload.get("alert_states") or ()

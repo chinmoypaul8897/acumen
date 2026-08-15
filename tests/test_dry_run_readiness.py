@@ -80,7 +80,10 @@ def test_the_MASTER_check_resolves_THE_DAYS_OWN_NAME_and_says_where_it_looked(
     assert not absent.ok
     assert "OpenAPIScripMaster_2026-06-10.json" in absent.detail
     assert str(tmp_path) in absent.detail, "and where it looked, so the fix is obvious"
-    assert "instrument_master --allow-network" in absent.detail, "with the remedy on it"
+    # REVIEW_15 C1: the remedy names the LAUNCHER, which runs on a tree with no editable
+    # install, and not `python -m acumen.instrument_master`, which answers "No module named".
+    assert f"`python {gate.MASTER_LAUNCHER} --allow-network`" in absent.detail, "the remedy"
+    assert "-m acumen.instrument_master" not in absent.detail, "the dead form is gone"
 
     path = tmp_path / "instrument_master" / "OpenAPIScripMaster_2026-06-10.json"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -339,7 +342,7 @@ def test_a_REFUSAL_names_what_is_missing_and_what_to_do(
     assert gate.NOT_READY_LINE in text
     assert len(report.refusals) == 3
     assert "Add them" in text                              # .env
-    assert "instrument_master --allow-network" in text     # the day's own dump
+    assert f"{gate.MASTER_LAUNCHER} --allow-network" in text   # the day's own dump
     assert "--send-test-message" in text                   # the chat
     for line in report.refusals:
         assert line.split(":")[0] in gate.CHECKS, line

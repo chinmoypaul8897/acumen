@@ -60,6 +60,13 @@ TRIPWIRE_SUITE: str = "tests/test_live_safety.py"
 #: How long the tripwire suite may take before the gate calls it unproven rather than green.
 TRIPWIRE_TIMEOUT_SECONDS: float = 600.0
 
+#: The launcher :func:`check_master`'s refusal names, relative to the repository root. It is a
+#: LAUNCHER and not a module path on purpose (REVIEW_15 **C1**, REVIEW_14 **B3**, B429): there is
+#: no editable install on the operator's machine, so ``python -m acumen.instrument_master``
+#: answers ``No module named 'acumen'``, while this file bootstraps ``src`` onto ``sys.path``
+#: itself and runs from a bare clone. A remedy that does not run is not a remedy.
+MASTER_LAUNCHER: str = "scripts/fetch_instrument_master.py"
+
 #: CONTEXT 4.6's sealed count, and QUESTIONS.md Q-30's ruling in one number: *"a live morning
 #: screens the 204 SETTLED symbols only ... the 6 quarantined are never screened"*. It is a
 #: figure of the LAW, not a tuning constant -- which is why the gate asserts it rather than
@@ -195,6 +202,12 @@ def check_master(day: date, *, cache_dir: Path) -> ReadinessCheck:
     verification all use -- so the gate proves the resolution as well as the file. A live morning
     REFUSES to start without this dump, by design, and finding that out at 09:14 is the failure
     this gate exists to move to the day before.
+
+    **The remedy names a command that runs on the operator's own tree (REVIEW_15 C1).** It used
+    to end ``python -m acumen.instrument_master --allow-network``, which needs an editable
+    install this machine does not have and so answers ``No module named 'acumen'`` at exactly the
+    moment the operator most needs it -- REVIEW_14 **B3**'s defect, one layer up from where B429
+    removed it. :data:`MASTER_LAUNCHER` is the launcher a bare clone really runs.
     """
     name = ls.day_master_filename(day)
     path = Path(cache_dir) / MASTER_CACHE_SUBDIR / name
@@ -205,7 +218,7 @@ def check_master(day: date, *, cache_dir: Path) -> ReadinessCheck:
             f"{name} is on disk ({path.stat().st_size:,} bytes)" if ok else
             f"{name} is NOT at {path}. A live morning runs on the DAY'S OWN dump (CONTEXT 4.7 / "
             "Q-29) and refuses to start without it. Run the pre-open refresh first, or "
-            "`python -m acumen.instrument_master --allow-network`"
+            f"`python {MASTER_LAUNCHER} --allow-network`"
         ),
         figures={"master_file": name, "path": str(path), "present": ok},
     )
@@ -505,6 +518,7 @@ __all__ = [
     "CHECK_TEST_MESSAGE",
     "CHECK_TRIPWIRES",
     "CHECK_UNIVERSE",
+    "MASTER_LAUNCHER",
     "NOT_READY_LINE",
     "QUARANTINED",
     "READY_LINE",
