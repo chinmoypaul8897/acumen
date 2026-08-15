@@ -124,6 +124,17 @@ STATE_WORDS: Mapping[str, str] = {
 }
 
 
+def _unjudged(verification) -> tuple:
+    """Live-alerted symbol-days the morning-after could not judge AT ALL (REVIEW_14 M15/M16).
+
+    Read with :func:`getattr` because this module is deliberately duck-typed about the
+    verification object -- it renders whatever the pre-open handed it, and a recording written
+    before this field existed still has to draw. Absent means "none", which is what every
+    verification produced before M15 and M16 were separable at all.
+    """
+    return tuple(getattr(verification, "alerted_but_unverified", ()) or ())
+
+
 #: Paise as rupees, EXACT -- half-paise POCs included. **The same object the alert line uses.**
 #:
 #: REVIEW_13 **M10**: this module rendered a half-paise POC exactly (148.695) while
@@ -183,7 +194,7 @@ def render_text(
         # REVIEW_14 M15/M16: a live-alerted symbol-day the morning-after could not judge AT ALL
         # is loud too. Quieter than a refusal and louder than silence -- the operator has to know
         # what was NOT checked, and "not checked" must never render as "checked out".
-        if verification.refused_after_alert or verification.alerted_but_unverified:
+        if verification.refused_after_alert or _unjudged(verification):
             lines.append("  !! " + verification.headline)
         else:
             lines.append("  " + verification.headline)
@@ -317,7 +328,7 @@ def render_html(
         # REVIEW_14 M15/M16, on the trader's own screen: an unjudged live-alerted symbol-day is
         # in the banner's register, because a verification that did not happen must not be shown
         # in the same quiet row as one that passed.
-        loud = bool(verification.refused_after_alert or verification.alerted_but_unverified)
+        loud = bool(verification.refused_after_alert or _unjudged(verification))
         add('<section class="group verify"><h2><span class="chip">YESTERDAY, VERIFIED</span>'
             '<span class="words">CONTEXT 4.7 -- the full battery, against the published '
             'bhavcopy</span></h2>')
