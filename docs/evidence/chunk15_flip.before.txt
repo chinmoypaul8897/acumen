@@ -1,0 +1,73 @@
+tree        : C:\Users\chinm\AppData\Local\Temp\claude\c--Users-chinm-acumen\f45c7b40-4a1b-4d59-8783-338dfc5e0e20\scratchpad\preflip
+HEAD        : cf53cfd12405169f7da8525f7cc85ecee289f951
+probe day   : HDFCBANK 2026-06-10  (375 stored 1-minute bars)
+
+==============================================================================
+R1 -- the seven malformed shapes of REVIEW_14B's census, through run_day()
+==============================================================================
+shape                    sweeps  evaluated/sweep  outcome
+------------------------------------------------------------------------------
+next-day stray stamp         18              [9]  CONTAINED by the evaluation guard
+high below low               18             [10]  no exception at all -- the gates refuse it
+negative volume              18             [10]  no exception at all -- the gates refuse it
+sub-minute stamp             18             [10]  no exception at all -- the gates refuse it
+tz-aware stamp                0                -  ESCAPED run_day: TypeError: can't compare offset-naive and off
+close_paise is None           0                -  ESCAPED run_day: TypeError: int() argument must be a string, a
+volume is None                0                -  ESCAPED run_day: TypeError: int() argument must be a string, a
+
+==============================================================================
+R1 -- one candle file that cannot be written at 11:30 (the reachable cause)
+==============================================================================
+sweeps completed        : 0  -- ESCAPED run_day: PermissionError: [Errno 13] the candle file is locked by another process
+boundaries lost         : the whole morning
+
+==============================================================================
+M4 -- what the 15:30 post-session poll delivers
+==============================================================================
+phase at 15:15                : armed
+phase after the 15:30 poll    : exited
+alerts delivered to a SINK at 15:30 : ['trigger', 'exit']
+messages on the TELEGRAM transport stamped 15:30 : 2
+    [2026-06-10 15:30] HDFCBANK LONG  entry 740.95  SL 738.10  TP 749.50  qty 350   (POC 739.80, bias bullish)
+    [2026-06-10 15:30] HDFCBANK EXIT target-hit  at 749.50
+alerts RECORDED as withheld   : []
+
+==============================================================================
+M4 -- do post-15:29 bars change the DECISION?
+==============================================================================
+decision fields identical with and without three post-15:29 bars : 9/9
+differing fields : none
+
+==============================================================================
+M13 / M14 -- two stacked unverified days, one of them holding two recordings
+==============================================================================
+recordings on disk       : ['2026-08-07-live', '2026-08-10-live', '2026-08-10-replay', '2026-08-11-live', '2026-08-11-live-2']
+unverified_recordings    : ABSENT -- the job cannot ask which recordings nobody has judged
+step name                : verify yesterday (CONTEXT 4.7)
+step ok                  : False
+recordings NAMED by it   : ['2026-08-11-live-2']
+recordings it looked at  : 1
+
+==============================================================================
+M12 -- the dashboard's type against DESIGN.md
+==============================================================================
+font families on the page : 9
+NOT in any DESIGN.md row  : ['Consolas', 'SFMono-Regular', 'ui-monospace']
+(size, tracking) pairs    : [('12px', '0'), ('12px', '0.28px'), ('14px', '0'), ('14px', '0.28px'), ('16px', '0'), ('32px', '-0.32px')]
+pairs in NO DESIGN.md row : [('12px', '0.28px')]
+
+==============================================================================
+M25 -- where the live layer's aggregation import lives, and how far the tripwire sees
+==============================================================================
+module-level aggregation import : False
+function-local ones             : ['_fifteen']
+  aggregate_15min    called in ['_fifteen']
+  gate_day           called in ['full_day_gates']
+  in_session_bars    called in ['_fifteen']
+
+==============================================================================
+L2 / L3 / L4 -- the three that are readable straight off the shipped code
+==============================================================================
+L2  posture_markers(no mode)  : ()  <- read as a LIVE morning
+L3  unvouched_price(stale, no age) : None  <- forwarded
+L4  the blind branch catches  : ['Exception']

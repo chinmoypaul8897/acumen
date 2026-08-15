@@ -1,0 +1,75 @@
+tree        : C:\Users\chinm\acumen
+HEAD        : ref: refs/heads/main
+probe day   : HDFCBANK 2026-06-10  (375 stored 1-minute bars)
+
+==============================================================================
+R1 -- the seven malformed shapes of REVIEW_14B's census, through run_day()
+==============================================================================
+shape                    sweeps  evaluated/sweep  outcome
+------------------------------------------------------------------------------
+next-day stray stamp         18              [9]  CONTAINED by the evaluation guard
+high below low               18             [10]  no exception at all -- the gates refuse it
+negative volume              18             [10]  no exception at all -- the gates refuse it
+sub-minute stamp             18             [10]  no exception at all -- the gates refuse it
+tz-aware stamp               18              [9]  CONTAINED by the intake guard
+close_paise is None          18              [9]  CONTAINED by the intake guard
+volume is None               18              [9]  CONTAINED by the intake guard
+
+==============================================================================
+R1 -- one candle file that cannot be written at 11:30 (the reachable cause)
+==============================================================================
+sweeps completed        : 18
+boundaries lost by ITC  : ['11:30']
+record_bars attempts     : 1   (a retry would double the intake)
+duplicate stamps created : 0
+ITC phase at the close  : exited
+
+==============================================================================
+M4 -- what the 15:30 post-session poll delivers
+==============================================================================
+phase at 15:15                : armed
+phase after the 15:30 poll    : exited
+alerts delivered to a SINK at 15:30 : []
+messages on the TELEGRAM transport stamped 15:30 : 0
+alerts RECORDED as withheld   : ['trigger', 'exit']
+
+==============================================================================
+M4 -- do post-15:29 bars change the DECISION?
+==============================================================================
+decision fields identical with and without three post-15:29 bars : 9/9
+differing fields : none
+
+==============================================================================
+M13 / M14 -- two stacked unverified days, one of them holding two recordings
+==============================================================================
+recordings on disk       : ['2026-08-07-live', '2026-08-10-live', '2026-08-10-replay', '2026-08-11-live', '2026-08-11-live-2']
+pending (oldest first)   : ['2026-08-10-live', '2026-08-11-live', '2026-08-11-live-2']
+unreadable               : []
+step name                : verify prior LIVE recordings (CONTEXT 4.7)
+step ok                  : False
+recordings NAMED by it   : ['2026-08-10-live', '2026-08-11-live', '2026-08-11-live-2']
+recordings it looked at  : 3
+
+==============================================================================
+M12 -- the dashboard's type against DESIGN.md
+==============================================================================
+font families on the page : 6
+NOT in any DESIGN.md row  : none
+(size, tracking) pairs    : [('12px', '0'), ('14px', '0'), ('14px', '0.28px'), ('16px', '0'), ('32px', '-0.32px')]
+pairs in NO DESIGN.md row : none
+
+==============================================================================
+M25 -- where the live layer's aggregation import lives, and how far the tripwire sees
+==============================================================================
+module-level aggregation import : True
+function-local ones             : none
+  aggregate_15min    called in ['_fifteen']
+  gate_day           called in ['full_day_gates']
+  in_session_bars    called in ['_fifteen']
+
+==============================================================================
+L2 / L3 / L4 -- the three that are readable straight off the shipped code
+==============================================================================
+L2  posture_markers(no mode)  : ("[POSTURE NOT STAMPED -- this alert's payload does not say which mode produced it, so it is NOT confirmed to be a live alert. Read its date]",)
+L3  unvouched_price(stale, no age) : HDFCBANK trigger: the payload names a price and stamps it st
+L4  the blind branch catches  : ['NO_CACHED_WINDOW']
