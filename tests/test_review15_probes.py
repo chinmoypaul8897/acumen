@@ -528,20 +528,19 @@ def test_B420_an_unjudgeable_recording_OF_THE_PRIOR_TRADING_DAY_blocks_the_morni
     assert "NOT JUDGED and still queued" in older.detail, "...but it is still named, loudly"
 
 
-def test_B420_a_prior_day_recording_that_cannot_SAY_which_day_it_is_does_NOT_block(
+def test_FLIPPED_B420_a_prior_day_recording_that_cannot_SAY_which_day_it_is_DOES_block(
     tmp_path: Path
 ) -> None:
-    """REVIEW_15 finding: the stated rule and the implemented rule part company here.
+    """REVIEW_15 **Q2**, FLIPPED by the cleanup session: the stated rule and the code agree now.
 
-    ``unverified_recordings`` reports an unreadable manifest, and the blocking test then asks
-    ``recording_day(...) == prior`` -- which for that very recording returns ``None``, because
-    the manifest is what could not be read. So the ONE recording whose day is unknowable is
-    treated as "not yesterday's" and the morning is READY.
+    As measured by this review, ``unverified_recordings`` reported an unreadable manifest and the
+    blocking test then asked ``recording_day(...) == prior`` -- which for that very recording
+    returned ``None``, because the manifest is what could not be read. The ONE recording whose
+    day was unknowable was treated as "not yesterday's" and the morning read READY.
 
-    Pinned as the measured behaviour, not as the intended one. It is a corner (the manifest is
-    written once, atomically, at ``open_session``), it is always NAMED and always left queued, and
-    nothing about the day's decisions changes -- which is why this review records it and does not
-    fail on it.
+    The day is now taken from the manifest, or failing that from the directory NAME, and an entry
+    neither can date is treated as possibly-prior. A recording that cannot say which day it is
+    COULD be yesterday's, and yesterday's is the one CONTEXT 4.7 names.
     """
     root = tmp_path / "live"
     friday, monday = date(2026, 8, 14), date(2026, 8, 17)
@@ -552,27 +551,38 @@ def test_B420_a_prior_day_recording_that_cannot_SAY_which_day_it_is_does_NOT_blo
     pending, unreadable = refresh.unverified_recordings(root, before=monday)
     assert pending == (), "it cannot be judged"
     assert len(unreadable) == 1 and "manifest" in unreadable[0][1].lower() or unreadable
-    assert refresh.recording_day(recording) is None, "and it cannot say which day it is"
+    assert refresh.recording_day(recording) is None, "the MANIFEST still cannot say"
+    assert refresh.recording_day_or_name(recording.root) == friday, (
+        "...and the name is read only for the blocking test, never to verify a day"
+    )
 
     _, step = _run_step(root, tmp_path, monday, calendar)
-    assert step.ok is True, (
-        "MEASURED: an unreadable manifest on the prior trading day's own recording does not "
-        "block -- because nothing can prove it IS the prior trading day's"
+    assert step.ok is False, (
+        "an unreadable manifest on the prior trading day's own recording STOPS the morning"
     )
     assert str(recording.root) in step.detail, "it is still named, and still queued"
     assert step.figures["not_judged"], "and reachable as data, not only as a sentence"
 
+    # B420's own judgment survives the fix: a DATED older artefact still does not hold the bell.
+    for child in sorted(recording.root.rglob("*"), reverse=True):
+        child.unlink() if child.is_file() else child.rmdir()
+    recording.root.rmdir()
+    thursday = _plant(root, date(2026, 8, 13), "live")
+    (thursday.root / "manifest.json").write_text("{ this is not json", encoding="utf-8")
+    _, older = _run_step(root, tmp_path, monday, calendar)
+    assert older.ok is True, "a Thursday-NAMED broken manifest does not stop a Monday"
+    assert str(thursday.root) in older.detail, "...and it is still shouted about"
 
-def test_B420_a_recording_with_NO_manifest_at_all_is_invisible_to_the_queue(
+
+def test_FLIPPED_B420_a_recording_with_NO_manifest_at_all_is_SURFACED_by_the_queue(
     tmp_path: Path
 ) -> None:
-    """The other edge of the same rule, recorded for the same reason.
+    """REVIEW_15 **Q4**, FLIPPED by the cleanup session: never invisible, in either list.
 
-    ``unverified_recordings`` skips a directory with no ``manifest.json`` -- not into the
+    ``unverified_recordings`` used to skip a directory with no ``manifest.json`` -- not into the
     unreadable list, but silently. Its own docstring says a recording absent from this list reads
-    as one that passed (M15's shape). Pre-existing (the chunk-13 code had the same filter) and
-    narrow: without a manifest there is no ``mode``, no ``trade_date`` and no ``master_file``, so
-    there is nothing to verify it under. Recorded, not failed.
+    as one that passed (M15's shape). It is now reported like any other entry that cannot be
+    read, and its day comes from its NAME for the blocking test alone.
     """
     root = tmp_path / "live"
     orphan = root / "2026-08-14-live"
@@ -580,7 +590,22 @@ def test_B420_a_recording_with_NO_manifest_at_all_is_invisible_to_the_queue(
     (orphan / "candles" / "HDFCBANK.jsonl").write_text("", encoding="utf-8")
 
     pending, unreadable = refresh.unverified_recordings(root, before=date(2026, 8, 17))
-    assert pending == () and unreadable == (), "MEASURED: silently invisible, in both lists"
+    assert pending == (), "there is nothing to verify it under"
+    assert [path for path, _why in unreadable] == [orphan], "but it is NAMED, not skipped"
+    assert "manifest.json" in unreadable[0][1], f"and the reason says why: {unreadable[0][1]}"
+
+    # It is dated by its NAME, so the prior-trading-day rule can still be applied to it.
+    calendar = TradingCalendar.from_holidays((date(2026, 1, 26),), covered_years=(2026,))
+    _, step = _run_step(root, tmp_path, date(2026, 8, 17), calendar)
+    assert step.ok is False, "a Friday-named orphan stops a Monday morning"
+    assert str(orphan) in step.detail
+
+    # ...and an orphan nothing can date at all is refused rather than assumed harmless.
+    (root / "scratch").mkdir()
+    _, undated = _run_step(root, tmp_path, date(2026, 8, 17), calendar)
+    assert undated.ok is False
+    assert str(root / "scratch") in " ".join(undated.figures["unknown_day"])
+    assert "cannot say WHICH day" in undated.detail
 
 
 def test_B420_TODAYs_own_and_a_FUTURE_recording_are_never_judged(tmp_path: Path) -> None:
@@ -823,19 +848,19 @@ def test_the_RUNBOOK_and_the_GATE_agree_on_the_SEVEN_CHECK_NAMES_verbatim() -> N
         assert f"`{name}`" in text, f"the runbook does not quote the check {name!r} verbatim"
     assert gate.READY_LINE in text
 
-    # REVIEW_15 finding, PINNED as measured rather than asserted away: the gate's own refusal
-    # line is the one sentence of it the runbook paraphrases ("it REFUSES and names what is
-    # missing") instead of quoting. The similar-looking line the document DOES quote --
-    # "NOT READY -- the screener must not start" -- belongs to the morning REFRESH, not to the
-    # gate, and section 11 tabulates it as such. Nothing is wrong on the page; one string simply
-    # is not pinned to its constant, which is how a paraphrase later drifts. Flip this when the
-    # runbook quotes it.
-    assert gate.NOT_READY_LINE not in text, (
-        "the runbook now quotes the gate's refusal line verbatim -- flip this pin: "
-        "change `not in` to `in` and delete this comment"
+    # REVIEW_15 **C2**, FLIPPED by the cleanup session. The gate's own refusal line was the one
+    # sentence of it the runbook paraphrased ("it REFUSES and names what is missing") instead of
+    # quoting -- which is how a paraphrase later drifts. It is quoted verbatim now, and the
+    # similar-looking line beside it still belongs to the morning REFRESH: two different steps,
+    # two different sentences, and the card says which is which.
+    assert gate.NOT_READY_LINE in text, (
+        "the runbook must quote the GATE's refusal line, from the constant"
     )
     assert "NOT READY -- the screener must not start" in text, (
-        "the REFRESH's refusal, which the runbook does quote, is still quoted"
+        "the REFRESH's refusal, which the runbook also quotes, is still quoted"
+    )
+    assert text.index(gate.NOT_READY_LINE) < text.index("## 1."), (
+        "the gate's refusal belongs in section 0, beside the gate's own READY line"
     )
     assert gate.TEST_MESSAGE_HEADING in text
     assert refresh.VERIFY_STEP in text
@@ -949,27 +974,21 @@ def test_the_SEVEN_CHECKS_each_driven_to_BOTH_a_pass_and_a_refusal(
 # --- the handover, read as the trader ------------------------------------------------------------
 
 
-def test_the_HANDOVERS_THREE_PATHS_are_NOT_the_PACKS_three_as_it_claims() -> None:
-    """REVIEW_15 finding, PINNED as measured. The attribution is wrong; one path is invented.
+def test_FLIPPED_the_HANDOVERS_THREE_PATHS_ARE_the_PACKS_own_three() -> None:
+    """REVIEW_15 **Q1**, FLIPPED by the cleanup session. The attribution is now the pack's own.
 
-    ``docs/handover.md`` section 4 opens *"The validation pack (chunk 12) put three paths in
-    front of you"* and lists **Stop here / The complete tool, used as a screener / Automation**.
-    The pack's own section is headed **"Three ways forward"** and its three are **Retire it /
-    Change it / Take it live knowing the arithmetic**.
+    As measured by this review, ``docs/handover.md`` section 4 claimed *"The validation pack
+    (chunk 12) put three paths in front of you"* and then listed **Stop here / The complete tool,
+    used as a screener / Automation** -- the pack's *Change it* dropped, and automation invented
+    (it is plan.md section 8's v2 backlog item, which the handover's own next sentence said).
 
-    * *Take it live* -> *the complete tool used as a screener* -- the CHOSEN one, correctly named
-      and correctly described. Nothing about the delivered path is wrong.
-    * *Retire it* -> *Stop here* -- the same option in the trader's own terms.
-    * **``Change it`` is DROPPED**, and **``Automation`` is put in its place** -- and automation
-      was never a pack option. It is plan.md section 8's v2 backlog item, which the handover's
-      own paragraph goes on to say ("listed in the plan's own backlog beside slippage modelling
-      and a point-in-time universe"), so the document contradicts its own sentence one line
-      later.
+    The document now carries the pack's three VERBATIM -- **Retire it / Change it / Take it live
+    knowing the arithmetic** -- with the delivered path named under the third and automation
+    stated as the v2 item it is rather than as a fourth option somebody was offered.
 
-    The build's ``tests/test_handover.py`` names this property
-    (``test_the_THREE_PATHS_are_the_packs_own_three...``) and checks the HANDOVER's own three
-    headings without ever opening the pack -- a test that asserts its own document, which is the
-    REVIEW_14 B2 shape. This probe opens the pack.
+    This probe reads the PACK, which is the point: the build's own
+    ``test_the_THREE_PATHS_are_the_packs_own_three...`` checked the handover against itself and
+    so agreed with the defect. It has been re-pointed at the pack too.
     """
     handover = (REPO / "docs" / "handover.md").read_text(encoding="utf-8")
     pack = (REPO / "docs" / "validation" / "trader_pack.md").read_text(encoding="utf-8")
@@ -978,26 +997,33 @@ def test_the_HANDOVERS_THREE_PATHS_are_NOT_the_PACKS_three_as_it_claims() -> Non
     forward = pack.split("### Three ways forward", 1)[1].split("\n## ", 1)[0]
     for offered in ("**Retire it.**", "**Change it.**", "**Take it live knowing the arithmetic.**"):
         assert offered in forward, f"the pack offers {offered}"
+        assert offered in handover, f"and the handover must carry it: {offered}"
 
-    assert "The validation pack (chunk 12) put three paths in front of you" in handover
+    assert "The validation pack (chunk 12) ended with a section headed **Three ways forward**" \
+        in handover, "the attribution now names the pack's own section, by its own heading"
 
-    # The one that IS right, and it is the one that matters most: the delivered path.
-    assert "2. **The complete tool, used as a screener.**" in handover
-    assert "This is the path being delivered." in handover
+    # The delivered path: still correctly named, still correctly described.
+    assert "This is the path being delivered" in handover
+    # Whitespace-normalised: the document wraps its prose, and a line break is not a paraphrase.
+    assert "the complete tool, used as a screener" in " ".join(handover.split())
     assert "the screener that watches the market and alerts you when a signal fires" in forward
 
-    # ...and the two that are not.
-    assert "Change it" not in handover, (
-        "the handover now carries the pack's second option -- flip this pin: the finding is fixed"
+    # The dropped option is back, with the pack's own trade-off on it.
+    change = handover.split("**Change it.**", 1)[1].split("3. **", 1)[0]
+    assert "fitted to that history" in change, "the pack's own caution travels with the option"
+    assert "This option stays open." in change, (
+        "and the trader is told it is still his to take"
     )
-    assert "3. **Automation.**" in handover
+
+    # Automation: named as the v2 backlog item it is, and NOT as one of the three.
     assert "Automation" not in forward, (
         "automation is not one of the pack's three; it is plan.md section 8's v2 backlog item"
     )
+    assert "**Automation was never one of the three.**" in handover
     plan = (REPO / "plan.md").read_text(encoding="utf-8")
     assert "auto-execution discussion" in plan, "which is where it really comes from"
 
-    # The half of the paragraph that is CORRECT and load-bearing must not be lost in a fix.
+    # The half of the old paragraph that was CORRECT and load-bearing survived the fix.
     flat = " ".join(handover.split())
     assert "explicitly *not* built" in flat and "v2 conversation" in flat
 

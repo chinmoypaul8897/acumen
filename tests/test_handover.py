@@ -58,14 +58,47 @@ def test_it_says_what_the_tool_is_NOT_before_anything_clever() -> None:
 
 
 def test_the_THREE_PATHS_are_the_packs_own_three_and_the_chosen_one_is_named() -> None:
-    """The trader chose path 2; the document must say which one it is delivering, and that
-    automation is explicitly NOT built."""
+    """The three the handover lists are read OUT OF THE PACK, not out of the handover.
+
+    **REVIEW_15 Q1.** This test used to assert the handover's own three headings and never open
+    the pack -- so it certified that the document agreed with itself, which it did, while the
+    document named three paths the pack never offered (*Stop here / the complete tool /
+    Automation*, with the pack's *Change it* dropped and automation invented). That is the
+    REVIEW_14 B2 / M1-M6 shape, and the sixth time this repository has pinned a claim at the
+    place that makes it rather than at its source. So the source is the pack: its own section
+    heading, its own three bolded options, parsed here and required of the handover.
+    """
     text = _text()
-    assert "1. **Stop here.**" in text
-    assert "2. **The complete tool, used as a screener.**" in text
-    assert "3. **Automation.**" in text
-    assert "This is the path being delivered." in text
+    pack = (REPO / "docs" / "validation" / "trader_pack.md").read_text(encoding="utf-8")
+
+    assert "### Three ways forward" in pack, "the pack's own section, by its own heading"
+    forward = pack.split("### Three ways forward", 1)[1].split("\n## ", 1)[0]
+    offered = re.findall(r"^\*\*(.+?)\*\*", forward, flags=re.MULTILINE)
+    assert len(offered) == 3, f"the pack offers three ways forward, not {len(offered)}: {offered}"
+
+    for option in offered:
+        assert f"**{option}**" in text, (
+            f"the pack offers {option!r} and the handover does not carry it -- the trader is "
+            "being shown a set of choices that is not the set he was given"
+        )
+    # ...and each of them is a numbered item of the handover's own list, in the pack's order.
+    positions = [text.index(f"**{option}**") for option in offered]
+    assert positions == sorted(positions), f"the handover reorders the pack's three: {offered}"
+
+    # The delivered path is NAMED as the delivered one, and it is the pack's third.
+    assert offered[2].startswith("Take it live"), offered
+    assert "This is the path being delivered" in text
+    delivered = text.index("This is the path being delivered")
+    assert positions[2] < delivered < text.index("**Automation was never one of the three.**"), (
+        "the 'this is the one' sentence must sit under the option it is about"
+    )
+
+    # Automation is stated as what it is -- a v2 backlog item -- and NOT as a fourth path the
+    # pack offered. It is the half of the old paragraph that was true and load-bearing.
+    assert "Automation" not in forward, "automation was never one of the pack's three"
+    assert "**Automation was never one of the three.**" in text
     assert "explicitly *not* built" in text
+    assert "v2 conversation" in text and "plan's own backlog" in text
 
 
 def test_every_figure_it_states_is_the_one_the_code_and_the_reports_state() -> None:

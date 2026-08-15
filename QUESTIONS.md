@@ -4317,7 +4317,7 @@ The ruling changes no code, no test and no document. It is recorded because an a
 decision that a later session might "tidy" is exactly the kind of thing that goes missing.
 ---
 
-## Q-30 · chunk 13 · class A · OPEN · raised by the REVIEW_13 session · **binds the first live morning; blocks nothing today**
+## Q-30 · chunk 13 · class A · **CLOSED 08-Aug-2026** (see ARCHITECT'S RULINGS 08-Aug-2026 on REVIEW_13, below) · option (a): a live morning screens the 204 SETTLED symbols only
 
 **Question.** Which universe does a LIVE morning screen -- CONTEXT 3.1's *"all NSE F&O stock
 underlyings (~210)"*, or the **settled 204** the backtester actually walked?

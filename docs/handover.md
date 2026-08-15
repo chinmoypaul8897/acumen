@@ -53,19 +53,34 @@ The POC is fixed at 11:15 and never moved. If the data for that window was incom
 number that comes from it is flagged for the rest of the day, and the flag travels on every
 message about that stock.
 
-## 4. The three paths you were offered, and where this one goes
+## 4. The three ways forward you were offered, and which one this is
 
-The validation pack (chunk 12) put three paths in front of you, and you chose the one this
-handover exists for.
+The validation pack (chunk 12) ended with a section headed **Three ways forward**, set out
+flatly and in no order, with no recommendation attached to any of them. They were, in the pack's
+own words:
 
-1. **Stop here.** The backtest is done and reviewed; read the numbers and decide with them.
-   Nothing further is built.
-2. **The complete tool, used as a screener.** The machine runs live beside you, alerts you, and
-   you keep trading by hand. **This is the path being delivered.**
-3. **Automation.** The tool places the trades itself. This is explicitly *not* built and is a v2
-   conversation, listed in the plan's own backlog beside slippage modelling and a point-in-time
-   universe. Nothing in the current code moves in that direction, and the no-order check exists
-   to keep it that way until somebody decides otherwise, deliberately, in writing.
+1. **Retire it.** The ten-year arithmetic is what these rules did, across every stock, with no
+   discretion applied. If the edge you trade by is the judgement you add on top of the rules
+   rather than the rules themselves, the machine has answered the question it was built to
+   answer and it can be put down.
+2. **Change it.** The rules are yours to change and the machinery is now yours too: a different
+   target multiple, a different profile window, a filter on which days to trade, a stop placed
+   somewhere else, entries on a different candle. Any one of them is a change in one place and a
+   re-run over the same ten years, with the answer back in hours rather than months. What you
+   would be taking on is that a rule changed until it looks good on ten years of history has
+   been fitted to that history, and only the next ten years can say whether it was worth it.
+   **This option stays open.** Nothing in the week ahead closes it, and the re-run is the same
+   command it always was.
+3. **Take it live knowing the arithmetic.** The screener watches the market and alerts you when
+   a signal fires, running the same code that produced those numbers -- so what was tested is
+   what you are alerted on. **This is the path being delivered**: the complete tool, used as a
+   screener, running live beside you while you keep trading by hand.
+
+**Automation was never one of the three.** The tool placing the trades itself is
+explicitly *not* built: it is a v2 conversation, listed in the plan's own backlog beside
+slippage modelling and a point-in-time universe. Nothing in the current code moves in that
+direction, and the no-order check of section 2 exists to keep it that way until somebody decides
+otherwise, deliberately, in writing.
 
 ## 5. The dry-run week: what happens, and what "success" means
 

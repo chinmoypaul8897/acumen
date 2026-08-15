@@ -22,8 +22,11 @@ certifies rather than reports: seven checks, no partial pass.
 python scripts/run_screener.py --readiness --day <TODAY>
 ```
 
-It prints one line per check and then `READY for a live dry-run week`, or it REFUSES and names
-what is missing with the remedy on the same line. The seven:
+It prints one line per check and then `READY for a live dry-run week` -- or it REFUSES with
+`NOT READY for a live dry-run week -- do not start it` and names what is missing, with the
+remedy on the same line. (That is the GATE's refusal. The morning refresh has a refusal line of
+its own -- `NOT READY -- the screener must not start`, section 3 -- and they are different
+steps; each says which one it is by the words it uses.) The seven:
 
 | check | what it certifies |
 |---|---|
@@ -261,7 +264,9 @@ That mark is also why a restart does **not** send a second summary for the same 
 After a resumed morning the summary carries one extra line:
 *"the list above is the whole day's, read from the recording; the counters are this process's
 own -- a resumed morning delivered its alerts before the restart"*. The two numbers describe two
-different things and both are right, which is why the line exists.
+different things and both are right, which is why the line exists. It appears whenever this
+process's three counters add up to FEWER than the day's alerts -- so a restart that delivered
+some of the day's alerts after it carries the line as well as one that delivered none.
 
 ---
 
@@ -280,7 +285,15 @@ Four outcomes, and they mean four different things:
 | `verified against the published bhavcopy -- N/N symbol-day(s) pass the FULL battery` | yesterday's data holds up against the exchange's own record. | nothing |
 | `THE EXCHANGE'S RECORD REFUSES ... treat them as withdrawn.` | the tool ALERTED on a symbol-day whose data the end-of-day battery does not accept. **Those alerts are withdrawn**: the signal was computed on data the exchange's record contradicts. | tell the trader, by name, before the debrief. If he traded it, that trade stands on data we now know was bad -- log it as a divergence |
 | `NOT VERIFIED -- ... could NOT be judged` | the recording alerted and there is nothing to judge it against: no candle file, or `THE ORACLE HAS NOT SPOKEN` (the bhavcopy has no row for that symbol-day). **The alerts are NOT withdrawn and NOT confirmed.** | note it; if the bhavcopy simply had not published, tomorrow's pre-open judges it |
-| `NOT JUDGED and still queued` | a recording names an instrument master that cannot be loaded. A day is re-judged under the ticks it ran on and never under another, so it is left unjudged and stays on the queue. | find the dump, or tell the architect |
+| `NOT JUDGED and still queued` | a recording names an instrument master that cannot be loaded, or its `manifest.json` cannot be read or is not there at all. A day is re-judged under the ticks it ran on and never under another, so it is left unjudged and stays on the queue. | find the dump, or tell the architect |
+
+**A recording that cannot say WHICH day it is of stops the morning.** If the manifest is
+unreadable or missing and the directory name does not date it either, the report says so by name
+(`cannot say WHICH day they are of ... and STOP this morning`) and the step FAILS. That is
+deliberate: an entry nobody can date could be yesterday's, and yesterday's is the one CONTEXT
+4.7 makes a duty. An entry that IS dated -- by its manifest or by its name -- and is older than
+the prior trading day is shouted about and does not hold the bell hostage. Tell the architect;
+do not delete anything (rule 3 of section 12, and store deletions are never a session's work).
 
 A withdrawn alert is not a bug report about the screener. It is the disclosed, bounded price of
 live mode: today cannot be verified during today, and 0.5229%-2.6808% of settled symbol-days
