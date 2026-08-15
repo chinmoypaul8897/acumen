@@ -4526,3 +4526,27 @@ Recorded by the chunk-14 FIX-2 session as its first duty, before any code moved.
 own order -- Q3/B1+B2, B3, the Telegram gate, M19, M15/M16, Q1's false-fresh stamp, M21's
 phase-regression hole, the end-of-day summary, then the pins and the citations. M4, M12, M13,
 M14 and M25 are NOT touched here and stay on chunk 15's carried list.
+
+---
+
+## ARCHITECT'S NOTE (15-Aug-2026) -- R1's class, and the chunk-14 card · recorded VERBATIM by the chunk-15 BUILD session
+
+Recorded as this session's first duty, before a line of code moved. The words between the
+quotation marks are the architect's; nothing outside them is.
+
+> "ARCHITECT'S NOTE (15-Aug-2026): R1 is an architect under-prescription (REVIEW_14's fix scope was narrower than the skip-and-continue property); chunk 15 completes it. The chunk-14 card is fully met (B398). Architect."
+
+**What it settles, and what it does not.** R1 is not a chunk-14 regression and not a fix session's
+miss: REVIEW_14 prescribed the remedy for M19 as *"wrap the `_evaluate` call ... and the sink
+loop"*, the FIX-2 session implemented exactly that, and REVIEW_14B then found by widening M19's
+own question that CONTEXT 4.4's skip-and-continue property is wider than the prescription. The
+note assigns the completion to chunk 15 and closes the open half of B398 (the chunk-14 card's
+end-of-day-summary line is MET; no rescope is owed) that REVIEW_14B PART 3.3 left standing.
+
+**Executed by this session (chunk 15):** R1 is closed by widening the per-symbol guard to the
+WHOLE per-symbol body of `_poll` -- `merge_bars`, `duplicate_stamps`, `record_bars`,
+`record_fetch` -- so a malformed bar or a file-I/O failure at any point in one symbol's handling
+skips that symbol and does not end the morning. The five carried majors (M4, M12, M13, M14, M25)
+and the four LOW notes (L1-L4) are closed in the same session, each with a test that flips its
+pin or drives the real path. No question is raised by this session: nothing in chunk 15's card
+met a hole CONTEXT.md does not answer.
