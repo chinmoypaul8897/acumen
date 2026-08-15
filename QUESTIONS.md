@@ -4509,3 +4509,20 @@ dedup; end-of-day summary message"*, and the build session had left that message
 only (`TelegramSink.summary()` printed by `run_screener`). It now goes to the phone through the
 sink's own send path at the close of the morning, under the same four rules every alert travels
 under. See PROGRESS.md's chunk-14 FIX entry.
+
+---
+
+## Q-33 · REVIEW_14's findings -- the architect's rulings (15-Aug-2026), verbatim
+
+Recorded by the chunk-14 FIX-2 session as its first duty, before any code moved.
+
+> "ARCHITECT'S RULINGS (15-Aug-2026, on REVIEW_14): all findings accepted for fix. M19/M15/M16
+> BLOCK the dry-run week and are fixed now (per-symbol isolation; false-green and oracle-hasn't-spoken-
+> vs-refuses corrected). M4/M12/M13/M14/M25 are chunk-15 scope. The store incident
+> is the evidence for two new operator/session rules below. Architect."
+
+**Executed by this session:** the two new rules are appended to CLAUDE.md in their own commit
+(the first commit of the session, before any src/ change), and the fixes land in the reviewer's
+own order -- Q3/B1+B2, B3, the Telegram gate, M19, M15/M16, Q1's false-fresh stamp, M21's
+phase-regression hole, the end-of-day summary, then the pins and the citations. M4, M12, M13,
+M14 and M25 are NOT touched here and stay on chunk 15's carried list.

@@ -64,6 +64,8 @@ Backtester + live screener for one frozen trading strategy. Real money depends o
    overwrites the previous until verified. The preflight prints the stores'
    last-changed timestamps so the operator can confirm the snapshot is newer.
    (Q-18 layer 3.)
+- A review or any session may NEVER run a mutating CLI (--refresh, or anything that writes) against the real data_root/cache_root; mutations run against a SCRATCH copy only. (REVIEW_14 store incident.)
+- A test that certifies a no-write property must drive the ACTUAL write path and fingerprint EVERY affected root, never assert its own name. (REVIEW_14 Q3 / the REVIEW_9B M1/M6 pattern, now 5 deep.)
 
 ## Code standards
 
