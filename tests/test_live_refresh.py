@@ -251,9 +251,9 @@ def test_the_refresh_runs_every_step_and_a_broken_one_does_not_stop_the_rest(
         "calendar (published NSE)", "universe (F&O underlyings)",
         "daily store (bhavcopy top-up)", "corporate actions",
         # CONTEXT 4.7's two additions, in the order the section needs them: the day's own master
-        # after the universe (which names the symbols its divergence is reported over), and
-        # yesterday's verification after the bhavcopy top-up (which fetched its oracle).
-        "instrument master (TODAY's dump)", "verify yesterday (CONTEXT 4.7)",
+        # after the universe (which names the symbols its divergence is reported over), and the
+        # prior recordings' verification after the bhavcopy top-up (which fetched their oracle).
+        "instrument master (TODAY's dump)", refresh.VERIFY_STEP,
     ]
     assert universe == ("AAA", "BBB")
     assert not report.ok
@@ -271,8 +271,8 @@ def test_the_refresh_runs_every_step_and_a_broken_one_does_not_stop_the_rest(
     assert "instrument master (TODAY's dump)" in failed
     assert "CONTEXT 4.7" in failed["instrument master (TODAY's dump)"].detail
     # The verification step, by contrast, is OK and says why: there is no live yesterday here.
-    verify = {step.name: step for step in report.steps}["verify yesterday (CONTEXT 4.7)"]
-    assert verify.ok and "nothing to verify" in verify.detail
-    assert report.verification is None
+    verify = {step.name: step for step in report.steps}[refresh.VERIFY_STEP]
+    assert verify.ok and "nothing unverified" in verify.detail
+    assert report.verification is None and report.verifications == ()
     assert len(report.steps) == 6
     assert "NOT READY" in report.render()

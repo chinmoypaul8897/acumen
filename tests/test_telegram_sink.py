@@ -48,6 +48,10 @@ def _trigger(**overrides) -> RecordedAlert:
         "side": "long", "entry_paise": 74_095, "stop_paise": 73_810, "target_paise": 74_950,
         "poc_paise": "73980", "bias": "bullish", "qty": 350, "risk_paise": 285,
         "entry_stamp": "2026-06-10T11:15:00", "gap_entry": False, "dry_run": False,
+        # B411's posture stamp. It is in the fixture because `LiveScreener._alert` puts it on
+        # EVERY alert, and a helper that claims to be shaped like a real one has to carry it --
+        # REVIEW_14B **L2**: an unstamped payload is no longer read as a live morning's.
+        "mode": ls.POSTURE_LIVE,
         "disclosure": ls.LIVE_DISCLOSURE,
         "bars": 135, "last_bar_stamp": "2026-06-10T11:29:00",
         "data_behind_minutes": 1, "stale": False,
@@ -144,6 +148,22 @@ def test_the_MESSAGE_carries_the_alert_the_disclosure_and_the_markers() -> None:
 
     dry = tg.message_for(_trigger(dry_run=True))
     assert "[DRY RUN -- log only, nothing was sent to anyone else]" in dry
+
+    # REVIEW_14B **L2**: a payload that does not say which posture produced it is not read as a
+    # live morning's. `live` is the only posture that carries no marker, so silence used to be
+    # the strongest claim a message could make and the only one nobody could check.
+    unstamped = dict(_trigger().payload)
+    unstamped.pop("mode")
+    message = tg.message_for(RecordedAlert(
+        kind=ls.ALERT_TRIGGER, symbol="HDFCBANK",
+        at=datetime(2026, 6, 10, 11, 30), payload=unstamped,
+    ))
+    assert tg.UNSTAMPED_MARKER in message
+    assert tg.REPLAY_MARKER not in message, (
+        "it is not claimed to be a replay either -- what is unknown is stated as unknown"
+    )
+    assert tg.UNSTAMPED_MARKER not in tg.message_for(_trigger()), "a stamped alert says nothing"
+    assert tg.UNSTAMPED_MARKER not in tg.message_for(_trigger(mode="settled"))
 
 
 # --- it sends only when the operator asked -------------------------------------------------------

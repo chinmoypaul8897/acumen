@@ -21,9 +21,11 @@ Two of this job's steps exist because of that section, and neither is optional:
   REPORTED every morning as information, exactly as the ruling instructs;
 * **yesterday's verdict** (Q-28). *"The NEXT pre-open runs the FULL battery on yesterday's
   recording against the published bhavcopy and reports the verdict, loudly naming any
-  live-alerted day the oracle refuses."* That is :func:`verify_prior_recording`, and it runs
-  AFTER the bhavcopy top-up in this job's order for the obvious reason: the oracle it needs is
-  the file the step before it fetched.
+  live-alerted day the oracle refuses."* That is :func:`verify_prior_recording`, driven over the
+  whole backlog by :func:`verify_prior_recordings`, and it runs AFTER the bhavcopy top-up in
+  this job's order for the obvious reason: the oracle it needs is the file the step before it
+  fetched. The duty is *"has anybody judged this recording"*, not *"is this yesterday's"* --
+  see :data:`VERIFY_STEP` for what reading it the other way cost (REVIEW_14 M13/M14).
 
 ## The Q-19 guard, applied
 
@@ -55,7 +57,12 @@ from . import backfill_daily as daily_backfill
 from . import calendar as cal
 from . import universe as uni
 from .daily_store import DailyStore
-from .live_recording import CALENDAR_PUBLISHED, CALENDAR_STORE_SCAN, LiveRecording
+from .live_recording import (
+    CALENDAR_PUBLISHED,
+    CALENDAR_STORE_SCAN,
+    MANIFEST_NAME,
+    LiveRecording,
+)
 from .signal_engine import DayGates, SignalPipeline, oracle_free_battery
 
 #: How far back a top-up looks when the store's own last day cannot be trusted to be recent.
@@ -68,6 +75,43 @@ DEFAULT_LOOKBACK_DAYS: int = 10
 NOT_RUN_WITHOUT_A_CALENDAR: str = (
     "NOT RUN: the published calendar step above failed, and {what}"
 )
+
+#: The pre-open step that discharges CONTEXT 4.7's verification duty, named ONCE.
+#:
+#: It used to be called *"verify yesterday"*, and the name was accurate about what the code did
+#: and wrong about what the duty is -- REVIEW_14 **M13**: the job looked only at
+#: ``prev_trading_day``, so a pre-open that was skipped (a sick day, a late start, a morning run
+#: without ``--refresh``) lost the loud case PERMANENTLY and the next report still said READY.
+#: **M14**: even for that one day it verified ``live_recordings[-1]`` alone, while
+#: :meth:`acumen.live_recording.LiveRecording.open_session` actively instructs the operator to
+#: start a SECOND recording when the code sha, the config digest or the master moves under a
+#: half-finished day. The step now verifies every unverified LIVE recording there is, so the name
+#: says recordings and not yesterday.
+VERIFY_STEP: str = "verify prior LIVE recordings (CONTEXT 4.7)"
+
+
+def _no_cached_window() -> tuple[type[BaseException], ...]:
+    """What *"there is no cached corporate-action window to read"* really raises.
+
+    **REVIEW_14B L4.** B407's blind branch caught bare ``Exception``, so a programming error
+    inside the puller -- a wrong keyword, a typo, an AttributeError three layers down -- would
+    have read to the operator as *"no cached window, THIS REPORT IS BLIND"*: a real defect
+    wearing the costume of a known, disclosed, harmless condition. These three are the whole
+    honest set: :class:`acumen.nse_http.NseFetchError` for an absent or damaged day-cache with
+    the network forbidden (which is exactly what the fence has just done),
+    :class:`acumen.corp_actions.CorporateActionError` for a cache that is present and cannot be
+    parsed, and ``OSError`` for one that is present and cannot be read. Anything else still
+    propagates and is reported by ``morning_refresh``'s own per-step guard as what it is.
+    """
+    from . import corp_actions as ca
+    from . import nse_http
+
+    return (nse_http.NseFetchError, ca.CorporateActionError, OSError)
+
+
+#: Resolved once at import, so the tuple a reader sees and the tuple the ``except`` uses are one
+#: object rather than two spellings that can drift.
+NO_CACHED_WINDOW: tuple[type[BaseException], ...] = _no_cached_window()
 
 
 class RefreshError(RuntimeError):
@@ -88,15 +132,30 @@ class RefreshStep:
 class RefreshReport:
     """The whole pre-open job. ``ok`` is the AND of every step -- there is no partial success.
 
-    ``verification`` is CONTEXT 4.7's verdict on YESTERDAY, when there was a live yesterday to
-    verify. It rides on the report rather than only in a step's ``detail`` because the dashboard
-    shows it as its own section, and because a live-alerted day the oracle refuses must be
-    reachable as data and not only as a sentence.
+    ``verifications`` are CONTEXT 4.7's verdicts on every PRIOR live recording this morning
+    judged -- plural since REVIEW_14 M13/M14, because a skipped pre-open leaves a backlog and one
+    half-finished day can hold two recordings. They ride on the report rather than only in a
+    step's ``detail`` because the dashboard shows the newest as its own section, and because a
+    live-alerted day the oracle refuses must be reachable as data and not only as a sentence.
     """
 
     day: date
     steps: tuple[RefreshStep, ...]
-    verification: "MorningVerification | None" = None
+    #: CONTEXT 4.7's verdicts on the PRIOR live recordings this morning judged, OLDEST FIRST.
+    #: A tuple and not one verdict, because a pre-open that was skipped leaves a backlog and a
+    #: half-finished day can hold two recordings (REVIEW_14 **M13**/**M14**); see
+    #: :data:`VERIFY_STEP`.
+    verifications: tuple["MorningVerification", ...] = ()
+
+    @property
+    def verification(self) -> "MorningVerification | None":
+        """The NEWEST verdict -- what a surface with room for one day shows (the dashboard).
+
+        Derived rather than stored, so the single-day surfaces and the backlog can never
+        disagree about which day they are describing. Every verdict, including this one, is in
+        :attr:`verifications`, and :meth:`render` shouts about all of them.
+        """
+        return self.verifications[-1] if self.verifications else None
 
     @property
     def ok(self) -> bool:
@@ -109,16 +168,20 @@ class RefreshReport:
             lines.append(f"[{mark}] {step.name:<28} {step.detail}")
         lines.append("=" * 72)
         lines.append("READY" if self.ok else "NOT READY -- the screener must not start")
-        if self.verification is not None and (
-            self.verification.refused_after_alert
-            or self.verification.alerted_but_unverified
-        ):
+        loud = [
+            verification for verification in self.verifications
+            if verification.refused_after_alert or verification.alerted_but_unverified
+        ]
+        if loud:
             # The one thing in this report that must not be read past. CONTEXT 4.7's "named
             # loudly", in the only register a text report has. REVIEW_14 M15: a live-alerted
             # symbol-day that could not be judged AT ALL is loud too -- quieter than a refusal
             # and louder than silence, because the operator has to know what was not checked.
+            # EVERY day of the backlog gets its own line (M13): a three-day catch-up that
+            # shouted only about the newest would bury exactly the days nobody has looked at.
             lines.append("")
-            lines.append("!! " + self.verification.headline)
+            for verification in loud:
+                lines.append("!! " + verification.headline)
         return "\n".join(lines) + "\n"
 
 
@@ -292,18 +355,18 @@ def refresh_corporate_actions(
     A fenced pull is a **downgrade to the cache, never a refusal**: the day-cache is read at any
     age (the 31-Jul-2026 offline ruling) and the morning goes on. When the fence has downgraded
     the pull and there is no cached window on disk to read, this step is ``ok`` and says so
-    LOUDLY in its own detail: the report it produces is advisory -- the factor tables every bias
+    LOUDLY in its own detail (and only for :data:`NO_CACHED_WINDOW`, never for a bare
+    ``Exception`` -- REVIEW_14B L4): the report it produces is advisory -- the factor tables every bias
     really descends from come from :func:`acumen.backtest.build_factor_tables`, fenced
     identically, reading the cache the backtester has always read -- and a read-only law is not a
     reason to tell the operator his morning is broken. An operator who asked for OFFLINE and has
     no cache still gets the failure he asked about, unchanged.
     """
     from . import backtest as bt
+    from . import corp_actions as ca
 
     window_start = today - timedelta(days=DEFAULT_LOOKBACK_DAYS)
     if puller is None:
-        from . import corp_actions as ca
-
         puller = ca.fetch_nse_corporate_actions
     resolved, network, fence_reason = bt.fence_ca_cache(
         cache_dir=cache_dir, allow_network=allow_network,
@@ -314,7 +377,7 @@ def refresh_corporate_actions(
         events = puller(
             window_start, today, allow_network=network, cache_dir=resolved, today=today
         )
-    except Exception as exc:
+    except NO_CACHED_WINDOW as exc:
         if not fenced:
             raise
         return RefreshStep(
@@ -778,20 +841,104 @@ def verify_prior_recording(
     )
 
 
-def verify_yesterday(
+def recording_day(recording: LiveRecording) -> date | None:
+    """The trade date a recording is OF, read from its own manifest. ``None`` if it cannot say.
+
+    The manifest, never the directory name: a recording's label is the operator's and its
+    ``trade_date`` is the screener's, and only one of those is a fact about the day.
+    """
+    try:
+        stamped = recording.read_manifest().get("trade_date")
+    except Exception:
+        return None
+    try:
+        return date.fromisoformat(str(stamped))
+    except (TypeError, ValueError):
+        return None
+
+
+def unverified_recordings(
+    root: Path, *, before: date
+) -> tuple[tuple[LiveRecording, ...], tuple[tuple[Path, str], ...]]:
+    """Every LIVE recording of a day before ``before`` that NO morning has judged. **M13/M14.**
+
+    Returns ``(pending oldest-first, (path, why) for the ones that could not even be read)``.
+
+    Three filters and no fourth:
+
+    * **LIVE only** -- a replay needs no verification, because its day already had a bhavcopy;
+    * **before today** -- today's own recording is being written as this runs, and CONTEXT 4.7's
+      whole point is that today has no oracle until evening;
+    * **no verdict on disk** -- :meth:`acumen.live_recording.LiveRecording.read_verification`
+      returns ``{}`` until a morning has written one, so the queue empties itself and a morning
+      that runs twice does not re-judge what it judged an hour ago.
+
+    Every recording of a day is returned, not the last one (**M14**), and every day is returned,
+    not yesterday (**M13**). An unreadable manifest is REPORTED rather than skipped: a recording
+    silently absent from this list reads as a recording that passed, which is M15's shape.
+    """
+    base = Path(root)
+    if not base.is_dir():
+        return (), ()
+    pending: list[tuple[date, str, LiveRecording]] = []
+    unreadable: list[tuple[Path, str]] = []
+    for path in sorted(p for p in base.iterdir() if p.is_dir()):
+        if not (path / MANIFEST_NAME).is_file():
+            continue
+        recording = LiveRecording.at(path)
+        try:
+            manifest = recording.read_manifest()
+        except Exception as exc:
+            unreadable.append((path, f"{type(exc).__name__}: {exc}"))
+            continue
+        if str(manifest.get("mode") or "") != "live":
+            continue
+        day = recording_day(recording)
+        if day is None:
+            unreadable.append((path, "the manifest names no readable trade_date"))
+            continue
+        if day >= before:
+            continue
+        try:
+            if recording.read_verification():
+                continue
+        except Exception as exc:
+            unreadable.append((path, f"verification.json: {type(exc).__name__}: {exc}"))
+            continue
+        pending.append((day, path.name, recording))
+    return (
+        tuple(recording for _day, _name, recording in sorted(pending, key=lambda row: row[:2])),
+        tuple(unreadable),
+    )
+
+
+def verify_prior_recordings(
     *,
     today: date,
     calendar: cal.TradingCalendar,
     data_root: Path,
     cache_dir: Path | None = None,
     recording_root: Path | None = None,
-) -> tuple[MorningVerification | None, RefreshStep]:
-    """Find yesterday's LIVE recording and verify it. CONTEXT 4.7's next-pre-open duty.
+) -> tuple[tuple[MorningVerification, ...], RefreshStep]:
+    """Verify EVERY unverified LIVE recording. CONTEXT 4.7's next-pre-open duty, done in full.
 
-    Absence is not failure and says so: on the first live morning, or after a replay-only day,
-    there is no prior LIVE recording and the step reports that in one line. What IS reported
-    loudly -- in the step's own ``detail``, so it reaches an operator who reads nothing else --
-    is a live-alerted symbol-day the oracle refuses.
+    **REVIEW_14 M13 and M14, closed together**, because they are one defect seen from two sides:
+    the job asked *"which recording is yesterday's?"* when the duty is *"which recordings has
+    nobody judged?"*. It looked at ``prev_trading_day`` only, so a skipped pre-open lost the loud
+    case permanently and the next report still said READY; and within that day it took
+    ``live_recordings[-1]``, while ``open_session`` tells the operator to start a second
+    recording when the code sha, the config digest or the master moves mid-day. Two stacked
+    unverified days used to produce one verdict about one of six recordings.
+
+    Absence is still not failure and still says so: a first live morning, or a week of replays,
+    leaves nothing pending and the step reports that in one line.
+
+    **What makes the step FAIL.** A recording that cannot be judged is always named, always loud
+    and always left UNVERIFIED, so it stays on this queue instead of vanishing from it. The step
+    is ``ok=False`` -- which stops the morning -- only when the recording that cannot be judged
+    is the one CONTEXT 4.7 names, *"the prior recording"*: the previous trading day's. An older
+    entry of the backlog is shouted about and does not hold the bell hostage, because a morning
+    the trader loses is a worse failure than a stale artifact nobody can re-judge.
     """
     from . import backtest as bt
     from .config import load_config
@@ -800,64 +947,86 @@ def verify_yesterday(
 
     prior = calendar.prev_trading_day(today)
     root = Path(recording_root) if recording_root is not None else Path(data_root) / "live"
-    candidates = [
-        LiveRecording.at(path) for path in sorted(root.glob(f"{prior.isoformat()}*"))
-        if (path / "manifest.json").is_file()
-    ] if root.is_dir() else []
-    live_recordings = [
-        rec for rec in candidates if rec.read_manifest().get("mode") == "live"
-    ]
-    if not live_recordings:
-        return None, RefreshStep(
-            name="verify yesterday (CONTEXT 4.7)", ok=True,
+    pending, unreadable = unverified_recordings(root, before=today)
+    if not pending and not unreadable:
+        return (), RefreshStep(
+            name=VERIFY_STEP, ok=True,
             detail=(
-                f"no LIVE recording for {prior.isoformat()} under {root} -- nothing to verify "
-                "(a replay needs no verification: its day already had a bhavcopy)"
+                f"nothing unverified under {root} -- every LIVE recording before "
+                f"{today.isoformat()} already carries a verdict (the last trading day was "
+                f"{prior.isoformat()}; a replay needs no verification: its day already had a "
+                "bhavcopy)"
             ),
-            figures={"prior_day": prior.isoformat(), "verified": False},
+            figures={"prior_day": prior.isoformat(), "pending": 0, "verified": False},
         )
 
-    recording = live_recordings[-1]
-    manifest = recording.read_manifest()
     config = load_config(include_env=False)
     cache = Path(cache_dir) if cache_dir is not None else config.path("cache_root")
-    try:
-        master, _path, _sha = bt.named_master(cache, str(manifest["master_file"]))
-    except Exception as exc:
-        return None, RefreshStep(
-            name="verify yesterday (CONTEXT 4.7)", ok=False,
-            detail=(
-                f"{recording.root} names master {manifest.get('master_file')!r}, which cannot be "
-                f"loaded: {type(exc).__name__}: {exc}. A day is re-judged under the ticks it ran "
-                "on (Q-29), so it is not re-judged under another."
-            ),
-            figures={"prior_day": prior.isoformat(), "verified": False},
+    verifications: list[MorningVerification] = []
+    refused: list[str] = []
+    unjudged: list[str] = []
+    blocking = False
+    for path, why in unreadable:
+        unjudged.append(f"{path} ({why})")
+        blocking = blocking or recording_day(LiveRecording.at(path)) == prior
+    for recording in pending:
+        day = recording_day(recording)
+        manifest = recording.read_manifest()
+        try:
+            master, _path, _sha = bt.named_master(cache, str(manifest["master_file"]))
+            pipeline = SignalPipeline(
+                minute_store=MinuteStore.at(Path(data_root) / "minute_store"),
+                daily_store=DailyStore.at(Path(data_root) / "daily_store"),
+                master=master,
+                row_size=int(manifest.get("row_size") or config.row_size),
+            )
+            verification = verify_prior_recording(recording, pipeline, day=day)
+        except Exception as exc:
+            # Named, left unverified (so it stays on the queue), and the rest of the backlog
+            # still runs -- the same skip-and-continue discipline CONTEXT 4.4 sets for a sweep.
+            unjudged.append(
+                f"{recording.root} names master {manifest.get('master_file')!r}: "
+                f"{type(exc).__name__}: {exc}"
+            )
+            blocking = blocking or day == prior
+            continue
+        recording.write_verification(verification.as_dict())
+        verifications.append(verification)
+        refused.extend(
+            f"{day.isoformat()} {verdict.symbol}" for verdict in verification.refused_after_alert
         )
-
-    pipeline = SignalPipeline(
-        minute_store=MinuteStore.at(Path(data_root) / "minute_store"),
-        daily_store=DailyStore.at(Path(data_root) / "daily_store"),
-        master=master,
-        row_size=int(manifest.get("row_size") or config.row_size),
-    )
-    verification = verify_prior_recording(recording, pipeline, day=prior)
-    recording.write_verification(verification.as_dict())
-    bad = verification.refused_after_alert
-    return verification, RefreshStep(
-        name="verify yesterday (CONTEXT 4.7)", ok=True,
-        detail=verification.headline,
+    details = [
+        f"{len(verifications)} recording(s) verified over "
+        f"{len({v.day for v in verifications})} day(s)"
+    ]
+    details.extend(verification.headline for verification in verifications)
+    if unjudged:
+        details.append(
+            f"NOT JUDGED and still queued -- {len(unjudged)}: " + "; ".join(unjudged)
+            + ". A day is re-judged under the ticks it ran on (Q-29), so it is not re-judged "
+            "under another."
+        )
+    return tuple(verifications), RefreshStep(
+        name=VERIFY_STEP, ok=not blocking, detail=" | ".join(details),
         figures={
             "prior_day": prior.isoformat(),
-            "verified": True,
-            "recording": str(recording.root),
-            "symbols": len(verification.verdicts),
-            "oracle_pass": len(verification.oracle_passed),
-            "alerted": len(verification.alerted),
-            "refused_after_alert": [verdict.symbol for verdict in bad],
+            "pending": len(pending),
+            "verified": bool(verifications),
+            "recordings": [str(v.recording_root) for v in verifications],
+            "days": sorted({v.day.isoformat() for v in verifications}),
+            "symbols": sum(len(v.verdicts) for v in verifications),
+            "oracle_pass": sum(len(v.oracle_passed) for v in verifications),
+            "alerted": sum(len(v.alerted) for v in verifications),
+            "refused_after_alert": refused,
             "alerted_but_unverified": [
-                verdict.symbol for verdict in verification.alerted_but_unverified
+                f"{v.day.isoformat()} {verdict.symbol}"
+                for v in verifications for verdict in v.alerted_but_unverified
             ],
-            "unverified": [verdict.symbol for verdict in verification.unverified],
+            "unverified": [
+                f"{v.day.isoformat()} {verdict.symbol}"
+                for v in verifications for verdict in v.unverified
+            ],
+            "not_judged": unjudged,
         },
     )
 
@@ -978,29 +1147,29 @@ def morning_refresh(
 
     # CONTEXT 4.7 / Q-28. AFTER the bhavcopy top-up: the oracle it verifies against is the file
     # that step just fetched.
-    verification: MorningVerification | None = None
+    verifications: tuple[MorningVerification, ...] = ()
     if verify_prior and calendar is None:
         steps.append(RefreshStep(
-            name="verify yesterday (CONTEXT 4.7)", ok=False,
+            name=VERIFY_STEP, ok=False,
             detail=NOT_RUN_WITHOUT_A_CALENDAR.format(
-                what="which day 'yesterday' was is a calendar question"
+                what="which day counts as 'the prior trading day' is a calendar question"
             ),
         ))
     elif verify_prior:
         try:
-            verification, step = verify_yesterday(
+            verifications, step = verify_prior_recordings(
                 today=today, calendar=calendar, data_root=data_root_for(store),
                 cache_dir=cache_dir, recording_root=recording_root,
             )
             steps.append(step)
         except Exception as exc:
             steps.append(RefreshStep(
-                name="verify yesterday (CONTEXT 4.7)", ok=False,
+                name=VERIFY_STEP, ok=False,
                 detail=f"{type(exc).__name__}: {exc}",
             ))
 
     return calendar, universe, RefreshReport(
-        day=today, steps=tuple(steps), verification=verification
+        day=today, steps=tuple(steps), verifications=verifications
     )
 
 
@@ -1019,7 +1188,9 @@ __all__ = [
     "NOT_RUN_WITHOUT_A_CALENDAR",
     "NOT_VERIFIED_MARK",
     "NO_CANDLES_RECORDED",
+    "NO_CACHED_WINDOW",
     "NO_ORACLE_ROW",
+    "VERIFY_STEP",
     "MorningVerification",
     "ca_cache_display",
     "oracle_spoke",
@@ -1035,6 +1206,8 @@ __all__ = [
     "refresh_daily_store",
     "refresh_instrument_master",
     "refresh_universe",
+    "recording_day",
+    "unverified_recordings",
     "verify_prior_recording",
-    "verify_yesterday",
+    "verify_prior_recordings",
 ]

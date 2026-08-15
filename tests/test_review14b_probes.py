@@ -4,9 +4,10 @@ Written by the RE-REVIEW session, not by a build or fix session. Each one pins a
 verified property from ``docs/reviews/REVIEW_14B.md`` at the place it lives.
 
 **A defect pin asserts the DEFECT** -- the convention REVIEW_13B set and REVIEW_14 followed, and
-the reason five of REVIEW_14's pins could be flipped and counted. This file carries exactly one:
-``test_DEFECT_R1_*``, which pins the residual the re-review found by widening M19's own question.
-Chunk 15 flips it. Every other probe here pins something CORRECT and must never flip.
+the reason five of REVIEW_14's pins could be flipped and counted. This file carried exactly one:
+``test_DEFECT_R1_*``, which pinned the residual the re-review found by widening M19's own
+question. **Chunk 15 flipped it** -- it is now ``test_FLIPPED_R1_*`` and asserts the property
+instead of the defect. Every other probe here pins something CORRECT and must never flip.
 
 Store-free by construction: nothing here reads ``data_root`` or ``cache_root``, so these run on a
 bare clone. The measurements that DO need the stores are evidence scripts instead, committed
@@ -34,38 +35,46 @@ REPO = Path(__file__).resolve().parents[1]
 # --- R1: the residual -- how far M19's isolation actually reaches --------------------------------
 
 
-def test_DEFECT_R1_the_poll_guard_stops_before_the_merge_and_record_block() -> None:
-    """REVIEW_14B **R1**: the isolation stops where ``_poll``'s guard stops.
+def test_FLIPPED_R1_the_poll_guard_covers_the_WHOLE_per_symbol_body() -> None:
+    """REVIEW_14B **R1**, closed by chunk 15 -- the probe this file was written to flip.
 
-    M19's remedy was implemented exactly as REVIEW_14 prescribed it -- the ``_evaluate`` call and
-    the sink loop -- and it closes the failure that review measured. The prescription was
-    narrower than the property: ``_poll`` wraps ONLY ``self.source.fetch(...)``, and the four
-    statements after it in the same method are outside both guards. Measured by the re-review, a
-    bar that survives the fetch and dies in that block still ends the sweep and the morning:
+    What it pinned, as the defect: ``_poll`` wrapped ONLY ``self.source.fetch(...)``, and the
+    four statements after it in the same method stood outside every guard in the module, so a
+    bar that survived the fetch and died in that block ended the sweep and the morning:
 
     * a tz-AWARE stamp raises ``TypeError`` in ``merge_bars``;
     * ``close_paise = None`` or ``volume = None`` raises ``TypeError`` in ``record_bars``.
 
-    Not blocking, because ``smartapi_client.parse_candles`` drops the tzinfo and refuses a
-    non-paise price from INSIDE ``SmartApiBarSource.fetch`` -- which the existing guard already
-    wraps -- so the shapes are out of reach of the shipped vendor source. What remains reachable
-    is another ``BarSource``, or a per-symbol file I/O failure in ``record_bars`` at 11:30.
-
-    **When the guard is widened to cover the merge-and-record block, this probe flips.**
+    The architect's 15-Aug-2026 note assigns the completion to chunk 15 and calls the narrower
+    remedy an under-prescription rather than a regression. This is the SOURCE-level half of the
+    flip -- every one of the four statements is now inside the ``try``, and the ``except`` tells
+    a feed that did not answer apart from a reply that could not be taken in. The BEHAVIOURAL
+    half, all seven malformed shapes driven through ``run_day``, is in
+    ``tests/test_chunk15_carried_defects.py``.
     """
-    source = inspect.getsource(ls.LiveScreener._poll)
-    guarded, after_guard = source.split("self.bars[symbol] = merged", 1)
+    import ast
+    import textwrap
 
-    assert "bars = self.source.fetch(symbol, self.day, boundary)" in guarded, (
-        "the fetch is the only call inside the try -- the shape R1 is about"
-    )
-    for unguarded in ("merge_bars(", "duplicate_stamps(", "record_bars(", "record_fetch("):
-        assert unguarded in source, unguarded
-    assert "try:" not in after_guard, (
-        "the merge-and-record block has gained a guard -- R1 is fixed and this probe flips to "
-        "assert that every statement of _poll is per-symbol isolated"
-    )
-    # ...and the evaluation site IS guarded, which is what the fix bought.
+    tree = ast.parse(textwrap.dedent(inspect.getsource(ls.LiveScreener._poll)))
+    guards = [node for node in ast.walk(tree) if isinstance(node, ast.Try)]
+    assert len(guards) == 1, "one guard, covering the whole per-symbol body"
+    guarded = "\n".join(ast.unparse(stmt) for stmt in guards[0].body)
+    for statement in (
+        "self.source.fetch",
+        "merge_bars",
+        "duplicate_stamps",
+        "record_bars",
+        "record_fetch",
+    ):
+        assert statement in guarded, (
+            f"{statement} is outside the per-symbol guard again -- R1, reopened"
+        )
+    # ...and the guard tells the two failures apart, because they need different handling.
+    source = inspect.getsource(ls.LiveScreener._poll)
+    assert "if answered:" in source and "self._intake_failed(" in source
+    assert "return POLL_UNREADABLE" in source
+
+    # The evaluation site is still guarded, which is what REVIEW_14's own remedy bought.
     swept = inspect.getsource(ls.LiveScreener.sweep)
     assert "alerts.extend(self._evaluate(symbol, boundary))" in swept
     assert "self._evaluation_failed(symbol, boundary, exc)" in swept

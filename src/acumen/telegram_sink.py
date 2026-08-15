@@ -82,6 +82,7 @@ from .live_screener import (
     ALERT_TRIGGER,
     MARKER_POC_PROVISIONAL,
     MARKER_STALE,
+    POSTURE_LIVE,
     LiveScreener,
     alert_state_notes,
     format_alert,
@@ -115,6 +116,30 @@ DRY_RUN_MARKER: str = "[DRY RUN -- log only, nothing was sent to anyone else]"
 #: byte-identical on the phone apart from a price (REVIEW_14 H1).
 REPLAY_MARKER: str = (
     "[REPLAY of a PAST day -- this is not a live alert and nothing about it is about today]"
+)
+
+#: On any message whose payload does not say WHICH POSTURE produced it (REVIEW_14B **L2**).
+#:
+#: ``posture_markers`` read a missing ``mode`` as live -- and live is the one posture that
+#: carries no marker at all, so an alert recorded before B411 existed, forwarded or replayed
+#: months later, arrived on a phone looking exactly like this morning's. Backwards compatibility
+#: was the right call and is kept (the message still goes, and the trade date still travels);
+#: what was wrong was resolving the ambiguity in the one direction that cannot be checked. An
+#: unstamped payload now says it is unstamped.
+UNSTAMPED_MARKER: str = (
+    "[POSTURE NOT STAMPED -- this alert's payload does not say which mode produced it, so it is "
+    "NOT confirmed to be a live alert. Read its date]"
+)
+
+#: **REVIEW_14B L1**, stated rather than left to be read as a contradiction. The alert list in
+#: the end-of-day summary is the RECORDING's -- the whole day, however many processes produced it
+#: (REVIEW_14 H2) -- while :meth:`TelegramSink.summary`'s three counters are this PROCESS's. After
+#: a resume they disagree by design, and each is right about its own subject: *"1 symbol(s)
+#: alerted ... telegram: 0 sent"*. Counting deliveries this process did not make would be worse
+#: than the ambiguity; saying which number is about what costs one line.
+SUMMARY_SUBJECTS: str = (
+    "(the list above is the whole day's, read from the recording; the counters are this "
+    "process's own -- a resumed morning delivered its alerts before the restart)"
 )
 
 #: The end-of-day summary's first line. plan.md's chunk-14 card lists *"end-of-day summary
@@ -199,7 +224,12 @@ def posture_markers(payload) -> tuple[str, ...]:
     markers: list[str] = []
     if payload.get("dry_run"):
         markers.append(DRY_RUN_MARKER)
-    if str(payload.get("mode") or "") not in ("", "live"):
+    mode = str(payload.get("mode") or "")
+    if not mode:
+        # REVIEW_14B **L2**: no stamp is not the same claim as "live", and only one of the two
+        # can be checked. Said out loud instead of assumed in the flattering direction.
+        markers.append(UNSTAMPED_MARKER)
+    elif mode != POSTURE_LIVE:
         markers.append(REPLAY_MARKER)
     return tuple(markers)
 
@@ -328,12 +358,12 @@ class TelegramSink:
         ]
         if not self.live:
             lines.append(DRY_RUN_MARKER)
-        if any(
-            REPLAY_MARKER in posture_markers(alert.payload) for alert in alerts
-        ):
-            # REVIEW_14 H1: the same rule the alerts obey. One summary of a replayed day must
-            # not read on a phone as the summary of today's morning.
-            lines.append(REPLAY_MARKER)
+        for marker in (REPLAY_MARKER, UNSTAMPED_MARKER):
+            if any(marker in posture_markers(alert.payload) for alert in alerts):
+                # REVIEW_14 H1: the same rule the alerts obey. One summary of a replayed day must
+                # not read on a phone as the summary of today's morning -- and (REVIEW_14B L2) a
+                # summary built from alerts nothing stamped must not either.
+                lines.append(marker)
         by_symbol: dict[str, list[str]] = {}
         for alert in alerts:
             by_symbol.setdefault(alert.symbol.strip().upper(), []).append(
@@ -347,6 +377,10 @@ class TelegramSink:
         else:
             lines.append(SUMMARY_NO_ALERTS)
         lines.append(self.summary())
+        if alerts and not (self.sent or self.refused or self.failed):
+            # REVIEW_14B **L1**: the two numbers above describe two different subjects, and after
+            # a resume they look like a contradiction. One line says which is which.
+            lines.append(SUMMARY_SUBJECTS)
         stale = sum(1 for alert in alerts if MARKER_STALE in set(
             alert.payload.get("alert_states") or ()
         ))
@@ -453,6 +487,8 @@ __all__ = [
     "SUMMARY_HEADING",
     "SUMMARY_NO_ALERTS",
     "SUMMARY_SENT",
+    "SUMMARY_SUBJECTS",
+    "UNSTAMPED_MARKER",
     "TelegramError",
     "TelegramSink",
     "credentials_present",

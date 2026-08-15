@@ -96,17 +96,97 @@ def test_the_backtester_and_the_screener_call_the_SAME_evaluate() -> None:
     )
     live = inspect.getsource(ls.LiveScreener._evaluate)
     assert "self.pipeline.evaluate(" in live
-    # the CODE, not the prose: the docstring names the engines it is forbidden to call, which is
-    # the point of it, so the docstring is removed before the scan.
-    function = ast.parse(dedent(live)).body[0]
-    if (function.body and isinstance(function.body[0], ast.Expr)
-            and isinstance(function.body[0].value, ast.Constant)):
-        function.body = function.body[1:]
-    code = ast.unparse(function)
-    for engine_call in ("day_profile", "aggregate_15min", "evaluate_day", "gate_day"):
-        assert engine_call not in code, (
-            f"the live layer calls {engine_call} directly -- it must go through evaluate()"
+
+
+def test_the_live_layer_calls_NO_DECIDING_ENGINE_directly_ANYWHERE_in_the_module() -> None:
+    """The forbidden-direct-call tripwire, over the WHOLE live path -- REVIEW_13 **M25**.
+
+    It used to unparse ONE method (16 lines of a 3,400-line module) and substring-scan four
+    names, so it reached 0.46% of what it claimed to cover -- and the live layer already broke
+    the rule it stated: ``_fifteen`` function-local-imported ``aggregate_15min`` and
+    ``in_session_bars`` and called both, on the evaluation path, at every square-off. Decision
+    **B328**'s recorded claim that *"a source-level test forbids the live layer from calling
+    day_profile, aggregate_15min, gate_day or evaluate_day directly"* was false as written; the
+    correction is in PROGRESS.md and this is the test that makes the corrected claim true.
+
+    The line the corrected claim draws is between MATHS and DECISIONS:
+
+    * **forbidden anywhere in the module** -- ``day_profile``, ``gate_day``, ``evaluate_day``,
+      unless the receiver is the ``pipeline``. These three DECIDE, and a live copy of any of them
+      is backtest/live drift by construction; reached through
+      :class:`acumen.signal_engine.SignalPipeline` they are the backtester's own methods, which
+      is the whole of the one-engine law (``full_day_gates`` calls ``pipeline.gate_day``, and
+      that is not a second implementation of anything).
+    * **allowed, in exactly one place, and pinned to it** -- ``in_session_bars`` and
+      ``aggregate_15min``, in ``_fifteen``, which READS one candle's close for the square-off.
+      They are pure functions over bars and are the same two the pipeline itself uses, so they
+      cannot make the halves disagree. A SECOND call site is what would be new, and this test
+      fails on one.
+
+    Scanned by AST over the module's whole source, docstrings removed -- the docstrings NAME the
+    forbidden calls, which is the point of them, and a substring scan that could not tell prose
+    from code is what made the old version toothless in both directions.
+    """
+    module = ast.parse(Path(ls.__file__).read_text(encoding="utf-8"))
+    for node in ast.walk(module):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Module)):
+            body = getattr(node, "body", [])
+            if (body and isinstance(body[0], ast.Expr)
+                    and isinstance(body[0].value, ast.Constant)
+                    and isinstance(body[0].value.value, str)):
+                node.body = body[1:]
+
+    def receiver_of(func: ast.AST) -> str:
+        """Who is being asked. ``""`` for a bare call, else the nearest attribute/name."""
+        if isinstance(func, ast.Attribute):
+            if isinstance(func.value, ast.Name):
+                return func.value.id
+            if isinstance(func.value, ast.Attribute):
+                return func.value.attr
+        return ""
+
+    called: dict[str, list[tuple[str, str]]] = {}
+    for parent in ast.walk(module):
+        if not isinstance(parent, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        for node in ast.walk(parent):
+            if isinstance(node, ast.Call) and isinstance(node.func, (ast.Name, ast.Attribute)):
+                name = node.func.id if isinstance(node.func, ast.Name) else node.func.attr
+                called.setdefault(name, []).append((parent.name, receiver_of(node.func)))
+
+    for deciding in ("day_profile", "gate_day", "evaluate_day"):
+        direct = [
+            where for where, receiver in called.get(deciding, ())
+            if receiver != "pipeline"
+        ]
+        assert not direct, (
+            f"the live layer calls {deciding} directly, in {direct} -- every decision must go "
+            "through the pipeline the backtester uses"
         )
+    assert ("full_day_gates", "pipeline") in called.get("gate_day", ()), (
+        "the LICENSED route is exercised, so this test says what is allowed and not only what "
+        "is forbidden"
+    )
+    for maths in ("aggregate_15min", "in_session_bars"):
+        assert [where for where, _receiver in called.get(maths, ())] == ["_fifteen"], (
+            f"{maths} is called from {called.get(maths)}; B328's corrected claim allows it in "
+            "_fifteen and nowhere else"
+        )
+    # ...and it is a MODULE-level import now, so a reader and this scan see the same thing.
+    assert "aggregate_15min" in vars(ls), "M25: the function-local import is hoisted"
+    assert "from .aggregate import Bar, aggregate_15min, in_session_bars" in Path(
+        ls.__file__
+    ).read_text(encoding="utf-8")
+
+    # The tripwire is not vacuous: a deciding call planted anywhere in the module is caught.
+    planted = ast.parse("def _sneak(self):\n    return day_profile(self.bars)\n")
+    module.body.append(planted.body[0])
+    names = {
+        node.func.id
+        for node in ast.walk(module)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+    assert "day_profile" in names, "the scan really would see it"
 
 
 def test_evaluate_and_stock_day_agree_on_the_synthetic_day(tmp_path: Path) -> None:

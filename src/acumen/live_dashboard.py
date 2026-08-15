@@ -80,6 +80,63 @@ TOKENS: Mapping[str, str] = {
     "on-dark": "#ffffff",
 }
 
+#: DESIGN.md's **Typography / Font Family** section, in its own words. Nothing outside this dict
+#: may appear as a ``font-family`` anywhere in this module -- the same rule :data:`TOKENS` has
+#: carried for colour since the first day, and the rule REVIEW_13 **M12** found type did not
+#: have: three families (``SFMono-Regular``, ``Consolas``, ``ui-monospace``) reached the rendered
+#: page and appear in NO DESIGN.md row, while this module's own comment claimed they were *"both
+#: with DESIGN.md's documented fallbacks"*. The chunk's colour test regexed hex literals only, so
+#: nothing went red.
+#:
+#: Dropping the three monospace fallbacks costs the price column nothing: ``CohereMono`` is not
+#: bundled (DESIGN.md's own Known Gaps), so the digits already render in the documented ``Arial``
+#: fallback, and it is ``font-variant-numeric: tabular-nums`` -- not the family -- that makes
+#: them a scannable column.
+FONT_STACK: Mapping[str, str] = {
+    # "Body/UI: `Unica77 Cohere Web`, falling back to `Inter`, `Arial`, `ui-sans-serif`, and
+    # `system-ui`."
+    "ui": "'Unica77 Cohere Web',Inter,Arial,ui-sans-serif,system-ui",
+    # "Technical labels: `CohereMono`, falling back to `Arial`, `ui-sans-serif`, and `system-ui`."
+    "mono": "CohereMono,Arial,ui-sans-serif,system-ui",
+}
+
+#: DESIGN.md's **Hierarchy** table, the five rows PART II's Type paragraph assigns this screen:
+#: *"`mono-label` (CohereMono 14) for every symbol and every price ... `body` 16 for prose,
+#: `caption` 14 for the timestamp on an alert, `card-heading` 32 for the one clock/status line"*,
+#: plus ``micro`` 12 for the sub-labels inside a row. Every size and every letter-spacing this
+#: module emits comes from here, so a PAIR that exists in no DESIGN.md row -- which is what
+#: ``.side``'s 12px + 0.28px was -- cannot be written down.
+#:
+#: ``spacing`` of ``"0"`` is emitted as nothing at all: the row's letter-spacing IS zero, and a
+#: declaration that restates the default is the fourth acceptance question's own answer.
+TYPE: Mapping[str, Mapping[str, str]] = {
+    "card-heading": {"family": "ui", "size": "32px", "line": "1.2", "spacing": "-0.32px"},
+    "body": {"family": "ui", "size": "16px", "line": "1.5", "spacing": "0"},
+    "caption": {"family": "ui", "size": "14px", "line": "1.4", "spacing": "0"},
+    "mono-label": {"family": "mono", "size": "14px", "line": "1.4", "spacing": "0.28px"},
+    "micro": {"family": "ui", "size": "12px", "line": "1.4", "spacing": "0"},
+}
+
+
+def type_role(role: str, *, family: bool = False, line: bool = False) -> str:
+    """The CSS declarations for one DESIGN.md type role. Nothing here is invented.
+
+    ``family`` and ``line`` are opt-in because most rules on this page inherit both from
+    ``body`` and only change the size: emitting them everywhere would be three declarations
+    where one carries the meaning.
+    """
+    row = TYPE[role]
+    parts = []
+    if family:
+        parts.append(f"font-family:{FONT_STACK[row['family']]}")
+    parts.append(f"font-size:{row['size']}")
+    if line:
+        parts.append(f"line-height:{row['line']}")
+    if row["spacing"] != "0":
+        parts.append(f"letter-spacing:{row['spacing']}")
+    return ";".join(parts)
+
+
 #: DESIGN.md PART II's state table, executed. One entry per state, and the seven states are
 #: exactly :data:`acumen.live_screener.PHASES`.
 STATE_STYLE: Mapping[str, dict] = {
@@ -401,54 +458,59 @@ def _slug(phase: str) -> str:
 
 
 def _css() -> str:
-    """Built from :data:`TOKENS` so a colour cannot enter this page except through DESIGN.md."""
+    """Built from :data:`TOKENS` and :data:`TYPE` -- neither a colour NOR a typeface can enter
+    this page except through DESIGN.md."""
     t = TOKENS
     rules = [
         f"*{{box-sizing:border-box}}",
-        # Type: Unica77 for UI, CohereMono for the scannable columns, both with DESIGN.md's
-        # documented fallbacks (the proprietary files are not bundled -- its Known Gaps).
+        # Type: DESIGN.md's `body` role, family and line-height included, so every rule below
+        # inherits both and only ever changes the size (REVIEW_13 M12).
         f"body{{margin:0;background:{t['canvas']};color:{t['ink']};"
-        "font-family:'Unica77 Cohere Web',Inter,Arial,ui-sans-serif,system-ui;"
-        "font-size:16px;line-height:1.5}",
-        ".mono{font-family:CohereMono,'SFMono-Regular',Consolas,Arial,ui-monospace;"
-        "font-size:14px;letter-spacing:0.28px;font-variant-numeric:tabular-nums}",
+        + type_role("body", family=True, line=True) + "}",
+        # `mono-label`, DESIGN.md's own stack. tabular-nums -- not the family -- is what makes
+        # the price column scannable, which is why dropping the three undocumented monospace
+        # fallbacks costs nothing.
+        ".mono{" + type_role("mono-label", family=True)
+        + ";font-variant-numeric:tabular-nums}",
         # Layout: the 8px scale. xl (24px) between groups, lg (16px) inside them -- so the
         # grouping is legible before a word is read (DESIGN.md PART II, Space).
         ".top{display:flex;align-items:baseline;justify-content:space-between;"
         f"padding:24px 24px 16px;border-bottom:1px solid {t['hairline']}}}",
-        ".title{font-size:32px;line-height:1.2;letter-spacing:-0.32px}",
-        f".meta{{display:flex;gap:16px;color:{t['muted']};font-size:14px}}",
+        ".title{" + type_role("card-heading", line=True) + "}",
+        f".meta{{display:flex;gap:16px;color:{t['muted']};" + type_role("caption") + "}",
         # The banner: the only full-width element on the page, and it is present or absent.
         f".banner{{background:{t['error']};color:{t['on-dark']};padding:12px 24px;"
-        "font-size:16px}",
+        + type_role("body") + "}",
         # CONTEXT 4.7's disclosed line: the header's own muted register, one hairline below it.
-        f".disclosure{{color:{t['muted']};font-size:14px;padding:8px 24px;"
+        f".disclosure{{color:{t['muted']};" + type_role("caption") + ";padding:8px 24px;"
         f"border-bottom:1px solid {t['hairline']}}}",
         ".group{padding:24px 24px 0}",
-        "h2{display:flex;align-items:baseline;gap:12px;margin:0 0 12px;font-size:16px;"
-        "font-weight:400}",
-        f".chip{{font-family:CohereMono,Consolas,Arial,ui-monospace;font-size:14px;"
-        f"letter-spacing:0.28px;border-radius:4px;padding:2px 8px;"
+        "h2{display:flex;align-items:baseline;gap:12px;margin:0 0 12px;"
+        + type_role("body") + ";font-weight:400}",
+        ".chip{" + type_role("mono-label", family=True)
+        + f";border-radius:4px;padding:2px 8px;"
         f"background:{t['soft-stone']};color:{t['ink']}}}",
-        f".count{{color:{t['muted']};font-size:14px}}",
-        f".words{{color:{t['muted']};font-size:14px}}",
+        f".count{{color:{t['muted']};" + type_role("caption") + "}",
+        f".words{{color:{t['muted']};" + type_role("caption") + "}",
         # Rows: unframed, rule-separated. DESIGN.md's own instruction, and 210 boxes would
         # compete with the four that matter.
         f".row{{display:flex;flex-wrap:wrap;align-items:baseline;gap:16px;padding:8px 12px;"
         f"border-bottom:1px solid {t['hairline']}}}",
         ".sym,.logsym{min-width:9rem;font-weight:400}",
-        f".side{{font-size:12px;letter-spacing:0.28px;color:{t['muted']};text-transform:uppercase}}",
+        # `micro`, DESIGN.md's smallest row. It used to be 12px WITH mono-label's 0.28px
+        # tracking -- a pair that exists in no DESIGN.md row at all, which is M12's other half.
+        f".side{{" + type_role("micro") + f";color:{t['muted']};text-transform:uppercase}}",
         ".num{display:inline-flex;gap:6px;align-items:baseline}",
-        f".num i{{font-style:normal;font-size:12px;color:{t['muted']}}}",
+        f".num i{{font-style:normal;" + type_role("micro") + f";color:{t['muted']}}}",
         ".num b{font-weight:400}",
-        f".detail{{color:{t['muted']};font-size:14px}}",
+        f".detail{{color:{t['muted']};" + type_role("caption") + "}",
         f".quiet{{color:{t['muted']}}}",
         # The freshness cell and its flag. The flag is `error` ink on the row's own ground --
         # not a fill and not a full-width strip, both of which the banner owns: a stale row must
         # be unmistakable without competing with "the sweep did not complete" (DESIGN.md PART
         # II, and REVIEW_13 B10).
         f".data i{{color:{t['muted']}}}",
-        f".flag{{color:{t['error']};font-size:14px}}",
+        f".flag{{color:{t['error']};" + type_role("caption") + "}",
         f".row.stale{{border-left:2px solid {t['error']}}}",
         f".stale .flag{{color:{t['error']}}}",
     ]
@@ -501,10 +563,13 @@ __all__ = [
     "STALE_AFTER_MINUTES",
     "STATE_STYLE",
     "STATE_WORDS",
+    "FONT_STACK",
     "TOKENS",
+    "TYPE",
     "data_age",
     "render_html",
     "render_text",
     "rupees",
+    "type_role",
     "write_dashboard",
 ]

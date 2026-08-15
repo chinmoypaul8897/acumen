@@ -651,7 +651,7 @@ def test_Q3_a_LIVE_REFRESH_writes_ZERO_bytes_under_the_stores(tmp_path: Path) ->
     assert not report.ok and calendar is None
     assert not steps["calendar (published NSE)"].ok
     assert not steps["instrument master (TODAY's dump)"].ok
-    for name in ("daily store (bhavcopy top-up)", "verify yesterday (CONTEXT 4.7)"):
+    for name in ("daily store (bhavcopy top-up)", refresh.VERIFY_STEP):
         assert steps[name].detail.startswith("NOT RUN:"), name
     assert argv_seen == [], "no calendar means no Q-19 ceiling, so no top-up was attempted"
     assert universe == (SYMBOL,)

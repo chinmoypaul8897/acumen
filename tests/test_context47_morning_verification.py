@@ -200,7 +200,7 @@ def test_the_REFRESH_REPORT_shouts_it_too(tmp_path: Path) -> None:
     report = refresh.RefreshReport(
         day=date(2026, 7, 20),
         steps=(refresh.RefreshStep(name="calendar (published NSE)", ok=True, detail="fine"),),
-        verification=verification,
+        verifications=(verification,),
     )
     text = report.render()
     assert "READY" in text
@@ -226,7 +226,7 @@ def write_master(cache_dir: Path, name: str = MASTER_NAME) -> Path:
     return path
 
 
-def test_verify_yesterday_finds_the_LIVE_recording_and_re_gates_it_under_ITS_OWN_master(
+def test_the_step_finds_the_LIVE_recording_and_re_gates_it_under_ITS_OWN_master(
     tmp_path: Path,
 ) -> None:
     """The whole step, end to end -- and the Q-29 half of it.
@@ -250,7 +250,7 @@ def test_verify_yesterday_finds_the_LIVE_recording_and_re_gates_it_under_ITS_OWN
     # The PUBLISHED calendar, which is what a live morning uses (the C5 duty): a store-derived
     # one refuses to answer for a day the store has never ingested, and "today" never has been.
     calendar = TradingCalendar.from_holidays((date(2026, 8, 15),), covered_years=(2026,))
-    verification, step = refresh.verify_yesterday(
+    verifications, step = refresh.verify_prior_recordings(
         today=date(2026, 7, 20),  # the Monday after TRADE_DAY (a Friday)
         calendar=calendar,
         data_root=tmp_path / "stores",
@@ -258,7 +258,8 @@ def test_verify_yesterday_finds_the_LIVE_recording_and_re_gates_it_under_ITS_OWN
         recording_root=recording_root,
     )
     assert step.ok and step.figures["verified"] is True
-    assert verification is not None
+    assert len(verifications) == 1
+    verification = verifications[0]
     assert verification.day == TRADE_DAY
     assert [v.symbol for v in verification.verdicts] == [SYMBOL]
     assert step.figures["refused_after_alert"] == []
@@ -290,13 +291,13 @@ def test_a_REPLAY_recording_is_NOT_verified_because_its_day_already_had_a_bhavco
     # The PUBLISHED calendar, which is what a live morning uses (the C5 duty): a store-derived
     # one refuses to answer for a day the store has never ingested, and "today" never has been.
     calendar = TradingCalendar.from_holidays((date(2026, 8, 15),), covered_years=(2026,))
-    verification, step = refresh.verify_yesterday(
+    verifications, step = refresh.verify_prior_recordings(
         today=date(2026, 7, 20), calendar=calendar, data_root=tmp_path / "stores",
         cache_dir=tmp_path / "cache", recording_root=recording_root,
     )
-    assert verification is None
+    assert verifications == ()
     assert step.ok and step.figures["verified"] is False
-    assert "no LIVE recording" in step.detail and "needs no verification" in step.detail
+    assert "nothing unverified" in step.detail and "needs no verification" in step.detail
 
 
 def test_a_recording_whose_master_is_GONE_is_a_FAILED_step_not_a_substitution(
@@ -321,11 +322,18 @@ def test_a_recording_whose_master_is_GONE_is_a_FAILED_step_not_a_substitution(
     # The PUBLISHED calendar, which is what a live morning uses (the C5 duty): a store-derived
     # one refuses to answer for a day the store has never ingested, and "today" never has been.
     calendar = TradingCalendar.from_holidays((date(2026, 8, 15),), covered_years=(2026,))
-    verification, step = refresh.verify_yesterday(
+    verifications, step = refresh.verify_prior_recordings(
         today=date(2026, 7, 20), calendar=calendar, data_root=tmp_path / "stores",
         cache_dir=tmp_path / "cache", recording_root=recording_root,
     )
-    assert verification is None
-    assert not step.ok
+    assert verifications == ()
+    assert not step.ok, (
+        "the recording that cannot be judged IS the prior trading day's, which is the one "
+        "CONTEXT 4.7 names -- so the morning stops (REVIEW_14 M13's other edge)"
+    )
     assert "OpenAPIScripMaster_1999-01-01.json" in step.detail
     assert "re-judged under the ticks it ran on" in step.detail
+    assert "NOT JUDGED and still queued" in step.detail, (
+        "and it stays on the queue rather than vanishing from it"
+    )
+    assert not recording.read_verification(), "nothing was written for a day nobody judged"

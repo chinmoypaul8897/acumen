@@ -246,7 +246,7 @@ def test_the_morning_refresh_survives_a_calendar_it_cannot_read(tmp_path: Path) 
     assert calendar is None and not report.ok
     assert not steps["calendar (published NSE)"].ok
     assert "QUESTIONS.md C5" in steps["calendar (published NSE)"].detail
-    for name in ("daily store (bhavcopy top-up)", "verify yesterday (CONTEXT 4.7)"):
+    for name in ("daily store (bhavcopy top-up)", refresh.VERIFY_STEP):
         assert steps[name].detail.startswith("NOT RUN:"), name
         assert not steps[name].ok, name
     assert len(report.steps) == 6, "every step is still reported, none silently dropped"

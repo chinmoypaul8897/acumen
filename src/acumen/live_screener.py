@@ -69,7 +69,7 @@ from typing import Callable, Iterable, Mapping, Protocol, Sequence
 from . import backtest as bt
 from . import signals as sig
 from . import simulate as sim
-from .aggregate import Bar
+from .aggregate import Bar, aggregate_15min, in_session_bars
 from .bias_engine import DailyBias
 from .calendar import TradingCalendar
 from .instrument_master import InstrumentMaster
@@ -80,6 +80,7 @@ from .live_recording import (
     FETCH_ERROR,
     FETCH_OK,
     FETCH_SKIPPED,
+    FETCH_UNREADABLE,
     FetchOutcome,
     LiveRecording,
     RecordedAlert,
@@ -197,6 +198,35 @@ EVENT_EVALUATION_FAILED: str = "evaluation-failed"
 #: One sink raised while an alert was being delivered to it (REVIEW_14 M19, second surface). The
 #: alert is already recorded and already on every other sink; this names the one that missed it.
 EVENT_SINK_FAILED: str = "sink-failed"
+
+#: An alert the POST-SESSION poll would have delivered, RECORDED instead of sent (**M4**).
+#:
+#: REVIEW_13 M4, upgraded in consequence by chunk 14 and measured again by REVIEW_14 H8:
+#: :meth:`LiveScreener.close_day`'s 15:30 poll was an ordinary sweep, so a feed that healed after
+#: 15:29 published, for the first time, a full TRIGGER with all four numbers to the screen, the
+#: bell and -- once chunk 14 attached a phone to that sink tuple -- Telegram. Measured message:
+#: ``[15:30] SYNTH LONG entry 2,001.00 SL 1,999.00 TP 2,007.00 qty 500``, thirty minutes after
+#: the last moment CONTEXT 3.4 lets anyone act on it.
+EVENT_POST_SESSION_ALERT: str = "post-session-alert-withheld"
+
+#: One symbol's reply ARRIVED and could not be taken in (REVIEW_14B **R1**). Recorded per symbol
+#: per boundary, exactly like :data:`EVENT_EVALUATION_FAILED` and for the same reason -- and kept
+#: a DIFFERENT word from it, because "the evaluation raised" would be a lie about a symbol whose
+#: bars never reached the evaluation at all.
+EVENT_INTAKE_FAILED: str = "intake-failed"
+
+#: What one poll of one symbol came to. **Three outcomes, not two** (REVIEW_14B **R1**).
+#:
+#: The bool this replaced could say "I have the day" and "I do not", and the whole of R1 lives in
+#: the case it could not say: the feed ANSWERED and this tool could not take the answer in. The
+#: two failures need different handling -- one is retried and re-polled at sweep end (CONTEXT 4.3
+#: calls a transient burst normal), the other must not be, because part of the intake has already
+#: been applied and a second identical reply would re-record the whole prefix under one sweep
+#: label, which is precisely what
+#: :meth:`acumen.live_recording.LiveRecording.duplicate_bars` reports to gate 2 as twins.
+POLL_OK: str = "ok"
+POLL_NO_ANSWER: str = "no-answer"
+POLL_UNREADABLE: str = "unreadable"
 
 # --- the clock the sweeps run on (CONTEXT 3.1 / 3.4) ------------------------------------------
 
@@ -541,7 +571,12 @@ def unvouched_price(alert: RecordedAlert) -> str | None:
        clamp (REVIEW_14 **H4**). A missing stamp was caught here from the first day; a false one
        was not, and a false one is worse, because it is the shape that survives a reviewer's eye.
        The predicate does not need a clock to catch it: the two numbers are both on the payload
-       and they have to agree.
+       and they have to agree -- and BOTH have to be there. REVIEW_14B **L3**: rule 3 needed the
+       age to be an ``int`` to fire, so a payload carrying ``stale`` with no
+       ``data_behind_minutes`` slipped all three rules and forwarded a price whose age nothing
+       stated. Unreachable from :meth:`LiveScreener._alert`, which sets the pair together -- and
+       a predicate that is only correct because of what its one caller happens to do is a
+       predicate this repo has been bitten by before.
 
     A sink calls this before it sends. Deliberately a function of the PAYLOAD alone: the sink
     holds no clock, no bars and no state, so what it can check is exactly what a later reader of
@@ -562,7 +597,16 @@ def unvouched_price(alert: RecordedAlert) -> str | None:
             "carries no staleness marker"
         )
     behind = payload.get("data_behind_minutes")
-    if not payload.get("stale") and isinstance(behind, int) and behind > STALE_AFTER_MINUTES:
+    if not isinstance(behind, int) or isinstance(behind, bool):
+        # **L3.** A freshness stamp is the pair, not the flag: an age that is absent, null or
+        # anything but a whole number of minutes means nothing on this payload says how old the
+        # window behind the price is -- which is rule 1's own failure, arriving by a second door.
+        return (
+            f"{alert.symbol} {alert.kind}: the payload names a price and stamps it "
+            f"stale={payload.get('stale')!r} with no NUMBER for how far behind the boundary its "
+            f"window is (data_behind_minutes={behind!r}), so the stamp vouches for nothing"
+        )
+    if not payload.get("stale") and behind > STALE_AFTER_MINUTES:
         return (
             f"{alert.symbol} {alert.kind}: the payload stamps this price FRESH while its own "
             f"recorded age is {behind} minute(s) behind the boundary -- a stamp that contradicts "
@@ -847,6 +891,15 @@ class LiveScreener:
     #: was missing: the identity of the state being alerted about.
     alerted: set[tuple[str, str, str]] = field(default_factory=set)
     banner: str = ""
+    #: True ONLY while :meth:`close_day`'s post-session poll runs (**M4**). CONTEXT 3.4's last
+    #: entry closes at 15:00 and its square-off at 15:15, so nothing after 15:29 is actionable --
+    #: and an alert nobody can act on, arriving after the market has closed, is worse than no
+    #: alert. While this is set every alert is still computed, still deduped and still WRITTEN --
+    #: as :data:`EVENT_POST_SESSION_ALERT`, with its whole payload -- and no sink is fired. No
+    #: new trade is created from post-15:29 bars either way (``in_session_bars`` drops them, and
+    #: the parity harness proves the decision is unchanged), so this is annunciation and not
+    #: strategy: the recording says everything it said before, and the phone stays quiet.
+    post_session: bool = False
     sweeps_done: list[str] = field(default_factory=list)
     #: CONTEXT 3.3's POC, PINNED at 11:15 and immutable for the day (REVIEW_13 B3).
     profiles: dict[str, DayProfile] = field(default_factory=dict)
@@ -929,12 +982,27 @@ class LiveScreener:
 
         The states are recomputed from the completed day and must not move; if one ever does,
         something after 15:14 reached a decision and that is a defect, not a late correction.
+
+        **This poll ANNUNCIATES NOTHING** (REVIEW_13 **M4**, re-measured as REVIEW_14 H8). It was
+        an ordinary sweep, so on a feed that healed after 15:29 it published a full TRIGGER --
+        entry, stop, target, quantity -- to the screen, the bell and, once chunk 14 attached a
+        phone to that sink tuple, Telegram, half an hour after the last moment CONTEXT 3.4 lets
+        anyone act on it. :attr:`post_session` is the flag REVIEW_14's remedy asked for: every
+        alert this poll warrants is still computed, deduped and written into the recording as
+        :data:`EVENT_POST_SESSION_ALERT` with its whole payload, and no sink is fired. The
+        operator still sees the moved state -- the dashboard and the closing terminal render both
+        read :meth:`by_phase`, and the banner is still set -- so nothing is hidden; it is only
+        not ANNOUNCED as though it were tradeable.
         """
         stamp = datetime.combine(self.day, SESSION_END)
         if before_sweep is not None:
             before_sweep(stamp)
         before = dict(self.states)
-        report = self.sweep(stamp)
+        self.post_session = True
+        try:
+            report = self.sweep(stamp)
+        finally:
+            self.post_session = False
         moved = [
             symbol for symbol, state in self.states.items()
             if symbol in before and before[symbol].phase != state.phase
@@ -967,29 +1035,37 @@ class LiveScreener:
 
         fetched: list[str] = []
         deferred: list[str] = []
-        failed: list[str] = []
+        #: Symbols whose reply ARRIVED and could not be taken in (REVIEW_14B **R1**). They are
+        #: NOT re-polled: see :meth:`_poll` for why a second identical reply is worse than none.
+        unreadable: list[str] = []
         deadline_hit = False
 
-        for symbol in self.symbols:
+        for index, symbol in enumerate(self.symbols):
             if self.clock.now() > deadline:
                 deadline_hit = True
-                deferred.extend(self.symbols[len(fetched) + len(deferred) + len(failed):])
+                deferred.extend(self.symbols[index:])
                 break
-            ok = self._poll(symbol, boundary, label)
-            if ok:
+            outcome = self._poll(symbol, boundary, label)
+            if outcome == POLL_OK:
                 fetched.append(symbol)
+            elif outcome == POLL_UNREADABLE:
+                unreadable.append(symbol)
             else:
                 deferred.append(symbol)
 
         # CONTEXT 4.4's second pass -- "on failure SKIP the symbol and re-poll at sweep end".
+        # It re-polls the symbols that did not ANSWER, and only those.
         still: list[str] = []
         for symbol in deferred:
             if self.clock.now() > deadline:
                 deadline_hit = True
                 still.append(symbol)
                 continue
-            if self._poll(symbol, boundary, label, attempt=2):
+            outcome = self._poll(symbol, boundary, label, attempt=2)
+            if outcome == POLL_OK:
                 fetched.append(symbol)
+            elif outcome == POLL_UNREADABLE:
+                unreadable.append(symbol)
             else:
                 still.append(symbol)
         failed = [s for s in still if s in self.bars]
@@ -997,7 +1073,10 @@ class LiveScreener:
 
         alerts: list[RecordedAlert] = []
         evaluated = 0
-        unevaluated: list[str] = []
+        # A symbol whose reply could not be taken in never reaches the evaluation, so it is
+        # unevaluated in exactly the sense M19's symbols are -- and the banner NAMES it for
+        # exactly the same reason (REVIEW_14B R1).
+        unevaluated: list[str] = list(unreadable)
         for symbol in fetched:
             try:
                 alerts.extend(self._evaluate(symbol, boundary))
@@ -1045,17 +1124,87 @@ class LiveScreener:
         self.persist()
         return report
 
-    def _poll(self, symbol: str, boundary: datetime, label: str, *, attempt: int = 1) -> bool:
-        """Fetch one symbol with CONTEXT 4.4's short retries. True when the day is in hand."""
+    def _poll(self, symbol: str, boundary: datetime, label: str, *, attempt: int = 1) -> str:
+        """Fetch one symbol and TAKE ITS REPLY IN. CONTEXT 4.4's short retries, then skip.
+
+        Returns :data:`POLL_OK`, :data:`POLL_NO_ANSWER` or :data:`POLL_UNREADABLE`.
+
+        **The guard covers the WHOLE per-symbol body** -- REVIEW_14B **R1**, and the architect's
+        15-Aug-2026 note, which calls the narrower shape an under-prescription rather than a
+        regression: REVIEW_14's remedy for M19 named the ``_evaluate`` call and the sink loop,
+        chunk 14 implemented exactly that, and CONTEXT 4.4's skip-and-continue property is wider
+        than the prescription was. The ``try`` used to wrap ``self.source.fetch(...)`` and
+        nothing else, so the four statements after it -- ``merge_bars``, ``duplicate_stamps``,
+        ``record_bars`` and ``record_fetch`` -- stood outside every guard in this module, and a
+        bar that survived the fetch and died in that block ended the sweep, the morning, and
+        (because :meth:`restore` resumes into the same bytes) the restart too. Measured by that
+        re-review over seven malformed one-minute shapes, three escaped ``run_day`` entirely: a
+        tz-AWARE stamp (``TypeError`` in ``merge_bars``), and ``close_paise=None`` or
+        ``volume=None`` (``TypeError`` in ``record_bars``). The reachable case is not exotic --
+        one locked or unwritable candle file at 11:30 on a laptop took the universe down with it.
+
+        **A failure before the reply is retried; a failure after it is not,** and both halves are
+        deliberate:
+
+        * before -- the feed did not answer, which CONTEXT 4.3 calls normal, and a short retry is
+          the ruling's own remedy;
+        * after -- the same bytes will fail the same way 0.5s later, and part of this block has
+          already been applied, so re-running it would double what succeeded and re-record the
+          whole prefix under ONE sweep label, which is exactly the shape
+          :meth:`acumen.live_recording.LiveRecording.duplicate_bars` hands to gate 2 as twins. A
+          fix that made tomorrow's verification refuse the day would be worse than the defect.
+
+        Either way the symbol keeps its previous state, is named in the banner, and is re-polled
+        at the NEXT boundary like any other. One symbol loses one boundary; nobody loses the
+        morning.
+        """
         backoff = RETRY_BACKOFF_SECONDS if attempt == 1 else RETRY_BACKOFF_SECONDS[:1]
         last_error = ""
         for tries in range(len(backoff) + 1):
             at = self.clock.now()
             began = at
+            answered = False
             try:
                 bars = self.source.fetch(symbol, self.day, boundary)
+                answered = True
+                # Divided by a unit rather than scaled by a magic 1000 -- which also keeps this
+                # module clear of the chunk-8 money tripwire, whose whole value is that it is a
+                # LITERAL scan and therefore cannot be reasoned with (REVIEW_9A_2 finding C4).
+                elapsed = int((self.clock.now() - began) / timedelta(milliseconds=1))
+                merged = merge_bars(self.bars.get(symbol, ()), bars)
+                self.bars[symbol] = merged
+                self.recording.record_bars(symbol, bars, sweep=label, at=at)
+                self.recording.record_fetch(FetchOutcome(
+                    symbol=symbol, sweep=label,
+                    outcome=FETCH_OK if bars else FETCH_EMPTY,
+                    bars=len(bars), at=at, attempt=attempt, elapsed_ms=elapsed,
+                ))
+                # CONTEXT 4.5 gate 2's first trigger, kept VISIBLE to it (REVIEW_13 B2). The
+                # merge above resolves a re-polled stamp for the engine, which needs one bar per
+                # minute; the twins it resolved away are carried here so the battery can refuse
+                # the day. The ACCUMULATION is the last statement of the block on purpose: it is
+                # the one step here that is not idempotent, so nothing that can raise may follow
+                # it (R1's guard makes that reachable, where before it was unreachable by being
+                # fatal).
+                twins = duplicate_stamps(bars)
+                if twins:
+                    self.recording.record_event(
+                        "duplicate-stamps", at=at, sweep=label, symbol=symbol,
+                        count=len(twins),
+                        detail=(
+                            f"{len(twins)} stamp(s) served twice in one reply "
+                            f"({', '.join(bar.stamp.strftime('%H:%M') for bar in twins[:5])}); "
+                            "CONTEXT 4.5 gate 2 excludes a day carrying one"
+                        ),
+                    )
+                    self.duplicate_bars[symbol] = self.duplicate_bars.get(symbol, ()) + twins
             except Exception as exc:  # a feed failure is normal (CONTEXT 4.3); a crash is not
                 last_error = f"{type(exc).__name__}: {exc}"
+                if answered:
+                    self._intake_failed(
+                        symbol, boundary, label, at=at, attempt=attempt, exc=exc
+                    )
+                    return POLL_UNREADABLE
                 self.recording.record_fetch(FetchOutcome(
                     symbol=symbol, sweep=label, outcome=FETCH_ERROR, bars=0,
                     at=at, attempt=attempt, detail=last_error,
@@ -1063,34 +1212,7 @@ class LiveScreener:
                 if tries < len(backoff):
                     self.clock.sleep(backoff[tries])
                     continue
-                return False
-            # Divided by a unit rather than scaled by a magic 1000 -- which also keeps this
-            # module clear of the chunk-8 money tripwire, whose whole value is that it is a
-            # LITERAL scan and therefore cannot be reasoned with (REVIEW_9A_2 finding C4).
-            elapsed = int((self.clock.now() - began) / timedelta(milliseconds=1))
-            merged = merge_bars(self.bars.get(symbol, ()), bars)
-            self.bars[symbol] = merged
-            # CONTEXT 4.5 gate 2's first trigger, kept VISIBLE to it (REVIEW_13 B2). The merge
-            # above resolves a re-polled stamp for the engine, which needs one bar per minute;
-            # the twins it resolved away are carried here so the battery can refuse the day.
-            twins = duplicate_stamps(bars)
-            if twins:
-                self.duplicate_bars[symbol] = self.duplicate_bars.get(symbol, ()) + twins
-                self.recording.record_event(
-                    "duplicate-stamps", at=at, sweep=label, symbol=symbol,
-                    count=len(twins),
-                    detail=(
-                        f"{len(twins)} stamp(s) served twice in one reply "
-                        f"({', '.join(bar.stamp.strftime('%H:%M') for bar in twins[:5])}); "
-                        "CONTEXT 4.5 gate 2 excludes a day carrying one"
-                    ),
-                )
-            self.recording.record_bars(symbol, bars, sweep=label, at=at)
-            self.recording.record_fetch(FetchOutcome(
-                symbol=symbol, sweep=label,
-                outcome=FETCH_OK if bars else FETCH_EMPTY,
-                bars=len(bars), at=at, attempt=attempt, elapsed_ms=elapsed,
-            ))
+                return POLL_NO_ANSWER
             if not bars:
                 # REVIEW_13 B10: an EMPTY answer is a not-answer, not a successful fetch. A feed
                 # replying 200 with an empty candle array used to count as complete, so no
@@ -1101,9 +1223,58 @@ class LiveScreener:
                 if tries < len(backoff):
                     self.clock.sleep(backoff[tries])
                     continue
-                return False
-            return True
-        return False
+                return POLL_NO_ANSWER
+            return POLL_OK
+        return POLL_NO_ANSWER
+
+    def _intake_failed(
+        self, symbol: str, boundary: datetime, label: str, *,
+        at: datetime, attempt: int, exc: Exception,
+    ) -> None:
+        """The reply ARRIVED and could not be taken in. Record it BY NAME, and mark it (**R1**).
+
+        The twin of :meth:`_evaluation_failed`, one step earlier in the same per-symbol body and
+        with the same discipline -- the symbol keeps its previous state, the reason is on disk
+        per symbol per boundary, the banner NAMES it, and the rest of the universe finishes its
+        sweep. It is a separate word from ``evaluation-failed`` because these bars never reached
+        the evaluation, and a separate word from *"missed its data window"* because they arrived.
+
+        **Both recordings are best-effort, and that is the point.** The reachable cause of this
+        branch is the recording itself failing -- a locked or unwritable candle file at 11:30 --
+        so the line that describes the failure is written by the machinery that just failed.
+        Losing that line is not a reason to lose the morning: the banner still names the symbol
+        on the operator's screen, and the state still says it is not being watched.
+        """
+        reason = f"{type(exc).__name__}: {exc}"
+        state = self.states[symbol]
+        if state.phase not in (PHASE_REFUSED, PHASE_EXITED):
+            self.states[symbol] = replace(
+                state, phase=PHASE_SKIPPED,
+                detail=(
+                    f"the {label} reply could not be taken in ({type(exc).__name__}); kept its "
+                    "previous state and NOT being watched"
+                ),
+            )
+        try:
+            self.recording.record_fetch(FetchOutcome(
+                symbol=symbol, sweep=label, outcome=FETCH_UNREADABLE, bars=0,
+                at=at, attempt=attempt, detail=reason,
+            ))
+        except Exception:  # the recording is the most likely thing to have failed here
+            pass
+        try:
+            self.recording.record_event(
+                EVENT_INTAKE_FAILED, at=boundary, symbol=symbol, sweep=label,
+                error=type(exc).__name__,
+                detail=(
+                    f"{symbol}: the {label} reply ARRIVED and could not be taken in -- {reason}. "
+                    "The symbol keeps its previous state and is SKIPPED for this boundary "
+                    "(CONTEXT 4.4); the rest of the sweep continues and it is re-polled at the "
+                    "next boundary."
+                ),
+            )
+        except Exception:  # pragma: no cover -- same reason, stated once above
+            pass
 
     # --- evaluation: THE ONE ENGINE -----------------------------------------------
 
@@ -1448,8 +1619,24 @@ class LiveScreener:
         return None
 
     def _fifteen(self, symbol: str) -> tuple[Bar, ...]:
-        from .aggregate import aggregate_15min, in_session_bars
+        """The day's 15-minute bars, for READING one candle's close. Never for a decision.
 
+        **REVIEW_13 M25.** The import used to be function-local, and there was no reason for it
+        to be -- ``aggregate`` imports nothing from this package, and this module already imported
+        ``Bar`` from it at the top. A local import in a language with module-level ones reads as
+        a circular-import workaround, and here it hid a real fact: the live layer DOES call the
+        aggregator directly, on the evaluation path, at every square-off. It is at the top now,
+        where the forbidden-direct-call tripwire in ``tests/test_live_replay_invariant.py`` can
+        see it -- and that tripwire is widened to the whole module, so what is allowed here and
+        what is not is pinned rather than asserted.
+
+        What is allowed: the CANDLE MATHS. ``in_session_bars`` and ``aggregate_15min`` are pure
+        functions over bars and are the SAME two the backtester's pipeline uses, so calling them
+        here cannot make the two halves disagree -- it is the one-engine law being kept, not
+        broken. What is forbidden, and what the tripwire refuses: ``day_profile``, ``gate_day``
+        and ``evaluate_day``, the three that DECIDE. Every decision on this path goes through
+        :meth:`acumen.signal_engine.SignalPipeline.evaluate`, which is the backtester's own call.
+        """
         session, _dropped = in_session_bars(self.bars.get(symbol, ()))
         return aggregate_15min(session) if session else ()
 
@@ -1630,6 +1817,25 @@ class LiveScreener:
         """
         key = self._alert_key(alert)
         if key in self.alerted:
+            return False
+        if self.post_session:
+            # **M4.** After 15:29 nothing is tradeable (CONTEXT 3.4-2's last entry is 15:00 and
+            # 3.4-5's square-off is 15:15), so an alert produced by the post-session poll is
+            # information about the recording and not a signal. It is written whole -- the
+            # payload the trader would have received, so the morning-after can see exactly what
+            # was withheld and why -- and no sink is fired. Checked AFTER the dedup test above,
+            # so a trigger already delivered at 13:30 and re-derived at 15:30 stays silent
+            # rather than generating a withheld-alert line for an alert that really did go.
+            self.recording.record_event(
+                EVENT_POST_SESSION_ALERT, at=alert.at, symbol=alert.symbol,
+                alert_kind=alert.kind, payload=dict(alert.payload),
+                detail=(
+                    f"{alert.symbol} {alert.kind}: the post-session poll produced this alert "
+                    f"at {alert.at.strftime('%H:%M')}, after CONTEXT 3.4's last actionable "
+                    "moment (15:15 square-off). It is recorded in full and was delivered to NO "
+                    "sink -- not the screen, not the bell, not the phone."
+                ),
+            )
             return False
         superseded = [
             prior for prior in self.alerted
@@ -2428,7 +2634,12 @@ __all__ = [
     "ALERT_FAILURE",
     "ALERT_KINDS",
     "EVENT_EVALUATION_FAILED",
+    "EVENT_INTAKE_FAILED",
+    "EVENT_POST_SESSION_ALERT",
     "EVENT_SINK_FAILED",
+    "POLL_NO_ANSWER",
+    "POLL_OK",
+    "POLL_UNREADABLE",
     "ALERT_SQUARE_OFF",
     "ALERT_TRIGGER",
     "AlertSink",

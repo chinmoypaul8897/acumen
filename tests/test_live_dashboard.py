@@ -110,6 +110,85 @@ def test_the_module_carries_no_hex_colour_outside_the_token_table() -> None:
     assert sorted(set(hexes)) == sorted({value for value in dash.TOKENS.values()})
 
 
+# --- the design law, half one and a half: the TYPE (REVIEW_13 M12) ---------------------------------
+
+
+def test_EVERY_TYPEFACE_AND_TYPE_SIZE_ON_THE_SCREEN_COMES_FROM_DESIGN_MD() -> None:
+    """CLAUDE.md: *"tokens from DESIGN.md only -- never invent colors or typography."*
+
+    Colour had this tripwire from the first day; **type did not**, and REVIEW_13 **M12** is what
+    that cost: three font families (``SFMono-Regular``, ``Consolas``, ``ui-monospace``) and one
+    12px/0.28px pair reached the rendered page and appear in NO DESIGN.md row, while the module's
+    own comment claimed the opposite. The colour test regexed hex literals, so nothing went red.
+
+    Checked at the RENDERED page, like the colour one, and against DESIGN.md itself: every
+    ``font-family`` the page emits must be a documented stack, every ``font-size`` and
+    ``letter-spacing`` must come from a Hierarchy row, and -- the assertion that actually catches
+    M12's second half -- every (size, spacing) PAIR in one rule must be a row that exists.
+    """
+    design = DESIGN.read_text(encoding="utf-8")
+    page = dash.render_html(day=DAY, now=NOW, grouped=states(), alerts=alerts(),
+                            banner="a sweep did not complete")
+    css = page.split("<style>", 1)[1].split("</style>", 1)[0]
+
+    # 1. The two stacks are DESIGN.md's, family for family, in DESIGN.md's own order.
+    documented = {
+        "ui": ["Unica77 Cohere Web", "Inter", "Arial", "ui-sans-serif", "system-ui"],
+        "mono": ["CohereMono", "Arial", "ui-sans-serif", "system-ui"],
+    }
+    for role, families in documented.items():
+        assert [
+            part.strip().strip("'\"") for part in dash.FONT_STACK[role].split(",")
+        ] == families, role
+        for family in families:
+            assert f"`{family}`" in design, f"{family} is not a DESIGN.md font"
+
+    # 2. Nothing else is a font family on the page.
+    used_families = set(re.findall(r"font-family:([^;}]+)", css))
+    assert used_families and used_families <= set(dash.FONT_STACK.values()), (
+        f"invented font stack(s): {used_families - set(dash.FONT_STACK.values())}"
+    )
+    for banned in ("SFMono", "Consolas", "ui-monospace", "Space Grotesk"):
+        assert banned not in css, f"{banned} is in no DESIGN.md row this screen uses"
+
+    # 3. Every TYPE row is a real Hierarchy row of DESIGN.md -- size, line height and tracking.
+    hierarchy = {
+        cells[1].strip().lower(): [cell.strip() for cell in cells[2:7]]
+        for cells in (line.split("|") for line in design.splitlines() if line.count("|") >= 6)
+        if len(cells) >= 8
+    }
+    labels = {"card-heading": "card heading", "body": "body", "caption": "caption",
+              "mono-label": "mono label", "micro": "micro"}
+    for role, row in dash.TYPE.items():
+        font, size, _weight, line, spacing = hierarchy[labels[role]]
+        assert row["size"] == size, role
+        assert float(row["line"]) == float(line), role
+        assert float(row["spacing"].removesuffix("px")) == float(
+            spacing.removesuffix("px")
+        ), role
+        first = dash.FONT_STACK[row["family"]].split(",")[0].strip().strip("'\"")
+        assert first.startswith(font), (
+            f"{role} is set in {first!r} while DESIGN.md's row says {font!r}"
+        )
+
+    # 4. Nothing else is a size or a tracking on the page...
+    sizes = {row["size"] for row in dash.TYPE.values()}
+    spacings = {row["spacing"] for row in dash.TYPE.values() if row["spacing"] != "0"}
+    assert set(re.findall(r"font-size:([^;}]+)", css)) <= sizes
+    assert set(re.findall(r"letter-spacing:([^;}]+)", css)) <= spacings
+
+    # 5. ...and no RULE pairs a size with a tracking that no row pairs them with. This is the
+    #    assertion `.side` (12px + 0.28px) failed: both halves existed, the pair did not.
+    rows = {(row["size"], row["spacing"]) for row in dash.TYPE.values()}
+    for rule in css.split("}"):
+        size = re.search(r"font-size:([^;}]+)", rule)
+        if size is None:
+            continue
+        spacing = re.search(r"letter-spacing:([^;}]+)", rule)
+        pair = (size.group(1), "0" if spacing is None else spacing.group(1))
+        assert pair in rows, f"the pair {pair} is in no DESIGN.md Hierarchy row: {rule[:60]}"
+
+
 def test_COLOUR_CARRIES_STATE_AND_NOTHING_ELSE() -> None:
     """DESIGN.md PART II's second acceptance question, made executable.
 

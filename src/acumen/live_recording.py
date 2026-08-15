@@ -87,10 +87,10 @@ class RecordingError(RuntimeError):
 class FetchOutcome:
     """One fetch ATTEMPT: what was asked for, what came back, and how long it took.
 
-    ``outcome`` is one of :data:`FETCH_OK`, :data:`FETCH_EMPTY`, :data:`FETCH_ERROR` or
-    :data:`FETCH_SKIPPED`. The last is CONTEXT 4.4's own word: *"on failure SKIP the symbol and
-    re-poll at sweep end"*, and a skipped symbol that the second pass never recovered is the
-    thing the sweep report must be able to name.
+    ``outcome`` is one of :data:`FETCH_OK`, :data:`FETCH_EMPTY`, :data:`FETCH_ERROR`,
+    :data:`FETCH_SKIPPED` or :data:`FETCH_UNREADABLE`. ``skipped-deadline`` is CONTEXT 4.4's own
+    word: *"on failure SKIP the symbol and re-poll at sweep end"*, and a skipped symbol that the
+    second pass never recovered is the thing the sweep report must be able to name.
     """
 
     symbol: str
@@ -108,8 +108,16 @@ FETCH_EMPTY: str = "empty"
 FETCH_ERROR: str = "error"
 FETCH_SKIPPED: str = "skipped-deadline"
 
+#: The reply ARRIVED and could not be taken in -- REVIEW_14B **R1**, closed in chunk 15. A
+#: distinct outcome from :data:`FETCH_ERROR` because the two are different mornings: an ``error``
+#: is the feed not answering, which CONTEXT 4.3 calls normal and which retries heal, while an
+#: ``unreadable`` is a malformed bar or a file-I/O failure inside this tool's own handling of a
+#: reply the feed really sent. Recording them under one word would have hidden the second inside
+#: the noise of the first.
+FETCH_UNREADABLE: str = "unreadable"
+
 ALL_FETCH_OUTCOMES: frozenset[str] = frozenset(
-    {FETCH_OK, FETCH_EMPTY, FETCH_ERROR, FETCH_SKIPPED}
+    {FETCH_OK, FETCH_EMPTY, FETCH_ERROR, FETCH_SKIPPED, FETCH_UNREADABLE}
 )
 
 
@@ -569,6 +577,7 @@ __all__ = [
     "FETCH_ERROR",
     "FETCH_OK",
     "FETCH_SKIPPED",
+    "FETCH_UNREADABLE",
     "FetchOutcome",
     "LiveRecording",
     "MANIFEST_NAME",
