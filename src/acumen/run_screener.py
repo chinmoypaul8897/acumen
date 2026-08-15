@@ -73,6 +73,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         help="live mode: sweep every boundary immediately instead of waiting for "
                              "the clock. For a same-day catch-up after a late start, never for a "
                              "morning that has not happened")
+    parser.add_argument("--readiness", action="store_true",
+                        help="run the DRY-RUN-WEEK READINESS GATE and exit. Seven checks, once, "
+                             "before the week: it certifies or it refuses by name. Opens no "
+                             "broker session, fetches no candle and writes nothing")
+    parser.add_argument("--send-test-message", action="store_true",
+                        help="--readiness only: send ONE clearly-labelled test message to the "
+                             "configured chat. The gate cannot certify a chat it has never "
+                             "reached, so this is opt-in and required, once, before the week")
     return parser.parse_args(argv)
 
 
@@ -102,6 +110,18 @@ def main(argv: list[str] | None = None) -> int:
     config = load_config(Path(args.config), include_env=False)
     data_root = config.path("data_root")
     live = args.mode == "live"
+
+    if args.readiness:
+        # CHUNK 15: the one command the operator runs ONCE before the week. It is handled here,
+        # first, and it returns -- it opens no broker session, builds no screener and writes no
+        # recording, because a gate with side effects is a gate nobody runs twice.
+        from . import dry_run_readiness as readiness
+
+        report = readiness.assess(
+            day=day, config=config, send_test_message=args.send_test_message,
+        )
+        print(report.render(), flush=True)
+        return 0 if report.ready else 1
 
     if live:
         # CONTEXT 4.7's disclosure, BEFORE anything runs. An operator who reads only the first
