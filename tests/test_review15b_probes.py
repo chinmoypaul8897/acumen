@@ -576,21 +576,23 @@ def test_R15B_C1_the_GATE_carries_the_launcher_and_no_printable_trace_of_the_dea
     assert not offenders, offenders
 
 
-def test_R15B_C1_the_SAME_dead_form_elsewhere_in_src_is_MEASURED_not_assumed_absent() -> None:
-    """The sweep C1 implies, taken across the whole package -- and pinned as MEASURED.
+def test_FLIPPED_R15B_R1_the_dead_form_is_GONE_from_every_printable_string_in_src() -> None:
+    """The sweep C1 implies, taken across the whole package -- and now CLOSED rather than measured.
 
-    REVIEW_15B finding: ``check_master`` was the site C1 named, and the cleanup fixed exactly it.
-    The identical remedy string survives in printable, operator-facing refusals in three more
-    places, none of which is in the cleanup's span and none of which REVIEW_15 raised:
+    REVIEW_15B finding **R1**: ``check_master`` was the site C1 named and the cleanup fixed exactly
+    it, while the identical remedy string survived in printable, operator-facing refusals in three
+    more places, none of which was in the cleanup's span and none of which REVIEW_15 raised:
 
     * ``live_screener._require_day_master`` -- the LIVE MORNING's own refusal when the day's dump
       is missing, which is the most operator-facing of the three;
     * ``backtest.named_master`` -- reached by the pre-open verification step;
     * ``backtest.CA_REFRESH_FENCED`` -- printed on every preflight, naming ``-m acumen.ca_report``.
 
-    Pinned as the MEASURED state, not as the intended one, exactly as REVIEW_15 pinned C1 before
-    the cleanup closed it. Flip this when the launchers are named: the working ones already exist
-    (``scripts/fetch_instrument_master.py``, ``scripts/run_screener.py``, ``scripts/ca_report.py``).
+    This pin was written as the MEASURED state with its own flip instruction -- *"flip this when
+    the launchers are named"* -- exactly as REVIEW_15 pinned C1 before the cleanup closed it. The
+    R1 fix session named them, so it is FLIPPED here: no printable string anywhere in the package
+    may name the dead form again, in any module, including the three it was measured at. Each site
+    is separately driven, run and pinned in ``tests/test_review15b_fix.py``.
     """
     carriers: dict[str, list[int]] = {}
     for path in sorted((REPO / "src" / "acumen").rglob("*.py")):
@@ -601,9 +603,8 @@ def test_R15B_C1_the_SAME_dead_form_elsewhere_in_src_is_MEASURED_not_assumed_abs
         if hits:
             carriers[path.name] = hits
 
-    assert "dry_run_readiness.py" not in carriers, "C1's own site is CLOSED and must stay closed"
-    assert set(carriers) == {"live_screener.py", "backtest.py"}, (
-        f"the carried sites moved -- re-measure this pin: {carriers}"
+    assert carriers == {}, (
+        f"a printable string in src/ names the dead `-m acumen.` form again: {carriers}"
     )
     for name, launcher in (
         ("fetch_instrument_master.py", "instrument master"),

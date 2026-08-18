@@ -1547,6 +1547,21 @@ def pinned_master(cache_dir: Path, filename: str) -> tuple[InstrumentMaster, Pat
     return master, path, file_sha256(path)
 
 
+#: The launchers this module's operator-facing strings name, relative to the repository root.
+#: They are LAUNCHERS and not module paths on purpose (REVIEW_15B **R1**, and REVIEW_15 **C1**,
+#: REVIEW_14 **B3**, **B429** before it): the operator's tree has no editable install, so
+#: ``python -m acumen.instrument_master`` and ``python -m acumen.ca_report`` -- which is what
+#: these two strings used to print -- answer ``No module named 'acumen'`` in a hand-typed shell.
+#: ``pyproject.toml``'s ``pythonpath = ["src"]`` is PYTEST's and not a subprocess's, which is
+#: exactly how that form stayed invisible to a green suite. Each launcher bootstraps ``src`` onto
+#: ``sys.path`` itself and runs from a bare clone. A remedy that does not run is not a remedy.
+#:
+#: Named as constants rather than typed into the strings (decision **B435**'s shape) so the
+#: refusal, its tests and any later document read one string.
+MASTER_LAUNCHER: str = "scripts/fetch_instrument_master.py"
+CA_REPORT_LAUNCHER: str = "scripts/ca_report.py"
+
+
 def named_master(cache_dir: Path, filename: str) -> tuple[InstrumentMaster, Path, str]:
     """Load a NAMED instrument master by filename. CONTEXT 4.7's door, and only its door.
 
@@ -1586,7 +1601,7 @@ def named_master(cache_dir: Path, filename: str) -> tuple[InstrumentMaster, Path
             f"The instrument master {filename!r} is not at {path}. CONTEXT 4.7 runs a live "
             "morning on THE DAY'S OWN master, fetched pre-open -- so this file is a prerequisite "
             "of the morning, not something to substitute around. Run the pre-open fetch "
-            "(`python -m acumen.instrument_master --allow-network`), or replay under the master "
+            f"(`python {MASTER_LAUNCHER} --allow-network`), or replay under the master "
             "the recording actually names."
         )
     try:
@@ -1613,7 +1628,7 @@ CA_REFRESH_FENCED: str = (
     "as READ-ONLY (CLAUDE.md data-store safety, Q-18 layer 2), so the day-cache was read at any "
     "age and NOTHING was fetched or written. This changes no factor a run already holds. "
     "Refreshing it is an operator step, taken after a snapshot and never ninety seconds before "
-    "the bell (the ingest path: `python -m acumen.ca_report --from <D> --to <D> "
+    f"the bell (the ingest path: `python {CA_REPORT_LAUNCHER} --from <D> --to <D> "
     "--allow-network`); a session may do it only under an architect-named sanction "
     "(`sanctioned_write=`)"
 )

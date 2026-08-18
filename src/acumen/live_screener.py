@@ -315,6 +315,17 @@ MASTER_MISSING_REFUSAL: str = (
     "to substitute around"
 )
 
+#: The launcher :func:`_require_day_master`'s refusal names for the pre-open refresh, relative to
+#: the repository root. It is a LAUNCHER and not a module path on purpose (REVIEW_15B **R1**, and
+#: REVIEW_15 **C1**, REVIEW_14 **B3**, **B429** before it): the operator's tree has no editable
+#: install, so ``python -m acumen.run_screener`` -- which is what this refusal used to print --
+#: answers ``No module named 'acumen'`` in a hand-typed shell. ``pyproject.toml``'s
+#: ``pythonpath = ["src"]`` is PYTEST's and not a subprocess's, which is exactly how that form
+#: stayed invisible to a green suite. This is the refusal a LIVE MORNING raises at 09:00, so its
+#: remedy is the one that can least afford not to run. The master's launcher is
+#: :data:`acumen.backtest.MASTER_LAUNCHER`, named once there and read here.
+SCREENER_LAUNCHER: str = "scripts/run_screener.py"
+
 
 #: CONTEXT 4.7, the architect's own words, carried on **every live alert** and on the dashboard
 #: header of any live session -- dry-run included, because a dry-run morning reads the same
@@ -2359,6 +2370,14 @@ def _require_day_master(filename: str | None, *, cache_dir: Path | None) -> Path
     safety suite -- and so that it comes first, before the calendar, the factor tables or the
     32 MB the loader would otherwise read. The file is not opened here; ``build_runner`` still
     loads and hashes it, which is what puts its sha256 in the recording.
+
+    **Both remedies name a command that runs on the operator's own tree (REVIEW_15B R1).** They
+    used to read ``python -m acumen.run_screener --mode live ...`` and ``python -m
+    acumen.instrument_master --allow-network``, which need an editable install this machine does
+    not have and so answer ``No module named 'acumen'`` at 09:00, on the morning's own refusal --
+    REVIEW_14 **B3**'s defect, at the latest possible moment to discover it.
+    :data:`SCREENER_LAUNCHER` and :data:`acumen.backtest.MASTER_LAUNCHER` are what a bare clone
+    really runs, and the flags are unchanged: each launcher forwards to the same ``main``.
     """
     from .config import MASTER_CACHE_SUBDIR, load_config
 
@@ -2370,9 +2389,9 @@ def _require_day_master(filename: str | None, *, cache_dir: Path | None) -> Path
     if not path.is_file():
         raise ScreenerError(
             f"{MASTER_MISSING_REFUSAL}. It is not at {path}. Run the pre-open refresh "
-            "(`python -m acumen.run_screener --mode live --day <today> --refresh "
+            f"(`python {SCREENER_LAUNCHER} --mode live --day <today> --refresh "
             "--allow-network`), or fetch the dump directly "
-            "(`python -m acumen.instrument_master --allow-network`)."
+            f"(`python {bt.MASTER_LAUNCHER} --allow-network`)."
         )
     return path
 
@@ -2627,6 +2646,7 @@ __all__ = [
     "PRICE_FIELDS",
     "REFUSAL_NO_BATTERY",
     "REFUSAL_QTY_ZERO",
+    "SCREENER_LAUNCHER",
     "SEED_LOOKBACK_DAYS",
     "STALE_AFTER_MINUTES",
     "ALERT_ARMED",
