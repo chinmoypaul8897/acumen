@@ -45,7 +45,7 @@ usage: acumen.run_screener [-h] [--mode {replay,live}] --day DAY
                            [--symbols SYMBOLS] [--label LABEL]
                            [--recording-root RECORDING_ROOT] [--config CONFIG]
 -- site 1b / site 2: the master fetch, WITHOUT --allow-network, on an empty temp cache --
-cache dir    : C:\Users\chinm\AppData\Local\Temp\claude\c--Users-chinm-acumen\0d1b589f-c2d0-4020-b18d-1f17d956e4cb\scratchpad\evidence_cache\instrument_master
+cache dir    : <SCRATCH>\evidence_cache\instrument_master
 already held : 0 dump(s)
 
 STOPPING (no --allow-network). Nothing was fetched and nothing was written.

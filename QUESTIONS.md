@@ -4550,3 +4550,46 @@ skips that symbol and does not end the morning. The five carried majors (M4, M12
 and the four LOW notes (L1-L4) are closed in the same session, each with a test that flips its
 pin or drives the real path. No question is raised by this session: nothing in chunk 15's card
 met a hole CONTEXT.md does not answer.
+
+---
+
+## ARCHITECT'S RULINGS (18-Aug-2026, on REVIEW_R1) - finding F1 and the tagging - recorded VERBATIM by the chunk-15 POST-REVIEW HOUSEKEEPING session
+
+Recorded FIRST, before the scrub was committed. The words between the quotation marks are the
+architect's; nothing outside them is. **Each ruling occupies exactly ONE quoted line**, so the
+record is byte-reconstructable by stripping the `> ` prefix and the outer quotation marks --
+no re-joining and no unwrapping is needed, which is the strictest reading of B349's fidelity
+standard. **No transliteration**: the three em dashes are the architect's own and they stay as
+U+2014. Reconstructed and byte-checked by this session at **542 characters** (ruling 1, two em
+dashes) and **349 characters** (ruling 2, one em dash), zero `--` substitutions.
+
+> "RULING (2026-08-18, on REVIEW_R1 finding F1): An incidental OS temp path that embeds the build tool's product name, appearing in a committed evidence transcript, is a machine path — not AI attribution — and does not violate CLAUDE.md's no-AI-attribution rule. Because the repository is now public, such incidental tool-naming path fragments in committed transcripts are redacted to the placeholder <SCRATCH>. Applies to all known and any future instances; going forward, evidence transcripts redact absolute host paths that embed a tool name."
+
+> "RULING (2026-08-18, tagging after REVIEW_R1 PASS): Existing release tags are NOT moved — acumen-v1.0 and chunk15-final remain as historical markers. A new annotated tag acumen-v1.0.1 is created at the head of this housekeeping commit, marking the current public release including the reviewed R1 fix. Future post-release fixes use semver patch tags."
+
+**What ruling 1 settles.** REVIEW_R1's **F1** asked for a one-time call rather than opening a
+question, and this is it, in both halves. The CLASSIFICATION half: an incidental OS temp path
+inside a pasted transcript is a machine path, carries no claim of authorship, and is **not** AI
+attribution -- so neither `docs/evidence/chunk15_flip.before.txt` (which has carried the fragment
+since `b762d74`, 15-Aug-2026, through REVIEW_15 and REVIEW_15B) nor `docs/evidence/r1_fix_bare_clone.md`
+ever violated CLAUDE.md's rule 'no AI attribution anywhere'. Nothing that passed a review is
+retroactively a defect. The HYGIENE half is independent of that and is what this session executed:
+because the repository is now public, the fragment is redacted anyway. Both known instances are
+scrubbed to `<SCRATCH>` in this session's commit, the whole repository was grepped for the same
+fragment so no third instance survives, and the standing rule for every future transcript is
+stated in the ruling's last clause.
+
+**What ruling 2 settles.** No tag is moved. `acumen-v1.0` and `chunk15-final` both point at
+`bd1be58` and stay there as historical markers of the release as it was cut; the reviewed R1 fix
+and this housekeeping are marked by a NEW annotated tag, `acumen-v1.0.1`, at this commit. That
+also answers the question REVIEW_R1's `state-for-next-session` left open ('re-tagging is the
+architect's call, not a session's') and sets the convention for anything that follows: post-release
+fixes take semver patch tags rather than re-pointing a released one.
+
+**One conflict recorded, NOT resolved here.** Ruling 1 states as fact that the repository is now
+public. CLAUDE.md's git-rules paragraph still reads *'The repo stays private, zero collaborators'*.
+CLAUDE.md is architect-owned and outside this housekeeping session's declared scope, so not one
+byte of it was touched; the divergence is flagged here for the architect to reconcile in whichever
+direction he means. Nothing in this session depends on which way it goes -- the scrub is correct
+under either, since it is hygiene the ruling orders outright rather than a consequence of the
+repository's visibility.

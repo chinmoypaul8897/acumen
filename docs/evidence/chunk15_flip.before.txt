@@ -1,4 +1,4 @@
-tree        : C:\Users\chinm\AppData\Local\Temp\claude\c--Users-chinm-acumen\f45c7b40-4a1b-4d59-8783-338dfc5e0e20\scratchpad\preflip
+tree        : <SCRATCH>\preflip
 HEAD        : cf53cfd12405169f7da8525f7cc85ecee289f951
 probe day   : HDFCBANK 2026-06-10  (375 stored 1-minute bars)
 
