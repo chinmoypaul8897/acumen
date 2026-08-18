@@ -159,7 +159,7 @@ The complete method — the build plan, per-chunk cards, session ledgers, and 28
 
 ## Correctness and verification
 
-- **2,621 automated tests** across 103 files, covering the pure engine, the data layer, and the live path.
+- **2,621 automated tests** across 102 test files, covering the pure engine, the data layer, and the live path.
 - **Live == backtest, proven.** A dedicated parity harness replays recorded market days through both the live screener and the backtester and checks they produce **byte-identical** signals, candle for candle. They match. This is the guarantee behind "what you tested is what you're alerted on."
 - **Independent recomputation.** The reporting metrics were re-derived by hand in a separate review session rather than graded against the builder's own numbers — because a self-graded exam doesn't count.
 - **Reconciliation.** All 495,312 walked symbol-days were streamed and recounted against the run manifest: 32 of 32 consistency checks agree, zero duplicate keys, costs and net P&L tie out on every one of the 188,345 rows.
@@ -187,7 +187,7 @@ Stated plainly, because a backtest that hides its assumptions is worse than none
 | [`CLAUDE.md`](CLAUDE.md) | The working constitution every build/review session followed. |
 | [`PROGRESS.md`](PROGRESS.md) · [`STATUS.md`](STATUS.md) · [`QUESTIONS.md`](QUESTIONS.md) | The honest ledgers — session log, chunk state, and open-question / ruling record. |
 | [`src/acumen/`](src/acumen/) | 49 modules, ~42.8k lines. Pure engine (`bias`, `poc`, `signals`, `simulate`) + data, backtest, live, and reporting layers. |
-| [`tests/`](tests/) | 2,621 tests across 103 files, plus frozen golden fixtures. |
+| [`tests/`](tests/) | 2,621 tests across 102 test files, plus frozen golden fixtures. |
 | [`docs/reviews/`](docs/reviews/) | 28 per-chunk adversarial review reports. |
 | [`docs/reports/`](docs/reports/) | The full backtest report and per-stock breakdown. |
 | [`docs/validation/`](docs/validation/) | The plain-English pack the trader read and confirmed. |
