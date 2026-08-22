@@ -4596,7 +4596,7 @@ repository's visibility.
 
 ---
 
-## Q-34 · resume-docs housekeeping (22-Aug-2026) · class A · **OPEN -- STOP** · BLOCKS the two resume-workflow docs (nothing else)
+## Q-34 · resume-docs housekeeping (22-Aug-2026) · class A · **CLOSED 22-Aug-2026** (ruling recorded below) · option (a): PROCESS.md is committed alongside the two docs
 
 **Question.** The 22-Aug-2026 housekeeping card instructs: copy `ARCHITECT_HANDOFF.md` and
 `prompt_templates.md` -- and ONLY those two files -- from the architect's outputs folder to
@@ -4644,3 +4644,29 @@ B443/B451: the card's logical path does not exist on this machine, and the files
 from the MSIX-virtualised location (a `<SCRATCH>`-class path, redacted here per ruling 1 of
 18-Aug-2026) and identified by size and hash. A ruling on (a)/(b)/(c) can be executed by any
 later session directly from the digests above.
+
+**ARCHITECT'S RULING (22-Aug-2026, on Q-34), verbatim:**
+
+> "ARCHITECT'S RULING (22-Aug-2026, on Q-34): Option (a). PROCESS.md — the reusable Architect
+> Loop method file, referenced as load-bearing by ARCHITECT_HANDOFF.md and by template 1 of
+> prompt_templates.md — is committed to the repository root alongside the two new docs. It
+> existed only in the architect's scratch space and was never tracked; committing it resolves
+> the dangling reference and makes the resume workflow self-contained. The committed file is
+> the architect's authored version (16,857 bytes, sha256
+> c7a57cb72415012634d8010743d35e74f0cf9d7a01564412d4c9c4921785ffe6), which is complete,
+> self-consistent, and names no file that does not exist. Q-34 CLOSED."
+
+**Fidelity note.** The record above is byte-reconstructable by stripping the `> ` prefix and
+the outer quotation marks; the line breaks and the three em dashes are the architect's own
+(U+2014, no `--` transliteration), per the B349 standard.
+
+**Executed the same day, same-session record.** All three files were copied to the repository
+root and verified byte-identical BEFORE commit — each matched the size and SHA-256 recorded
+in this question and in the ruling exactly (`PROCESS.md` 16,857 B, `ARCHITECT_HANDOFF.md`
+4,774 B, `prompt_templates.md` 6,348 B; digests above). With `PROCESS.md` at the root, the
+reference check that raised this question passes on all nine targets, and every file or
+directory named by either document now resolves: `CONTEXT.md`, `CLAUDE.md`, `plan.md`,
+`PROCESS.md`, `PROGRESS.md`, `STATUS.md`, `QUESTIONS.md`, `docs/reviews/`,
+`prompt_templates.md`, `ARCHITECT_HANDOFF.md`, `personas/`. Fence audit on the committed
+copies: `prompt_templates.md` 8 fence lines / 4 blocks, `PROCESS.md` 8 fence lines / 4
+blocks, zero unclosed. Nothing remains blocked by Q-34.
