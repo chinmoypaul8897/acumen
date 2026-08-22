@@ -4593,3 +4593,54 @@ byte of it was touched; the divergence is flagged here for the architect to reco
 direction he means. Nothing in this session depends on which way it goes -- the scrub is correct
 under either, since it is hygiene the ruling orders outright rather than a consequence of the
 repository's visibility.
+
+---
+
+## Q-34 · resume-docs housekeeping (22-Aug-2026) · class A · **OPEN -- STOP** · BLOCKS the two resume-workflow docs (nothing else)
+
+**Question.** The 22-Aug-2026 housekeeping card instructs: copy `ARCHITECT_HANDOFF.md` and
+`prompt_templates.md` -- and ONLY those two files -- from the architect's outputs folder to
+the repo root, verify that the internal references in `ARCHITECT_HANDOFF.md` to
+`CONTEXT.md`, `CLAUDE.md`, `plan.md`, `PROCESS.md`, `PROGRESS.md`, `STATUS.md`,
+`QUESTIONS.md`, `docs/reviews/` and `prompt_templates.md` ALL resolve, then commit both.
+Eight of the nine targets resolve. **`PROCESS.md` does not: no commit in this repository's
+history has ever contained it** (`git ls-files` has no match, case-insensitive; it is not at
+the root, not under `docs/`, not anywhere). Both new documents name it as a load-bearing
+governance file: `ARCHITECT_HANDOFF.md`'s "Where the knowledge lives" table describes it as
+"The reusable method (the architect loop) in general form", and `prompt_templates.md`'s
+template 1 puts it in the architect bootstrap's mandatory read order. Which does the
+architect want: **(a)** also commit `PROCESS.md` from the same outputs folder -- one exists
+there, 16,857 bytes, SHA-256
+`c7a57cb72415012634d8010743d35e74f0cf9d7a01564412d4c9c4921785ffe6`, file-dated 01-Aug-2026;
+**(b)** commit the two docs as-is, dangling reference disclosed; or **(c)** re-issue the
+two docs without the `PROCESS.md` reference?
+
+**Why it is a hole.** The card's verification step and its scope fence contradict each other
+on the actual repo state: the link check cannot pass while the fence ("commit ONLY those two
+files plus a PROGRESS.md entry") holds. The card's own rider -- "If anything else seems
+required, STOP and write QUESTIONS.md" -- lands exactly here. Every escape is an architect's
+call, not a session's: (a) publishes a 16,857-byte document to the PUBLIC repo that no card
+ever sanctioned and no review ever read; (b) ships a bootstrap prompt whose mandatory read
+order names a file a fresh architect session cannot read -- the precise failure mode these
+documents exist to prevent; (c) changes the architect's own authored sources.
+
+**Why it matters.** These two documents ARE the account-independent resume path. Their first
+consumer is a fresh session, possibly on a different machine, following the read order
+literally with zero prior context. A dangling governance-file reference at that moment is
+not cosmetic; it is a defect in the exact mechanism being shipped.
+
+**What is blocked right now.** The copy and commit of `ARCHITECT_HANDOFF.md` and
+`prompt_templates.md` -- nothing else. No other work was on this session's card.
+
+**What the raising session did in the meantime.** Verified everything verifiable without
+deciding. Both sources were read in full and hashed: `ARCHITECT_HANDOFF.md` 4,774 bytes,
+SHA-256 `b1686e13cb8ef539a2d221ff08beda1b14a5665b705395d2b27eeee7730f6d17`;
+`prompt_templates.md` 6,348 bytes, SHA-256
+`e20478549ccf6e4782856fe2f71455813a9e81599614cd5b045de9ec7275a1d7`. All 8 code-fence lines
+in `prompt_templates.md` pair cleanly (4 blocks, zero unclosed; `ARCHITECT_HANDOFF.md`
+contains no fences). The other eight reference targets all resolve. NOTHING was copied into
+the repository and neither doc was committed. The source path resolved exactly per
+B443/B451: the card's logical path does not exist on this machine, and the files were read
+from the MSIX-virtualised location (a `<SCRATCH>`-class path, redacted here per ruling 1 of
+18-Aug-2026) and identified by size and hash. A ruling on (a)/(b)/(c) can be executed by any
+later session directly from the digests above.
